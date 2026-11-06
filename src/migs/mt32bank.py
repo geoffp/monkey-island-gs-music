@@ -32,6 +32,7 @@ MELODIC_CH, RHYTHM_CH = 1, 9    # MT-32 part 1 = MIDI channel 2; rhythm = 10
 LOOP_BYTES = 256
 FIRST_PAGE = 2                  # pages $00-$01: synthLAB metronome woodblock
 MIN_DRUM_RATE = 6000
+MIN_RELEASE_RATE = 12           # ~1 s full-scale release at most
 
 
 # ---------------------------------------------------------------------------
@@ -130,11 +131,12 @@ def to_doc(y: np.ndarray, peak: float | None = None) -> bytes:
 def fit_envelope(env: np.ndarray, start: int, off: int, release_slow: bool = False) -> bytes:
     """MIDI Synth envelope approximating a loudness contour (levels linear 0-127)."""
     top = float(np.max(env[start:off])) or 1.0
-    lv = lambda i: int(round(127 * float(env[min(max(i, 0), len(env) - 1)]) / top))
+    half = int(0.05 * SR)                    # average +-50 ms: tremolo/beating would mislead points
+    lv = lambda i: int(round(127 * float(np.mean(env[max(i - half, 0) : max(min(i + half, len(env)), 1)])) / top))
     pk = start + int(np.argmax(env[start:off]))
     t = lambda a, b: (b - a) / SR
     d1, d2 = min(pk + int(0.15 * SR), off), min(pk + int(0.6 * SR), off)
-    sus_at = max(off - int(0.05 * SR), d2)
+    sus_at = max(off - int(0.1 * SR), d2)
     l1, l2, ls = lv(d1), lv(d2), lv(sus_at)
     level_off = max(lv(off), 1)
     below = np.nonzero(env[off:] < 0.1 * env[off] + 1e-9)[0]
@@ -144,7 +146,8 @@ def fit_envelope(env: np.ndarray, start: int, off: int, release_slow: bool = Fal
         decay1=(l1, dt.segment_rate(127, l1, t(pk, d1))),
         decay2=(l2, dt.segment_rate(l1, l2, t(d1, d2))),
         sustain=ls, decay3_rate=dt.segment_rate(l2, ls, t(d2, sus_at)),
-        release1=(0, dt.segment_rate(level_off, 0, rel * (2 if release_slow else 1))),
+        # cap the release at ~1 s so stopping playback (All Notes Off -> Release 1) is prompt
+        release1=(0, max(MIN_RELEASE_RATE, dt.segment_rate(level_off, 0, rel * (2 if release_slow else 1)))),
         release2=(0, 31), release3_rate=31, velocity_gain=4)
 
 
@@ -207,7 +210,8 @@ def build(spec: dict, smf2wav: Path, roms: Path, cache: Path, log=print):
         x = render(smf2wav, roms, cache, program=m["program"], key=m["key"], hold=hold)
         f0 = 440 * 2 ** ((m["key"] - 69) / 12)
         a = onset(x)
-        off = int((0.5 + hold) * SR)
+        # smf2wav drops leading silence, so the note starts at the onset, not at 0.5 s
+        off = a + int(hold * SR)
         env = rms_envelope(x)
         loud[m["name"]] = float(np.max(env[a:off]))
         nbytes = m.get("attack_bytes", 2048)

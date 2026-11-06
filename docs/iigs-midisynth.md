@@ -269,6 +269,8 @@ Measured in GSSquared by playing `/synthLAB/Tune/TUNE.SEQ` and sampling the Enso
   - **MIDI Synth's envelope** is fitted to the MT-32's RMS contour (rise time, levels at +0.15 s and +0.6 s, sustain level, release time) using the ERS rate table;
   - **volume** comes from the relative MT-32 loudness.
   - The MT-32 renders were in tune to within a few cents of A440. For inharmonic sounds (Xylophone, Taiko) the period search falls back to the nominal pitch.
+  - **Munt quirk:** `mt32emu-smf2wav` drops leading silence, so a note scheduled at 0.5 s starts at 0.0 s in the WAV. The note-off is therefore at onset + hold. (Getting this wrong first gave release rates of 13 s and notes that rang on after Stop.)
+  - **Release is capped at rate ≥ 12** (≈1 s full scale), because stopping playback (All Notes Off) sends every voice to Release 1. Envelope levels are averaged over ±50 ms (the organ tremolo misled single-point reads).
 - **Drum zone** = a one-shot (OscConfig 2). Its sample rate is chosen so the trimmed sound fills its power-of-two wave (6 kHz floor; longer sounds are cut, with a fade). Keys that share a sample (toms, hi/lo bongo, conga, agogo) are pitched by an offset measured from the Munt renders (log-frequency spectrum correlation).
 - **Kit key layout:** a wave is only in tune where its tuning fits octaves 0–6. Higher keys need faster playback, so slow, small waves need low keys: `max key = 69 + 12 × (log2(rate/B0) − (size − res) + 4)`. Zones are laid out in order of that limit, which puts the drums on keys 0–23.
 - **Budget (first build):** 237 of 238 pages (pages $00–$01 metronome, 16 reserved). Melodic ≈ 34 KB, drums ≈ 26 KB, plus one silence page used by the muted Generator-2 oscillators.
