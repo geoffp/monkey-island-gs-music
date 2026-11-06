@@ -33,6 +33,8 @@ LE  (whole file)
 ```
 A sound's directory offset is relative to the LF data start, i.e. `LF offset + 8`. Room 94 (the "roland" room) is on DISK04.
 
+**Stale index entries:** sounds 72, 74, 76, 78, 80, 82, 84, 86, 88, 90, 92, 94, 95, 96 and 97 point mid-block into other data in their rooms (109 other entries resolve fine). The extractor skips them with a warning. None are Roland tracks. They are probably unused leftovers; not investigated further.
+
 ## Sound blocks
 - `SO` contains `WA` (PC speaker/PCjr) and `AD` (AdLib) sub-blocks, sometimes nested `SO`s. Both sub-blocks start `7f 00 …`. An `AD` byte at +2 of `0x80` marks music rather than an effect (`convertADResource` in `sound.cpp`).
 - `RO` is a raw MT-32 event stream: see `ro-format.md`.

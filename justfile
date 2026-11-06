@@ -145,6 +145,22 @@ mt32-wav mid wav: fetch-munt
 gm-wav mid wav: fetch-soundfont
     fluidsynth -ni -F "{{wav}}" "{{sf2}}" "{{mid}}"
 
-# Run a tool script in the project environment, e.g. `just py tools/foo.py args`
-py *args:
-    uv run python -I {{args}}
+# Extract the MT-32 soundtrack: music/midi/{mt32,gm}/*.mid + music/patches/*.toml
+extract:
+    uv run extract-music "{{game}}" music
+
+# Render every extracted song to WAV via both paths (music/wav/{mt32,gm}/)
+render: extract fetch-munt fetch-soundfont
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mkdir -p music/wav/mt32 music/wav/gm
+    for f in music/midi/mt32/*.mid; do
+      n=$(basename "$f" .mid)
+      "{{smf2wav}}" --quiet -m "{{roms}}" -f -o "music/wav/mt32/$n.wav" "$f"
+      fluidsynth -ni -q -F "music/wav/gm/$n.wav" "{{sf2}}" "music/midi/gm/$n.mid" >/dev/null
+    done
+    ls music/wav/*/ | head -50
+
+# Run the unit tests
+test *args:
+    uv run pytest {{args}}

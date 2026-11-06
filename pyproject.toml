@@ -1,5 +1,5 @@
 [project]
-name = "monkey-island-gs"
+name = "migs"
 version = "0.1.0"
 description = "Extract the Monkey Island 1 MT-32 soundtrack and port it to Apple IIGS MIDI Synth"
 readme = "README.md"
@@ -8,5 +8,15 @@ dependencies = [
     "mido>=1.3",
 ]
 
-[tool.uv]
-package = false   # tools/ are plain scripts, not an installable package
+[project.scripts]
+extract-music = "migs.extract_music:main"
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["uv_build>=0.9,<0.14"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

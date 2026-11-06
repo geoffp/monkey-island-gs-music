@@ -23,10 +23,12 @@ The EGA release keeps its MT-32 music in a separate Roland Upgrade file (`DISK09
 ## Layout
 ```
 docs/          format notes, findings, sources
-tools/         Python tools (extraction, conversion)
+src/migs/      Python package (extraction, conversion)
+tests/         unit tests (`just test`)
 music/midi/mt32/  extracted SMFs, original MT-32 programs
 music/midi/gm/    the same, converted to General MIDI
 music/patches/ per-song channel → instrument notes (TOML)
+music/song_names.toml  hand-kept names for sound ids (optional)
 gs/            IIGS MIDI Synth output and instrument mapping
 gs/system6/    System 6.0.4 disk images (synthLAB, stock instruments)
 ref/scummvm/   ScummVM source (git submodule, reference only)
@@ -68,6 +70,7 @@ These go in `original files/`, which is gitignored and never committed:
 - [x] Repo setup, ScummVM reference submodule
 - [x] Located the MT-32 music: 19 sounds (150–168), 16 distinct, in room 94
 - [ ] Docs: SCUMM v4 resources, `RO` format, MT-32, MIDI Synth formats
-- [ ] Extract `RO` → SMF + patch notes
+- [x] Extract `RO` → SMF (MT-32 + GM) + patch notes (`just extract`, `just render`)
+- [ ] Name the 16 tracks (`music/song_names.toml`)
 - [ ] SMF → MIDI Synth sequence converter
 - [ ] Test on a IIGS emulator with synthLAB

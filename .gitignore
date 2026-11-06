@@ -8,3 +8,7 @@ __pycache__/
 *.pyc
 # Working copies of IIGS disk images (`just disks`)
 /gs/disks/
+# Generated from the game data (`just extract` / `just render`); copyrighted music, never commit
+/music/midi/
+/music/patches/
+/music/wav/

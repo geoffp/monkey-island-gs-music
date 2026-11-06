@@ -14,11 +14,11 @@ Both come from the same parse. Only the steps marked *GM* differ.
 ## Rules
 1. **Programs** (*GM*): `gm = _mt32ToGm[mt32]`. Override per song in `music/patches/*.toml` where a listening test calls for it.
 2. **Rhythm** (channel 10, *GM*): MT-32 default keys 35–51, 54, 56, 60–73 and 75 map to the same GM key (`Mt32PresetRhythmKeymap`). All other keys are silent on a stock MT-32, so drop them in GM. MI1 uses one such key: **76**, a single hit.
-3. **Pan** (*GM*): MT-32 pan is reversed relative to the MIDI spec, so GM gets `127 − v`.
+3. **Pan** (*GM*): MT-32 pan is reversed relative to the MIDI spec, so GM gets `min(128 − v, 127)`. That keeps centre (64) at 64 (ScummVM `mt32gm.cpp`).
 4. **Default pan** (*GM*): emit the MT-32 power-on panning for channels 2–9 at tick 0 (`MT32_DEFAULT_PANNING` in `mt32gm.cpp`, reversed per rule 3) unless the track sets pan itself. Every MI1 track sets pan on most channels.
 5. **Pitch-bend range**: the MT-32 defaults to ±12 semitones and GM to ±2. MI1 sends **no pitch bends**, so no action is needed.
 6. **Channel 9**: every track sends `C8 00` (program 0) with no notes. Harmless; keep it.
-7. **Reverb**: the MT-32 applies global reverb. Optionally add CC91 ≈ 40 on all channels in GM. Decide by ear.
+7. **Reverb** (*GM*): CC91 = 64 on every channel used, at tick 0. ScummVM `initGM` calls this the "equivalent of MT-32 default Reverb Level 5".
 8. **Assumption**: program N means MT-32 *preset* timbre N. That holds only if the game doesn't upload custom patches or timbres via SysEx at startup. Still to check: `MONKEY.EXE`/its driver (see `ro-format.md`, open questions). If it does, the MT-32 rendition must include that SysEx too.
 
 ## Programs used by the MI1 soundtrack (0-based)
@@ -55,3 +55,8 @@ Rough approximations under GM:
 - 73 is Quijada on the MT-32 but Short Guiro in GM.
 - 67/68 are Agogos in both, but they sound different.
 - 62–64 congas and 60–61 bongos map one-to-one.
+
+## Implementation
+`src/migs/mt32.py` holds the tables, and `src/migs/extract_music.py` (`_gm_transform`, `_gm_channel_defaults`) holds the rules. Both renditions are written as format-1 SMF at 120 PPQN:
+- track 0 is the conductor: tempo, a GM System On SysEx (GM only), `loopStart`/`loopEnd` markers for looping songs, and `A<n>` markers for the RO sync markers;
+- then one track per MIDI channel.
