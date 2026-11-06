@@ -231,7 +231,28 @@ Measured in GSSquared by playing `/synthLAB/Tune/TUNE.SEQ` and sampling the Enso
 - DOC rule (GSSquared `ensoniq.cpp`): the address is `acc >> (9 + res − size)`, and `acc += freq` per sample. So **one pass through the wave = rate × freq / 2^(17 + res) Hz**, and **bytes per second = rate × freq / 2^(9 + res − size)**.
 - **Frequency register:** A4 at octave 4 = **2197** (≈ 1098.5 × 2^(oct − 3)). Semitone + fine scale it by 2^((semi + fine/64)/12) (measured ×1.5428 for +7 semi, +32 fine). One octave per 12 keys, exactly.
   - So a **single-cycle wave plays in tune at record octave 4** with semi = fine = 0. synthLAB's manual says "octave 3", probably its display offset.
-- **Resolution:** sizes 256 B and 1 KB got res 0, and 8 KB got res 5. Experiment 2 (`TUNE2.SEQ`, sizes 512 B–32 KB) measures the full rule.
+- **Resolution rule** (experiment 2, `TUNE2.SEQ`, A4 at octave 4, freq 2197):
+
+  | size code (bytes) | res | one pass | bytes/s |
+  |---|---|---|---|
+  | 1 (512) | 0 | 441.2 Hz | 225 879 |
+  | 2 (1K) | 0 | 441.2 Hz | 451 758 |
+  | 3 (2K) | 3 | 55.1 Hz | 112 940 |
+  | 4 (4K) | 4 | 27.6 Hz | 112 940 |
+  | 5 (8K) | 5 | 13.8 Hz | 112 940 |
+  | 6 (16K) | 6 | 6.9 Hz | 112 940 |
+  | 7 (32K) | 7 | 3.4 Hz | 112 940 |
+
+  - Sizes 0–2 (256 B–1 KB) use **res 0**: *single-cycle mode*. The whole wave is one cycle, in tune at octave 4.
+  - Sizes 3–7 (2 KB–32 KB) use **res = size**: *sample mode*. A constant byte rate, independent of size.
+  - Single sine cycles in sample-mode waves sound like a soft swoosh or thud, as expected (heard in the test).
+- **Unified playback formula:**
+  - `bytes/s = (26320 / 512) × freq × 2^(size − res)`
+  - `freq = 2197 × 2^((key − 69)/12 + octave − 4 + (semi + fine/64)/12)`
+  - `res = 0 if size ≤ 2 else size`
+- **Tuning a sample** recorded at Rs bytes/s with pitch p Hz, so it plays in tune at every key: solve `octave − 4 + (semi + fine/64)/12 = log2(Rs × 440 / (p × 51.406 × 2197 × 2^(size − res)))`.
+  - The octave range 0–6 limits this. In sample mode it needs **Rs/p ≥ 16** (at least 16 bytes per cycle).
+  - Keep the played byte rate below the 26 320 Hz DOC rate, or bytes are skipped (aliasing).
 - `vol` is 109 for a full-volume (127) oscillator at velocity 100, and 16 for our "silent" Gen-2 copies, so volume 0 isn't fully silent.
 
 ## Open questions
