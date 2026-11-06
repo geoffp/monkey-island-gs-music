@@ -157,7 +157,8 @@ disks: fetch-cp2
       rm -rf "$t"; echo "installed Tool035 on gs/disks/SYSTEM.DISK.PO"
     fi
 
-# Write/refresh a GSSquared machine config (gs/disks/<name>.gs2): IIgs, host speed, 3.5" drives.
+# Write/refresh a GSSquared machine config (gs/disks/<name>.gs2): IIgs, host speed, 3.5" drives,
+# startup slot 5 and no 5.25" drives (battery RAM).
 # GSSquared stores battery RAM in the .gs2 on quit, so an existing file is kept and only
 # its speed line is updated. speed: 1.024mhz | 2.8mhz | 7.159mhz | 14.3mhz | ludicrous
 _gs2 name speed disk1 disk2:
@@ -170,6 +171,9 @@ _gs2 name speed disk1 disk2:
       printf 'gs2_version = 1\nname = "%s"\nplatform = "apple2gs"\nspeed = "%s"\n\n[[storage]]\nslot = 5\ndrive = 1\nimage = "%s"\n\n[[storage]]\nslot = 5\ndrive = 2\nimage = "%s"\n' \
         "MI1 {{name}}" "{{speed}}" "{{disk1}}" "{{disk2}}" > "$f"
     fi
+    # Boot straight from slot 5 and turn off the built-in 5.25" drives (slot 6 = Your Card),
+    # so the boot scan doesn't wait on empty floppies. New configs are seeded with a known-good BRAM.
+    uv run gs2-bram "$f" --startup-slot 5 --your-card 6 --seed gs/emu/default-bram.hex
 
 # Boot the IIgs in GSSquared with System 6 + stock synthLAB (default: unlimited speed)
 emu speed="ludicrous": fetch-gssquared disks
