@@ -20,6 +20,7 @@ gs2-config = "migs.emu:main"
 tunetest = "migs.tunetest:main"
 gs2-docscope = "migs.gs2client:main"
 mt32bank = "migs.mt32bank:main"
+voices = "migs.voices:main"
 
 [dependency-groups]
 dev = ["pytest>=8"]

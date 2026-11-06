@@ -96,15 +96,17 @@ covers = [117]
 key = 48
 attack_bytes = 4096       # a drum: mostly attack
 
-# Drum kits: slots 0 and 9 (MIDI Synth allows 8 key zones per instrument).
+# Drum kits: slots 0 and 9 (MIDI Synth allows 8 key zones per instrument), grouped by sample
+# length: a kit's envelope frees the voice after its longest sample, so short sounds (slot 0)
+# don't hold voices as long as kick/snare/toms (slot 9).
 [[drum]]
-slot = 0
+slot = 9
 name = "Kick"
 key = 36
 covers = [35, 36]
 bytes = 2048
 [[drum]]
-slot = 0
+slot = 9
 name = "Snare"
 key = 38
 covers = [38]
@@ -122,13 +124,13 @@ key = 42
 covers = [42]
 bytes = 1024
 [[drum]]
-slot = 0
+slot = 9
 name = "Open Hat"
 key = 44
 covers = [44]
 bytes = 4096
 [[drum]]
-slot = 0
+slot = 9
 name = "Tom"
 key = 45
 covers = [41, 43, 45, 47, 48, 50]
@@ -146,13 +148,13 @@ key = 75
 covers = [75]
 bytes = 512
 [[drum]]
-slot = 9
+slot = 0
 name = "Bongo"
 key = 60
 covers = [60, 61]
 bytes = 1024
 [[drum]]
-slot = 9
+slot = 0
 name = "Mute Conga"
 key = 62
 covers = [62]

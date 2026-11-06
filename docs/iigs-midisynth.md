@@ -255,6 +255,25 @@ Measured in GSSquared by playing `/synthLAB/Tune/TUNE.SEQ` and sampling the Enso
   - Keep the played byte rate below the 26 320 Hz DOC rate, or bytes are skipped (aliasing).
 - `vol` is 109 for a full-volume (127) oscillator at velocity 100, and 16 for our "silent" Gen-2 copies, so volume 0 isn't fully silent.
 
+## Voice pressure: what makes MIDI Synth steal notes (2026-11-06)
+- **Symptom** (MT32 profile, MI160): sustained notes dropped out one by one by measures 9–10, although the music didn't sound dense.
+- **Cause:** a voice is freed only when **both** generators' envelopes reach 0 (ERS p.16), not at note-off. MIDI Synth then steals the *least noticeable* voice, apparently the quietest. That made sustained notes idling at their sustain level (organ ≈ 39) lose to loud-but-inaudible tails. `just voices` (src/migs/voices.py) replays each sequence against the bank's envelopes to estimate this.
+- **What held voices,** in order: slow release and decay tails (marimba held 0.13 s median, but busy ~3× longer); drum voices kept until note-off (MT-32 drums ignore note-off, so MI1 holds them); a "silent" Generator 2 whose envelope sat at 127 until note-off; drum kits that lasted the whole sample.
+- **Fixes:**
+  - the converter gates rhythm notes to ≤ 50 ms (`DRUM_GATE_SECONDS`; both profiles);
+  - Generator 2 gets an all-zero envelope;
+  - decaying instruments reach 0 where the MT-32 sound falls below −20 dB;
+  - release ≤ ~0.18 s (rate ≥ 20);
+  - drum kits decay to 0 within ~0.28 s, and are grouped by sample length (short sounds in Kit A).
+- **Result** (MT32 profile, share of song time with > 7 busy voices):
+
+  | | MI150 | MI160 | MI161 | MI162 | others |
+  |---|---|---|---|---|---|
+  | before | 100% | 93% | 96% | 67% | 21–94% |
+  | after | 25% | 44% | 16% | 15% | 0–24% |
+
+  Held notes alone (no tails) exceed 7 voices for 23% of MI160, so that song needs musical thinning on top of this.
+
 ## Custom MT-32 bank: MI1 (`just mt32bank`, gs/mt32bank.toml, src/migs/mt32bank.py)
 - **Why one shared bank:** a game port can't stop to load banks between songs. The bank is loaded once and every sequence references `MI1.BNK`.
 - **Effects reserve:** `reserve_pages` (16 = 4 KB) keeps DOC pages free at the top for game sound effects, which MIDI Synth's generator 7 plays from the same 64 KB.
@@ -270,7 +289,7 @@ Measured in GSSquared by playing `/synthLAB/Tune/TUNE.SEQ` and sampling the Enso
   - **volume** comes from the relative MT-32 loudness.
   - The MT-32 renders were in tune to within a few cents of A440. For inharmonic sounds (Xylophone, Taiko) the period search falls back to the nominal pitch.
   - **Munt quirk:** `mt32emu-smf2wav` drops leading silence, so a note scheduled at 0.5 s starts at 0.0 s in the WAV. The note-off is therefore at onset + hold. (Getting this wrong first gave release rates of 13 s and notes that rang on after Stop.)
-  - **Release is capped at rate ≥ 12** (≈1 s full scale), because stopping playback (All Notes Off) sends every voice to Release 1. Envelope levels are averaged over ±50 ms (the organ tremolo misled single-point reads).
+  - **Release is capped short** (rate ≥ 20, ≈0.18 s full scale): stopping playback (All Notes Off) sends every voice to Release 1, and long tails cause voice stealing (see "Voice pressure"). Envelope levels are averaged over ±50 ms (the organ tremolo misled single-point reads).
 - **Drum zone** = a one-shot (OscConfig 2). Its sample rate is chosen so the trimmed sound fills its power-of-two wave (6 kHz floor; longer sounds are cut, with a fade). Keys that share a sample (toms, hi/lo bongo, conga, agogo) are pitched by an offset measured from the Munt renders (log-frequency spectrum correlation).
 - **Kit key layout:** a wave is only in tune where its tuning fits octaves 0–6. Higher keys need faster playback, so slow, small waves need low keys: `max key = 69 + 12 × (log2(rate/B0) − (size − res) + 4)`. Zones are laid out in order of that limit, which puts the drums on keys 0–23.
 - **Budget (first build):** 237 of 238 pages (pages $00–$01 metronome, 16 reserved). Melodic ≈ 34 KB, drums ≈ 26 KB, plus one silence page used by the muted Generator-2 oscillators.

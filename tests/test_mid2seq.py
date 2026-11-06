@@ -51,7 +51,7 @@ def test_channels_become_instrument_slots_and_unsupported_data_is_dropped():
 def test_drum_keys_are_remapped_onto_kit_zones():
     seq, _ = convert(song(), BANK)
     offs = sorted(i.data[0] for i in seq.items if i.status == 0x80)
-    assert offs == [36, 80]                              # 42 (vel-0 on = off) -> hi-hat zone 80; 76 dropped
+    assert offs == [36]          # gated hit; the orphan vel-0 "off" for 42 and key 76 are dropped
     ons = [(i.time, i.data[0]) for i in seq.items if i.status == 0x90]
     assert ons == [(60, 36)]
 
@@ -73,3 +73,25 @@ def test_peak_voices_are_reported_not_reduced():
     assert rep.peak_voices == 10 and rep.notes == 10
     assert sum(1 for i in seq.items if i.status & 0xF0 == 0x90) == 10
     assert any("steal" in w for w in rep.warnings)
+
+
+def test_drum_notes_are_gated_and_rehits_not_cut():
+    from migs.mid2seq import _gate_drums
+    on = lambda t, n: (t, 0, mido.Message("note_on", channel=9, note=n, velocity=100))
+    off = lambda t, n: (t, 0, mido.Message("note_off", channel=9, note=n))
+    ev = [on(0, 36), on(5, 36), off(400, 36), off(401, 36), on(100, 42), off(1000, 42),
+          (0, 0, mido.Message("note_on", channel=1, note=60, velocity=90))]
+    out = _gate_drums(sorted(ev, key=lambda e: e[0]), gate=12)
+    drums = [(t, m.type, m.note) for t, _, m in out if m.channel == 9]
+    assert drums == [(0, "note_on", 36), (5, "note_off", 36), (5, "note_on", 36),
+                     (17, "note_off", 36), (100, "note_on", 42), (112, "note_off", 42)]
+    assert any(m.channel == 1 for _, _, m in out)                       # melodic untouched
+
+
+def test_voice_estimate_counts_envelope_tails_not_note_length():
+    from migs.voices import envelope_end
+    from migs.midisynth import envelope
+    held = envelope(sustain=127, release1=(0, 16))                     # 0.43 s full release
+    assert envelope_end(held, 2.0) == pytest.approx(2.43, abs=0.01)
+    decays = envelope(sustain=0, decay3_rate=16)                       # falls to 0 by itself
+    assert envelope_end(decays, 5.0) == pytest.approx(0.43, abs=0.01)

@@ -25,6 +25,10 @@ from .midisynth import SEQ_TICKS_PER_QUARTER, TRACK_ON, Bank, SeqItem, Sequence
 RHYTHM_CHANNEL = 9
 KEEP_CC = {7, 64}
 MAX_VOICES = 7
+# MT-32 rhythm sounds are one-shots that ignore note-off, so MI1 often holds drum notes for a
+# long time. A held note keeps its MIDI Synth voice busy, so drum note-offs are moved to at
+# most this long after the note-on.
+DRUM_GATE_SECONDS = 0.05
 
 
 @dataclass
@@ -94,6 +98,28 @@ def _tempo_and_scale(tpq: int, tempo_us: int) -> tuple[int, float]:
     return max(5, min(132, half)), SEQ_TICKS_PER_QUARTER / tpq
 
 
+def _gate_drums(events, gate: int):
+    """Rhythm-channel notes: each hit's note-off = min(note-on + gate, next hit of that key).
+    The original rhythm note-offs are dropped (the MT-32 ignores them anyway)."""
+    hits: dict[int, list[tuple[int, int]]] = {}
+    out = []
+    for t, ti, m in events:
+        if getattr(m, "channel", None) == RHYTHM_CHANNEL and m.type in ("note_on", "note_off"):
+            if m.type == "note_on" and m.velocity > 0:
+                hits.setdefault(m.note, []).append((t, ti))
+                out.append((t, ti, m))
+            continue
+        out.append((t, ti, m))
+    for note, ons in hits.items():
+        for i, (t, ti) in enumerate(ons):
+            nxt = ons[i + 1][0] if i + 1 < len(ons) else None
+            off = t + gate if nxt is None else min(t + gate, nxt)
+            out.append((off, ti, mido.Message("note_off", channel=RHYTHM_CHANNEL, note=note)))
+    # stable sort; at equal times put note-offs first so a re-hit isn't cut by its own release
+    out.sort(key=lambda e: (e[0], 0 if e[2].type == "note_off" else 1))
+    return out
+
+
 def convert(mf: mido.MidiFile, bank: BankMap, overrides: dict[int, int] | None = None,
             bank_file: Bank | None = None, title: str = "") -> tuple[Sequence, Report]:
     overrides = overrides or {}
@@ -114,6 +140,8 @@ def convert(mf: mido.MidiFile, bank: BankMap, overrides: dict[int, int] | None =
     if len({tp for _, tp in tempos}) > 1:
         raise ValueError("tempo changes are not supported yet")
     tempo_us = next(iter(tempos))[1] if tempos else 500_000
+    gate = max(1, round(DRUM_GATE_SECONDS * 1e6 / tempo_us * mf.ticks_per_beat))
+    events = _gate_drums(events, gate)
     file_tempo, scale = _tempo_and_scale(mf.ticks_per_beat, tempo_us)
 
     # Channel -> slot from the first program change (or overrides / rhythm).

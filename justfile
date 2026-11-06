@@ -224,6 +224,11 @@ seq: stock-banks mt32bank
 mt32bank: fetch-munt
     uv run mt32bank -o gs/seq/mt32
 
+# Estimated MIDI Synth voice pressure per sequence (voices free only when envelopes reach 0)
+voices: seq
+    @echo "== stock"; uv run voices gs/seq/stock/MI*.SEQ -b "{{vendor}}/synthlab"
+    @echo "== mt32";  uv run voices gs/seq/mt32/MI*.SEQ -b gs/seq/mt32
+
 # Tuning experiment bank/sequence (gs/seq/tune/TUNE.*), see src/migs/tunetest.py
 tunetest:
     uv run tunetest -o gs/seq/tune

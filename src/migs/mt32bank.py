@@ -32,7 +32,17 @@ MELODIC_CH, RHYTHM_CH = 1, 9    # MT-32 part 1 = MIDI channel 2; rhythm = 10
 LOOP_BYTES = 256
 FIRST_PAGE = 2                  # pages $00-$01: synthLAB metronome woodblock
 MIN_DRUM_RATE = 6000
-MIN_RELEASE_RATE = 12           # ~1 s full-scale release at most
+# Voices free only at envelope 0, and MIDI Synth steals the least noticeable (quietest) voice.
+# Slow tails from loud notes therefore outlive quieter *sustained* notes, which get stolen.
+# Keep tails short:
+MIN_RELEASE_RATE = 20           # release <= ~0.18 s full scale
+MIN_KIT_FALL_RATE = 18          # drum kit voice ends within ~0.28 s
+SUSTAIN_FLOOR = 12              # fitted sustain below this -> 0, so the voice frees itself
+AUDIBLE = 0.1                   # a decaying sound is "over" below 10% of its peak (-20 dB)
+# Generator 2 plays silence; an all-zero envelope ends at once so it never holds a voice
+# (MIDI Synth frees a voice only when BOTH envelopes reach zero).
+GEN2_OFF = envelope(attack=(0, 31), decay1=(0, 31), decay2=(0, 31), sustain=0, decay3_rate=31,
+                    release1=(0, 31), release2=(0, 31), release3_rate=31, velocity_gain=0)
 
 
 # ---------------------------------------------------------------------------
@@ -141,11 +151,21 @@ def fit_envelope(env: np.ndarray, start: int, off: int, release_slow: bool = Fal
     level_off = max(lv(off), 1)
     below = np.nonzero(env[off:] < 0.1 * env[off] + 1e-9)[0]
     rel = (below[0] if len(below) else int(0.3 * SR)) / SR
+    if ls < SUSTAIN_FLOOR:
+        # decaying sound: reach zero where it drops below audibility, freeing the voice
+        quiet = np.nonzero(env[pk:off] < AUDIBLE * top)[0]
+        gone = pk + (int(quiet[0]) if len(quiet) else off - pk)
+        if gone <= d1:
+            d1, l1, d2, l2 = gone, 0, gone, 0
+        elif gone <= d2:
+            d2, l2 = gone, 0
+        ls, sus_at = 0, max(gone, d2)
     return envelope(
         attack=(127, dt.segment_rate(0, 127, t(start, pk))),
         decay1=(l1, dt.segment_rate(127, l1, t(pk, d1))),
         decay2=(l2, dt.segment_rate(l1, l2, t(d1, d2))),
-        sustain=ls, decay3_rate=dt.segment_rate(l2, ls, t(d2, sus_at)),
+        sustain=ls,
+        decay3_rate=dt.segment_rate(l2, ls, t(d2, sus_at)),
         # cap the release at ~1 s so stopping playback (All Notes Off -> Release 1) is prompt
         release1=(0, max(MIN_RELEASE_RATE, dt.segment_rate(level_off, 0, rel * (2 if release_slow else 1)))),
         release2=(0, 31), release3_rate=31, velocity_gain=4)
@@ -281,7 +301,7 @@ def build(spec: dict, smf2wav: Path, roms: Path, cache: Path, log=print):
         v = vol(m["name"])
         wl = wavelist(127, 3, (pages[aw.name], aw.size_code, v, *ta), (pages[lw.name], 0, v, *tl))
         silent = wavelist(127, 0, silence, silence)
-        insts[slot] = Instrument.build(m["name"], (s["env"], [wl]), (envelope(), [silent]))
+        insts[slot] = Instrument.build(m["name"], (s["env"], [wl]), (GEN2_OFF, [silent]))
         for p in m["covers"]:
             programs[p] = slot
     for slot, zones in kits.items():
@@ -311,9 +331,20 @@ def build(spec: dict, smf2wav: Path, roms: Path, cache: Path, log=print):
             wls.append(wavelist(top, 2, (pages[d["name"]], w.size_code, vol(d["name"]), *t), silence))
             for c, off in z["offsets"].items():
                 drums[c] = [slot, home + off]
-        env = envelope(attack=(127, 31), sustain=127, release1=(0, 12), velocity_gain=4)
+        # One-shot drums: decay to zero over the kit's longest sample, so each hit frees its
+        # voice by itself (note-off, if early, releases at the same rate).
+        def audible_seconds(z):          # where the one-shot falls below 10% of its peak
+            y = np.abs(np.frombuffer(by_name[z["spec"]["name"]].data, np.uint8).astype(float) - 128)
+            e = np.convolve(y, np.ones(32) / 32, mode="same")
+            loud = np.nonzero(e >= AUDIBLE * e.max())[0]
+            return (loud[-1] + 1) / z["rate"] if len(loud) else 0.05
+        longest = max(audible_seconds(z) for z in zones)
+        fall = max(MIN_KIT_FALL_RATE, dt.segment_rate(127, 0, longest))
+        env = envelope(attack=(127, 31), decay1=(127, 31), decay2=(127, 31), sustain=0,
+                       decay3_rate=fall, release1=(0, fall), velocity_gain=4)
         insts[slot] = Instrument.build(f"Kit {'AB'[slot != 0]}", (env, wls),
-                                       (envelope(), [wavelist(127, 0, silence, silence)] * len(wls)))
+                                       (GEN2_OFF, [wavelist(127, 0, silence, silence)] * len(wls)))
+        log(f"  kit slot {slot}: {len(zones)} zones, voice frees after ~{longest:.2f}s (rate {fall})")
     ram = bytearray([0x80]) * 0x10000
     for w in waves:
         ram[pages[w.name] * 256 : pages[w.name] * 256 + len(w.data)] = w.data
