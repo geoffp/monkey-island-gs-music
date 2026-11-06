@@ -1,0 +1,10 @@
+# User-supplied, non-redistributable data (game files, MT-32 ROMs): never commit
+/original files/
+# Fetched/built by `just fetch`
+/vendor/
+# Python (uv)
+.venv/
+__pycache__/
+*.pyc
+# Working copies of IIGS disk images (`just disks`)
+/gs/disks/
