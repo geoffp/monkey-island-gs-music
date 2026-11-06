@@ -42,12 +42,12 @@ setup: doctor submodules sync fetch
 doctor:
     #!/usr/bin/env bash
     missing=0
-    for c in git gh uv curl unzip tar sha256sum cmake c++ pkg-config fluidsynth; do
+    for c in git gh uv curl unzip tar sha256sum cmake c++ pkg-config fluidsynth ffmpeg php; do
       command -v "$c" >/dev/null || { echo "missing: $c"; missing=1; }
     done
     pkg-config --exists glib-2.0 || { echo "missing: glib2 development files (for mt32emu-smf2wav)"; missing=1; }
     if [ $missing = 1 ]; then
-      echo "Fedora: sudo dnf install git gh uv curl unzip cmake gcc-c++ pkgconf glib2-devel fluidsynth"
+      echo "Fedora: sudo dnf install git gh uv curl unzip cmake gcc-c++ pkgconf glib2-devel fluidsynth ffmpeg php-cli"
       exit 1
     fi
     echo "host tools OK"
@@ -244,6 +244,28 @@ voices: seq
     @echo "== stock"; uv run voices gs/seq/stock/MI*.SEQ -b "{{vendor}}/synthlab"
     @echo "== mt32";  uv run voices gs/seq/mt32/MI*.SEQ -b gs/seq/mt32
 
+# MT-32 MIDI -> 15-channel-class ProTracker MODs within NinjaTrackerPlus limits (music/ntp/MInnn.mod),
+# plus desktop previews rendered with ffmpeg/libopenmpt (music/ntp/wav/). Config: gs/ntp.toml
+ntpmod: fetch-ntp fetch-munt
+    #!/usr/bin/env bash
+    set -euo pipefail
+    uv run ntpmod music/midi/mt32/*.mid -o music/ntp
+    mkdir -p music/ntp/wav
+    for f in music/ntp/*.mod; do
+      ffmpeg -hide_banner -loglevel error -y -f libopenmpt -i "$f" -ac 2 -ar 44100 "music/ntp/wav/$(basename "$f" .mod).wav"
+    done
+    echo "previews: music/ntp/wav/"
+
+# MOD -> .NTP with Ninjaforce's converter (needs php-cli). Streaming forbidden: everything in DOC RAM
+ntp: ntpmod
+    #!/usr/bin/env bash
+    set -euo pipefail
+    command -v php >/dev/null || { echo "php not found: sudo dnf install php-cli"; exit 1; }
+    for f in music/ntp/*.mod; do
+      php "{{vendor}}/ntp/src/ntpconverter.php" "$f" STREAM_FORBIDDEN > "${f%.mod}.log" || { cat "${f%.mod}.log"; exit 1; }
+    done
+    ls -la music/ntp/*.ntp
+
 # Tuning experiment bank/sequence (gs/seq/tune/TUNE.*), see src/migs/tunetest.py
 tunetest:
     uv run tunetest -o gs/seq/tune
@@ -280,7 +302,7 @@ gsdisk: seq drum-audition
 # 32 MB ProDOS hard disk image for BazFast (gs/disks/MI.HD.PO): System 6.0.4 merged from the
 # boot disk + SystemTools1 (Finder, CDevs, DAs, FSTs, tools, fonts; not its SCSI/printer
 # drivers) + SystemTools3 (sounds, fonts), Tool035, and /synthLAB with a folder per export
-# profile (Stock, ...) and the tuning test (Tune).
+# profile (Stock, ...), the tuning test (Tune), and /SenseiPlay with our NTP songs (MI).
 hdimage: seq drum-audition tunetest
     #!/usr/bin/env bash
     set -euo pipefail
@@ -306,6 +328,12 @@ hdimage: seq drum-audition tunetest
       done
     done
     mkdir -p "$st/synthLAB/Tune"; for f in gs/seq/tune/*; do typed "$f" "$st/synthLAB/Tune"; done
+    # NinjaTrackerPlus: SenseiPlay (ProDOS 8 player) + our songs, if `just ntp` has run
+    if ls music/ntp/*.ntp >/dev/null 2>&1; then
+      mkdir -p "$st/SenseiPlay/MI"
+      x "$st/SenseiPlay" "{{vendor}}/ntp/senseiplay800.2mg" sensei.system ntpplayer dgr.radio.dgr
+      for f in music/ntp/*.ntp; do cp "$f" "$st/SenseiPlay/MI/$(basename "$f" .ntp | tr a-z A-Z).NTP#d50008"; done
+    fi
     "$cp2" create-disk-image "$img" 32m prodos >/dev/null
     "$cp2" rename "$img" : MI.HD >/dev/null
     (cd "$st" && "$cp2" add "$img" * >/dev/null)

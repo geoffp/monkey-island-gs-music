@@ -12,6 +12,7 @@ __pycache__/
 /music/midi/
 /music/patches/
 /music/wav/
+/music/ntp/
 # Generated sequences (derived from the soundtrack)
 /gs/seq/
 # Build intermediates (Munt sample renders)

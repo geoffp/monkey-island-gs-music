@@ -1,0 +1,24 @@
+# MI1 -> ProTracker MOD (15CH) -> NinjaTrackerPlus. See docs/ninjatrackerplus.md.
+# Instruments/drums come from gs/mt32bank.toml (same MT-32 sounds and merges as MI1.BNK).
+#
+# Timing: rows sit on each song's detected grid unit (usually a 16th); rows_per_unit
+# subdivides it. Each note keeps its micro-timing with EDx (quantize = 0) or is snapped
+# toward its row (quantize = 1). Smaller rows = more pattern RAM and player CPU.
+
+[defaults]
+rows_per_unit = 2       # 32nd-note rows on a 16th-note grid
+speed = 3               # tracker ticks per row; EDx resolution = row / speed
+quantize = 0.0          # 0 = full performance timing, 1 = hard snap to rows
+oscillators = 31        # NTP budget: drum (one-shot) tracks use 1, looped melodic tracks 2
+attack_bytes = 2040     # loop header; NTP adds 8 stopper bytes -> one 2 KB DOC block
+loop_bytes = 512        # one ideal-size loop holding whole cycles
+min_rate = 9000         # sample-rate window for melodic samples (Hz)
+max_rate = 22000
+release_max = 0.3       # seconds of release ramp after note-off
+headroom_min = 0.5      # min attack volume headroom for instruments that swell after the attack
+
+# Per-song overrides, e.g.:
+# [songs.160]
+# rows_per_unit = 1
+# unit_ticks = 40.6     # override the detected grid unit (MI1 ticks, 120 per beat)
+# phase_ticks = 12.0

@@ -40,7 +40,7 @@ vendor/        fetched/built tools (gitignored; `just fetch`)
 ## Setup
 Host tools: [just](https://github.com/casey/just), [uv](https://github.com/astral-sh/uv), git, the GitHub CLI (`gh`), curl, unzip, cmake, a C++ compiler, glib2 headers, and FluidSynth. On Fedora:
 ```sh
-sudo dnf install just uv git gh curl unzip cmake gcc-c++ pkgconf glib2-devel fluidsynth
+sudo dnf install just uv git gh curl unzip cmake gcc-c++ pkgconf glib2-devel fluidsynth ffmpeg php-cli
 ```
 Then:
 ```sh
