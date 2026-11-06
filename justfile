@@ -27,6 +27,9 @@ ers_url       := "https://www.brutaldeluxe.fr/documentation/synthlab/apda_midisy
 ers_sha       := "47f7d2eb6e37ccffdb51901177ba2b3239fbe9112fd8276a6d552cf06c07e428"
 manual_url    := "https://www.brutaldeluxe.fr/documentation/synthlab/synthlab_usersmanual.pdf"
 manual_sha    := "54a5ec84e5fd152043a9a5b666bec0dab366656effeae5bd4a759894aa488a93"
+ntpsrc_sha    := "461260e35dc0b10176c05865d01c4e31694f704c0c3a9e5760fc093623dc52fb"
+ntpdemo_sha   := "350843388bde213b10101212fcd6e3f5affa3b4f25b74ea970b0b6ab85d14d97"
+sensei_ver    := "v2.0"     # digarok/senseiplay (no published checksums)
 
 # List recipes
 default:
@@ -60,7 +63,7 @@ sync:
     uv sync
 
 # All downloaded/built dependencies
-fetch: fetch-gssquared fetch-mcp fetch-cp2 fetch-soundfont fetch-munt fetch-synthfile fetch-docs
+fetch: fetch-gssquared fetch-mcp fetch-cp2 fetch-soundfont fetch-munt fetch-synthfile fetch-docs fetch-ntp
 
 # GSSquared emulator AppImage
 fetch-gssquared:
@@ -131,6 +134,18 @@ fetch-synthfile: fetch-cp2
     echo "{{synthfile_sha}}  $d/synthfile15.shk" | sha256sum -c -
     mkdir -p "$d/src"
     "$PWD/{{cp2}}" extract --exdir="$d/src" "$d/synthfile15.shk"
+
+# NinjaTrackerPlus: player sources + MOD->NTP converter, demo disk, SenseiPlay player disk
+fetch-ntp:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    d="{{vendor}}/ntp"; mkdir -p "$d"
+    get() { [ -f "$d/$1" ] && echo "$3  $d/$1" | sha256sum -c --quiet - && return 0
+            curl -fL -o "$d/$1" "$2" && echo "$3  $d/$1" | sha256sum -c -; }
+    get ntpsources.zip http://www.ninjaforce.com/downloads/ntpsources.zip "{{ntpsrc_sha}}"
+    get ntp.2mg http://www.ninjaforce.com/downloads/ntp.2mg "{{ntpdemo_sha}}"
+    [ -d "$d/src" ] || unzip -q -o "$d/ntpsources.zip" -d "$d/src"
+    [ -f "$d/senseiplay800.2mg" ] || gh release download {{sensei_ver}} -R digarok/senseiplay -p senseiplay800.2mg -D "$d"
 
 # Reference PDFs: MIDI Synth ERS and synthLAB manual (Brutal Deluxe scans)
 fetch-docs:
