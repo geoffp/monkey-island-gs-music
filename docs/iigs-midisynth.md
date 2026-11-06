@@ -196,6 +196,7 @@ The `num_inst` byte doesn't always match the number of named slots: COMBO says 9
 - synthLAB opens our `MInnn.SEQ` files from `Seq.and.Instr` and plays them; it loads COMBO.BNK/.WAV from the same folder. It does **not** open a sequence by itself at startup; use File → Open.
 - **Timing and tempo are correct.** Tempo 75 with unchanged 120-PPQN ticks is confirmed, and so is the half-note tempo field.
 - Voice stealing is only a noticeable problem in sound 160 (16 simultaneous notes peak).
+- A 32 MB BazFast hard-disk image (`just hdimage`, System 6.0.4 merged from the boot disk + SystemTools1/3, plus Tool035) boots and runs synthLAB fine, and is far faster than floppies. GS/OS needs no special driver for BazFast; its generic SmartPort support handles it.
 - **The first drum mapping was poor.** See "Drum kits" below.
 
 ## Drum kits [DATA]
