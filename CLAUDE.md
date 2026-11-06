@@ -33,7 +33,8 @@ Pipeline:
 - `engines/scumm/scumm-md5.h`: release identification
 
 ## IIGS emulator (testing stage 3)
-- Emulator: GSSquared AppImage at `vendor/gssquared/GSSquared-x86_64.AppImage` (`just fetch-gssquared`; `just emu` boots System 6 + synthLAB). CLI: `-p 5` = IIgs, `-dsXdY=img` mounts a disk, `--debug SOCK`.
+- Emulator: GSSquared AppImage at `vendor/gssquared/GSSquared-x86_64.AppImage` (`just fetch-gssquared`; `just emu` boots System 6 + synthLAB).
+  - `just emu`/`just emu-music` launch from a generated machine config `gs/disks/<name>.gs2` (IIgs, 3.5" drives in slot 5). Host speed defaults to 14.3 MHz; pass e.g. `just emu-music ludicrous` for unlimited. GSSquared writes battery RAM into the `.gs2` on quit, so the recipes keep the file and only rewrite its `speed` line. Format: GSSquared `Docs/SystemConfigTOML.md`. CLI: `-p 5` = IIgs, `-dsXdY=img` mounts a disk, `--debug SOCK`.
 - System disks: `gs/system6/*.PO` (System 6.0.4, 800K ProDOS, committed). `SYNTHLAB.PO` has synthLAB, TOOL035 (MIDI Synth), 5 stock `.BNK`/`.WAV` pairs and 7 sample `.SEQ` files in `/SEQ.AND.INSTR/`; `SYSTEM.DISK.PO` boots.
 - MCP: `gs2-debug` server in `.mcp.json` → `vendor/bin/gs2-mcp` (`just fetch-mcp`) ([gssquared-mcp](https://github.com/jawaidbazyar2/gssquared-mcp) v0.1.4).
   - Call `launch {platform: "IIgs"}` first.

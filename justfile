@@ -157,13 +157,29 @@ disks: fetch-cp2
       rm -rf "$t"; echo "installed Tool035 on gs/disks/SYSTEM.DISK.PO"
     fi
 
-# Boot the IIgs in GSSquared with System 6 + synthLAB in the 3.5" drives
-emu: fetch-gssquared disks
-    "{{gs2}}" -p 5 -ds5d1="$PWD/gs/disks/SYSTEM.DISK.PO" -ds5d2="$PWD/gs/disks/SYNTHLAB.PO"
+# Write/refresh a GSSquared machine config (gs/disks/<name>.gs2): IIgs, host speed, 3.5" drives.
+# GSSquared stores battery RAM in the .gs2 on quit, so an existing file is kept and only
+# its speed line is updated. speed: 1.024mhz | 2.8mhz | 7.159mhz | 14.3mhz | ludicrous
+_gs2 name speed disk1 disk2:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    f="gs/disks/{{name}}.gs2"
+    if [ -f "$f" ]; then
+      sed -i 's/^speed = .*/speed = "{{speed}}"/' "$f"
+    else
+      printf 'gs2_version = 1\nname = "%s"\nplatform = "apple2gs"\nspeed = "%s"\n\n[[storage]]\nslot = 5\ndrive = 1\nimage = "%s"\n\n[[storage]]\nslot = 5\ndrive = 2\nimage = "%s"\n' \
+        "MI1 {{name}}" "{{speed}}" "{{disk1}}" "{{disk2}}" > "$f"
+    fi
+
+# Boot the IIgs in GSSquared with System 6 + stock synthLAB (default 14.3 MHz)
+emu speed="14.3mhz": fetch-gssquared disks
+    just _gs2 synthlab {{speed}} SYSTEM.DISK.PO SYNTHLAB.PO
+    "{{gs2}}" "$PWD/gs/disks/synthlab.gs2"
 
 # Boot the IIgs with System 6 and the MI music synthLAB disk (open /Seq.and.Instr/MInnn.SEQ)
-emu-music: fetch-gssquared disks gsdisk
-    "{{gs2}}" -p 5 -ds5d1="$PWD/gs/disks/SYSTEM.DISK.PO" -ds5d2="$PWD/gs/disks/MI.SYNTHLAB.PO"
+emu-music speed="14.3mhz": fetch-gssquared disks gsdisk
+    just _gs2 mi-music {{speed}} SYSTEM.DISK.PO MI.SYNTHLAB.PO
+    "{{gs2}}" "$PWD/gs/disks/mi-music.gs2"
 
 # Render an MT-32 MIDI file to WAV with Munt (needs ROMs)
 mt32-wav mid wav: fetch-munt
