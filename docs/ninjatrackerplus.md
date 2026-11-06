@@ -94,3 +94,24 @@ So the songs were played to a beat, but the outliers (50–150 ms: drift, grace 
 - Each note goes in the row at or before its time, with `EDx` (0–5 ticks) keeping its micro-timing: error ≤ half a tracker tick, ~14 ms at MI160's tempo.
 - An optional hard quantize drops the `EDx` delays.
 - Pattern RAM matters for a game. MI160 on a 31 ms grid ≈ 47 patterns × 15 tracks × 64 × 4 B ≈ 180 KB; on its unit grid ≈ 9 patterns ≈ 35 KB.
+
+## Our MOD-first pipeline (`src/migs/ntpmod.py`, `just ntpmod` → `just ntp`)
+The MOD is the primary artefact: it renders on the desktop (ffmpeg's libopenmpt → `music/ntp/wav/`), and Ninjaforce's converter (`php-cli`, `STREAM_FORBIDDEN`) turns it into `.NTP`. Settings live in `gs/ntp.toml`; sounds come from `gs/mt32bank.toml` (the same 14 melodic and 14 drum sounds as MI1.BNK).
+
+- **Samples:**
+  - **Melodic:** the raw MT-32 attack (2040 B, so with NTP's 8 stopper bytes it fills a 2 KB block), then a 512 B loop holding k whole sustain cycles, continuous with the attack. The rate is set by 512 B = k periods. The note base + finetune (16 ProTracker finetune tables read from `make_tables.php`) tune it to within ±4 cents. NTP rate = PAL 3 546 894.6 / period.
+  - **Drums:** one-shots at about 5.9–8.3 kHz. Pitched pairs are offset by whole notes.
+  - **Memory:** sized and packed by NTP's rules (stopper bytes, loop split, power-of-two blocks, largest at page 0), giving **242 of 256 DOC pages** for 28 samples.
+- **Timing:** rows sit on each song's detected grid unit / `rows_per_unit` (default 32nds), speed 3, MOD tempo per song (49–137). `EDx` keeps micro-timing (`quantize = 0`). The measured mean error is 4.6–13.6 ms.
+- **Velocity:**
+  - in the note's own cell when it needs no delay;
+  - else, on a drum track that has gone silent, a `Cxx` in the preceding cell plus an instrument-less note (NTP keeps the track volume; `setup_effect` in `ninjatrackerplus.s`);
+  - else the instrument's default volume, corrected by the next row's envelope `Cxx`.
+- **Envelope:** per-row `Cxx` follows the MT-32 loudness contour after the attack. Notes start with "headroom" so swelling sounds (strings, organ) can rise. Release is a ramp of up to 0.3 s, then `C00`.
+- **Tracks:** created on demand within NTP's **31-oscillator** budget (drum tracks 1, looped melodic tracks 2). When the budget is full, a track that's only releasing is stolen. There's no separate control track: speed and tempo sit in row 0 (the lead-in), and the loop `B00` goes in a free cell of the last row.
+- **Channel tag:** `nCHN` below 10 channels, `nnCH` from 10. libopenmpt didn't recognise `09CH` (it rendered silence), so the format matters.
+
+### First build (2026-11-06)
+- 9–19 tracks per song, using up to 31 oscillators. Dropped notes are 0–16 per song, except MI167 (89).
+- **MI160:** 797 releases stolen, 16 notes dropped.
+- About 60% of notes need an `EDx` delay. Most of those start at the default volume for one row (70–150 ms) before the envelope corrects them.
