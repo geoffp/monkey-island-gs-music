@@ -155,6 +155,22 @@ class Instrument:
     name: str
     raw: bytes                      # the 288-byte InstrumentRec
 
+    @classmethod
+    def build(cls, name: str, gen1: tuple[bytes, list[bytes]],
+              gen2: tuple[bytes, list[bytes]] | None = None) -> Instrument:
+        """From (EnvelopeRec, [WavelistRec...]) per generator (see envelope()/wavelist()).
+        Unused wavelists are zero (TopKey 0). Gen 2 defaults to silent copies of Gen 1."""
+        def gen(env: bytes, wls: list[bytes]) -> bytes:
+            if len(wls) > 8:
+                raise ValueError("at most 8 wavelists per generator")
+            return env + b"".join(wls) + bytes(16 * (8 - len(wls)))
+        if gen2 is None:
+            env, wls = gen1
+            gen2 = (env, [w[:6] + b"\x00" + w[7:12] + b"\x00" + w[13:] for w in wls])  # volumes 0
+        raw = gen(*gen1) + gen(*gen2)
+        assert len(raw) == 288
+        return cls(name, raw)
+
     def gen1_wavelists(self) -> list[Wavelist]:
         out = []
         for i in range(8):
@@ -174,11 +190,41 @@ class Instrument:
         return zones
 
 
+def envelope(attack=(127, 31), decay1=(127, 31), decay2=(127, 31), sustain=127, decay3_rate=31,
+             release1=(0, 20), release2=(0, 31), release3_rate=31, decay_gain=0,
+             velocity_gain=4, pitch_bend_range=0) -> bytes:
+    """EnvelopeRec (ERS 14-17): (level 0-127, rate 0-31) pairs; rate 31 = instant."""
+    return bytes([attack[0], attack[1], decay1[0], decay1[1], decay2[0], decay2[1], sustain,
+                  decay3_rate, release1[0], release1[1], release2[0], release2[1], release3_rate,
+                  decay_gain, velocity_gain, pitch_bend_range])
+
+
+def wavelist(top_key: int, config: int, a: tuple[int, int, int, int, int, int],
+             b: tuple[int, int, int, int, int, int] | None = None, stereo=0, detune=0) -> bytes:
+    """WavelistRec (ERS 18-23). a/b = (page, size code, volume, octave, semitone, fine)."""
+    b = b or (a[0], a[1], 0, a[3], a[4], a[5])
+    return bytes([top_key, config, stereo, detune, *a, *b])
+
+
 @dataclass
 class Bank:
     wave_name: str
     num_inst: int
     instruments: list[Instrument]
+
+    def to_bytes(self, owner: str = "migs") -> bytes:
+        if len(self.instruments) != 16:
+            raise ValueError("a bank has exactly 16 instrument slots")
+        h = bytearray(0x400)
+        h[0:4] = b"INST"
+        struct.pack_into("<HH", h, 4, 0x0100, 0x0400)
+        h[0x08:0x18] = owner.encode("latin-1")[:16].ljust(16, b"\x00")
+        h[0x18:0x28] = _pack_pstr(self.wave_name)
+        h[0x2B] = 15                                  # master volume, as in every stock bank
+        h[0x2C] = self.num_inst
+        for i, inst in enumerate(self.instruments):
+            h[0x300 + i * 16 : 0x310 + i * 16] = _pack_pstr(inst.name)
+        return bytes(h) + b"".join(i.raw for i in self.instruments)
 
     @classmethod
     def from_bytes(cls, d: bytes) -> Bank:
@@ -192,6 +238,24 @@ class Bank:
 @dataclass
 class WaveBank:
     waves: dict[int, tuple[str, int]]   # page address -> (name, size code)
+    ram: bytes = b""                    # 64 KB DOC RAM image (when built or read)
+
+    def to_bytes(self, owner: str = "migs") -> bytes:
+        if len(self.waves) > 64:
+            raise ValueError("at most 64 wave table entries")
+        ram = self.ram or bytes(0x10000)
+        if len(ram) != 0x10000:
+            raise ValueError("DOC RAM image must be 64 KB")
+        h = bytearray(0x900)
+        h[0:4] = b"WAVE"
+        struct.pack_into("<HH", h, 4, 0x0100, 0x0900)
+        h[0x08:0x18] = owner.encode("latin-1")[:16].ljust(16, b"\x00")
+        h[0x18] = len(self.waves)
+        for i, (page, (name, size)) in enumerate(sorted(self.waves.items())):
+            e = 0x100 + i * 32
+            h[e : e + 16] = _pack_pstr(name)
+            h[e + 17], h[e + 19] = page, size
+        return bytes(h) + ram
 
     @classmethod
     def from_bytes(cls, d: bytes) -> WaveBank:
@@ -201,4 +265,4 @@ class WaveBank:
         for i in range(d[0x18]):
             e = d[0x100 + i * 32 : 0x120 + i * 32]
             waves.setdefault(e[17], (_pstr(e[:16]), e[19]))
-        return cls(waves)
+        return cls(waves, d[0x900:0x10900])

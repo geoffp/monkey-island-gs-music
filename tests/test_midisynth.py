@@ -91,3 +91,23 @@ def test_audition_sequence_maps_beats_to_keys():
     assert ons == [(384, 47), (480, 48), (576, 49), (672, 50)]     # after a 1-measure lead-in
     assert table[0].split() == ["2:1", "key", "47", "Kick"] and table[2].endswith("silent")
     assert abs(seq.seconds() - (672 + 48) * 30 / (96 * 30)) < 1e-9  # one hit per second
+
+
+def test_bank_and_wave_writers_round_trip():
+    from migs.midisynth import WaveBank, envelope, wavelist
+    env = envelope(sustain=100)
+    inst = Instrument.build("Sine", (env, [wavelist(127, 0, (0x10, 0, 120, 3, 0, 0))]))
+    bank = Bank("T.WAV", 1, [inst] + [Instrument("", bytes(288))] * 15)
+    raw = bank.to_bytes()
+    assert len(raw) == 5632 and raw[:4] == b"INST"
+    back = Bank.from_bytes(raw)
+    assert back.wave_name == "T.WAV" and back.instruments[0].name == "Sine"
+    assert back.instruments[0].raw == inst.raw and inst.raw[:16] == env
+    (lo, hi, wl), = back.instruments[0].zones()
+    assert (lo, hi, wl.addr_a, wl.vol_a, wl.vol_b) == (0, 127, 0x10, 120, 0)   # gen 2 silent copy
+    ram = bytearray(0x10000)
+    ram[0x1000:0x1100] = bytes(range(1, 256)) + b"\x01"
+    wraw = WaveBank({0x10: ("Sine", 0)}, bytes(ram)).to_bytes()
+    assert len(wraw) == 67840
+    wb = WaveBank.from_bytes(wraw)
+    assert wb.waves == {0x10: ("Sine", 0)} and wb.ram == bytes(ram)

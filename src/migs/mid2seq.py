@@ -57,10 +57,12 @@ class Report:
         self.dropped[what] = self.dropped.get(what, 0) + 1
 
 
-def load_config(path: Path, song_id: str | None) -> tuple[BankMap, dict[int, int]]:
+def load_config(path: Path, song_id: str | None, profile: str = "stock") -> tuple[BankMap, dict[int, int]]:
     cfg = tomllib.loads(path.read_text())
+    prof = cfg["profiles"][profile]
     song = cfg.get("songs", {}).get(song_id or "", {})
-    bank_name = song.get("bank", cfg["default_bank"])
+    song = song.get(profile, song) if isinstance(song.get(profile), dict) else song
+    bank_name = song.get("bank", prof["default_bank"])
     overrides = {int(k) - 1: v for k, v in song.get("channels", {}).items()}
     return BankMap.from_config(bank_name, cfg["banks"][bank_name]), overrides
 
@@ -205,6 +207,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("inputs", nargs="+", type=Path, help="GM MIDI files")
     ap.add_argument("-o", "--out-dir", type=Path, required=True)
     ap.add_argument("-c", "--config", type=Path, default=Path("gs/instruments.toml"))
+    ap.add_argument("-p", "--profile", default="stock", help="export profile in the config")
     ap.add_argument("-b", "--bank-dir", type=Path,
                     help="directory holding the bank files, to check key zones")
     args = ap.parse_args(argv)
@@ -212,7 +215,7 @@ def main(argv: list[str] | None = None) -> int:
 
     for path in args.inputs:
         song_id = path.stem.split("-")[0]
-        bank, overrides = load_config(args.config, song_id)
+        bank, overrides = load_config(args.config, song_id, args.profile)
         bank_file = None
         if args.bank_dir:
             bank_file = Bank.from_bytes((args.bank_dir / bank.file).read_bytes())

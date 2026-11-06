@@ -6,7 +6,15 @@
 #
 # Keys here are GM program numbers (0-based) and GM drum keys, written as strings.
 
+# Export profiles: each writes gs/seq/<profile>/ and a /synthLAB/<folder> on the HD image,
+# holding its sequences plus the bank/wave files they reference.
+[profiles.stock]          # Apple's stock synthLAB COMBO bank
 default_bank = "COMBO"
+folder = "Stock"
+
+# [profiles.mt32]         # our MT-32-sampled bank (in testing); enabled once MI1.BNK exists
+# default_bank = "MI1"
+# folder = "MT32"
 
 [banks.COMBO]
 # Stock synthLAB bank (gs/system6/SYNTHLAB.PO /SEQ.AND.INSTR/), slots:

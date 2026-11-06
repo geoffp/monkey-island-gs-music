@@ -215,14 +215,24 @@ stock-banks: fetch-cp2
     for f in "$d.tmp"/Seq.and.Instr/*; do cp "$f" "$d/$(basename "$f" | tr a-z A-Z)"; done
     rm -rf "$d.tmp"; ls "$d"
 
-# Convert the GM MIDI files to MIDI Synth sequences (gs/seq/MInnn.SEQ)
+# Convert the GM MIDI files to MIDI Synth sequences, per export profile (gs/seq/<profile>/MInnn.SEQ)
 seq: stock-banks
-    uv run mid2seq music/midi/gm/*.mid -o gs/seq -b "{{vendor}}/synthlab"
+    rm -rf gs/seq/stock && uv run mid2seq music/midi/gm/*.mid -p stock -o gs/seq/stock -b "{{vendor}}/synthlab"
 
-# Drum-kit audition sequences (gs/seq/AUDITnn.SEQ + .txt key tables) for the default bank's kits
+# Tuning experiment bank/sequence (gs/seq/tune/TUNE.*), see src/migs/tunetest.py
+tunetest:
+    uv run tunetest -o gs/seq/tune
+
+# Boot the HD and sample the DOC oscillators to gs/disks/docscope.jsonl while you play something
+docscope seconds="240": fetch-gssquared fetch-mcp hdimage
+    uv run gs2-config gs/disks/mi-music.gs2 --name "MI1 music (BazFast HD)" --speed ludicrous \
+      --card 7=bazfast3 --disk 7:1=MI.HD.PO --startup-slot 7 --your-card 6 --your-card 7 --seed {{seed_bram}}
+    uv run gs2-docscope --config gs/disks/mi-music.gs2 --seconds {{seconds}}
+
+# Drum-kit audition sequences (gs/seq/stock/AUDITnn.SEQ + .txt key tables) for the default bank's kits
 drum-audition: stock-banks
-    uv run audition "{{vendor}}/synthlab/COMBO.BNK" 0 --wave "{{vendor}}/synthlab/COMBO.WAV" -o gs/seq --lo 28 --hi 100
-    uv run audition "{{vendor}}/synthlab/COMBO.BNK" 9 --wave "{{vendor}}/synthlab/COMBO.WAV" -o gs/seq --lo 28 --hi 100
+    uv run audition "{{vendor}}/synthlab/COMBO.BNK" 0 --wave "{{vendor}}/synthlab/COMBO.WAV" -o gs/seq/stock --lo 28 --hi 100
+    uv run audition "{{vendor}}/synthlab/COMBO.BNK" 9 --wave "{{vendor}}/synthlab/COMBO.WAV" -o gs/seq/stock --lo 28 --hi 100
 
 # Build gs/disks/MI.SYNTHLAB.PO: a copy of the synthLAB disk whose /Seq.and.Instr holds
 # our sequences plus the bank/wave files they use (Apple's samples removed to make room)
@@ -233,7 +243,7 @@ gsdisk: seq drum-audition
     mkdir -p gs/disks && rm -rf "$stage" && cp gs/system6/SYNTHLAB.PO "$img"
     "$cp2" list "$img" | grep '^Seq.and.Instr:' | tr : / | while read -r f; do "$cp2" delete "$img" "$f" >/dev/null; done
     mkdir -p "$stage/Seq.and.Instr"
-    for f in gs/seq/*.SEQ; do cp "$f" "$stage/Seq.and.Instr/$(basename "$f")#d50001"; done
+    for f in gs/seq/stock/*.SEQ; do cp "$f" "$stage/Seq.and.Instr/$(basename "$f")#d50001"; done
     for b in $(uv run python -I -c "import tomllib;c=tomllib.load(open('gs/instruments.toml','rb'));print(' '.join(v['file']+' '+v['wave_file'] for v in c['banks'].values()))"); do
       case "$b" in *.BNK) t=d60001;; *.WAV) t=d80004;; esac
       cp "{{vendor}}/synthlab/$b" "$stage/Seq.and.Instr/$b#$t"
@@ -244,23 +254,33 @@ gsdisk: seq drum-audition
 
 # 32 MB ProDOS hard disk image for BazFast (gs/disks/MI.HD.PO): System 6.0.4 merged from the
 # boot disk + SystemTools1 (Finder, CDevs, DAs, FSTs, tools, fonts; not its SCSI/printer
-# drivers) + SystemTools3 (sounds, fonts), Tool035, and /synthLAB with our Seq.and.Instr.
-hdimage: seq drum-audition
+# drivers) + SystemTools3 (sounds, fonts), Tool035, and /synthLAB with a folder per export
+# profile (Stock, ...) and the tuning test (Tune).
+hdimage: seq drum-audition tunetest
     #!/usr/bin/env bash
     set -euo pipefail
     cp2="$PWD/{{cp2}}"; img="$PWD/gs/disks/MI.HD.PO"; st="$PWD/gs/disks/hdstage"
-    rm -rf "$st" "$img" && mkdir -p "$st/synthLAB/Seq.and.Instr"
+    rm -rf "$st" "$img" && mkdir -p "$st/synthLAB"
     x() { "$cp2" extract --preserve=naps --overwrite --exdir="$1" "${@:2}" >/dev/null; }
     x "$st" gs/system6/SYSTEM.DISK.PO
     x "$st" gs/system6/SYSTEMTOOLS1.PO System/Finder System/CDevs System/Desk.Accs System/FSTs System/Tools System/Fonts Icons
     x "$st" gs/system6/SYSTEMTOOLS3.PO System
     x "$st" gs/system6/SYNTHLAB.PO System/Tools/Tool035
     x "$st/synthLAB" gs/system6/SYNTHLAB.PO synthLAB Icons Reference
-    for f in gs/seq/*.SEQ; do cp "$f" "$st/synthLAB/Seq.and.Instr/$(basename "$f")#d50001"; done
-    for b in $(uv run python -I -c "import tomllib;c=tomllib.load(open('gs/instruments.toml','rb'));print(' '.join(v['file']+' '+v['wave_file'] for v in c['banks'].values()))"); do
-      case "$b" in *.BNK) t=d60001;; *.WAV) t=d80004;; esac
-      cp "{{vendor}}/synthlab/$b" "$st/synthLAB/Seq.and.Instr/$b#$t"
+    # A folder per export profile (sequences + the banks they reference) and the tuning test
+    typed() {   # copy file $1 into dir $2 with its ProDOS type (NAPS suffix)
+      case "$1" in *.SEQ) t=d50001;; *.BNK) t=d60001;; *.WAV) t=d80004;; *) return;; esac
+      cp "$1" "$2/$(basename "$1")#$t"
+    }
+    for prof in $(uv run python -I -c "import tomllib;c=tomllib.load(open('gs/instruments.toml','rb'));print(' '.join(f'{k}:{v[\"folder\"]}:{c[\"banks\"][v[\"default_bank\"]][\"file\"]}:{c[\"banks\"][v[\"default_bank\"]][\"wave_file\"]}' for k,v in c['profiles'].items()))"); do
+      IFS=: read -r name folder bnk wav <<< "$prof"
+      d="$st/synthLAB/$folder"; mkdir -p "$d"
+      for f in gs/seq/$name/*.SEQ; do typed "$f" "$d"; done
+      for f in "{{vendor}}/synthlab/$bnk" "{{vendor}}/synthlab/$wav" "gs/seq/$name/$bnk" "gs/seq/$name/$wav"; do
+        [ -f "$f" ] && typed "$f" "$d"
+      done
     done
+    mkdir -p "$st/synthLAB/Tune"; for f in gs/seq/tune/*; do typed "$f" "$st/synthLAB/Tune"; done
     "$cp2" create-disk-image "$img" 32m prodos >/dev/null
     "$cp2" rename "$img" : MI.HD >/dev/null
     (cd "$st" && "$cp2" add "$img" * >/dev/null)
