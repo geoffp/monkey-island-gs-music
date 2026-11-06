@@ -224,6 +224,16 @@ The `num_inst` byte doesn't always match the number of named slots: COMBO says 9
   - Drum Kit 2 (`AUDIT09.SEQ`) hasn't been auditioned yet.
 - `just drum-audition` builds `AUDITnn.SEQ` (nn = kit slot). It plays one hit per beat across a key range, so synthLAB's measure:beat counter identifies the key. `gs/seq/AUDITnn.txt` lists measure:beat → key.
 
+## Measured: how MIDI Synth drives the DOC (2026-11-06, `just tunetest` + `just docscope`)
+Measured in GSSquared by playing `/synthLAB/Tune/TUNE.SEQ` and sampling the Ensoniq oscillator state through gs2-mcp (`src/migs/gs2client.py`). Log: `gs/disks/docscope.jsonl`.
+- With MIDI Synth running, **all 32 oscillators are enabled**, so the DOC rate is 894 886 / 34 ≈ **26 320 Hz**. Before MIDI Synth starts, 1 oscillator runs at 298 295 Hz.
+- **Each note uses 4 oscillators** (Gen 1 A/B, Gen 2 A/B), all with the same frequency register.
+- DOC rule (GSSquared `ensoniq.cpp`): the address is `acc >> (9 + res − size)`, and `acc += freq` per sample. So **one pass through the wave = rate × freq / 2^(17 + res) Hz**, and **bytes per second = rate × freq / 2^(9 + res − size)**.
+- **Frequency register:** A4 at octave 4 = **2197** (≈ 1098.5 × 2^(oct − 3)). Semitone + fine scale it by 2^((semi + fine/64)/12) (measured ×1.5428 for +7 semi, +32 fine). One octave per 12 keys, exactly.
+  - So a **single-cycle wave plays in tune at record octave 4** with semi = fine = 0. synthLAB's manual says "octave 3", probably its display offset.
+- **Resolution:** sizes 256 B and 1 KB got res 0, and 8 KB got res 5. Experiment 2 (`TUNE2.SEQ`, sizes 512 B–32 KB) measures the full rule.
+- `vol` is 109 for a full-volume (127) oscillator at velocity 100, and 16 for our "silent" Gen-2 copies, so volume 0 isn't fully silent.
+
 ## Open questions
 - What the bank header bytes at `$030`–`$2FF` (`INST_TOPKEYWV_OFFSET`) hold.
 - Whether MIDI Synth honours `t_channel` from the file, or only synthLAB/synthfile apply it via `TrackToChan`. (Our files will put events on the right channels directly, so it doesn't matter.)
