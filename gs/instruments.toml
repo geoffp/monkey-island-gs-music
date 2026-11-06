@@ -44,8 +44,8 @@ fallback_slot = 2
 
 # Drum Kit 1 zones by ear (docs/midisynth-drum-keys-audit.md, translated in
 # docs/iigs-midisynth.md "Drum kits"): kick 28-47 | snare 48-55 | toms 56-71 low->high |
-# ride 72-77 | "crash" 78-83 (the Hi-hat zone 79-84: probably a hat pitched low, so hats go at
-# its top, like Apple's 85-89 on Kit 3) | 85+ Rim, unusable.
+# ride 72-77 | open hat 78-83 | closed hat 84 (Hi-hat zone 79-84; hats at its top, like
+# Apple's 85-89 on Kit 3) | 85+ Rim, unusable. No real crash: the top of the cymbal zone stands in.
 # [A] = key Apple's SYNTH.SEQ uses on the same zone layout. "stand-in" = no real equivalent.
 [banks.COMBO.drums]      # GM drum key -> kit key
 "35" = 41   # Acoustic Bass Drum -> kick
@@ -59,12 +59,12 @@ fallback_slot = 2
 "47" = 63   # Low-Mid Tom
 "48" = 66   # Hi-Mid Tom
 "50" = 69   # High Tom
-"42" = 84   # Closed Hi-Hat      -> hi-hat zone, top
-"44" = 83   # Pedal Hi-Hat       -> hi-hat zone
-"46" = 81   # Open Hi-Hat        -> hi-hat zone, lower = longer
+"42" = 84   # Closed Hi-Hat      -> closed hat (key 84, by ear)
+"44" = 84   # Pedal Hi-Hat       -> closed hat
+"46" = 81   # Open Hi-Hat        -> open hat (78-83 by ear)
 "51" = 73   # Ride Cymbal        -> ride
-"49" = 79   # Crash Cymbal       -> hi-hat zone, bottom ("crash" by ear)
-"57" = 79   # Crash Cymbal 2
+"49" = 78   # Crash Cymbal       -> top of cymbal zone       stand-in
+"57" = 78   # Crash Cymbal 2                                stand-in
 "54" = 84   # Tambourine         -> hi-hat zone, top        stand-in
 "56" = 71   # Cowbell            -> top tom                 stand-in
 "60" = 70   # Hi Bongo           -> high toms               stand-in

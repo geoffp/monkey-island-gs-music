@@ -215,11 +215,12 @@ The `num_inst` byte doesn't always match the number of named slots: COMBO says 9
   | hard snares | 7–8 | 48–55 | 49–56 "Snare" |
   | toms, low → high | 9–12 | 56–71 | 57–72 "Toms" |
   | ride | 13:1–14:2 | 72–77 | 73–78 "Cymbal" |
-  | crash (a poor one) | 14:3–15 | 78–83 | 79–84 "Hi-hat" |
-  | unrecognisable | 16–20 | 84–103 | 85–127 "Rim" |
+  | open hat (first heard as "a poor crash") | 14:3–15 | 78–83 | 79–84 "Hi-hat" |
+  | closed hat (re-listen) | 16:1 | 84 | 79–84 "Hi-hat" (top) |
+  | unrecognisable | 16:2–20 | 85–103 | 85–127 "Rim" |
 
   - The zone boundaries match the decoded TopKeys to within a key, which is about the resolution of measure-level notes.
-  - Interpretation: the "Hi-hat" zone (79–84) heard as a poor crash is probably the hat sample pitched low. Apple plays hats near the top of the zone (85–89 on Kit 3, zone 79–96). So hats are mapped to 83–84 and the crash to 79. **Key 84 itself (16:1) needs a re-listen.** The "Rim" zone (85+) is unusable, so there's no rim/side-stick sound.
+  - **Hats:** the "Hi-hat" zone is open hat for most of its range and closed hat at its top key (84). That matches Apple playing hats near the top of the zone (85–89 on Kit 3). **The kit has no crash** (the top of the ride/"Cymbal" zone, 78, stands in) and no rim/side stick (the "Rim" zone, 85+, is unusable).
   - Drum Kit 2 (`AUDIT09.SEQ`) hasn't been auditioned yet.
 - `just drum-audition` builds `AUDITnn.SEQ` (nn = kit slot). It plays one hit per beat across a key range, so synthLAB's measure:beat counter identifies the key. `gs/seq/AUDITnn.txt` lists measure:beat → key.
 
