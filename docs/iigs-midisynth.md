@@ -206,6 +206,20 @@ The `num_inst` byte doesn't always match the number of named slots: COMBO says 9
   - SYNTH Drum Kit 3: Kick 2 0–48, Snare 2 49–56, Toms 2 57–72, Clap 73–78, Hi-hat 2 79–96.
 - **Apple's own kit usage** (`SYNTH.SEQ`, channel 0 = Drum Kit 3, note-on counts): 43 ×120 (kick), 52 ×123 (snare), 60 ×6 (tom), 77 ×30 (clap), 85 ×291, 87 ×162, 89 ×3 (hi-hat). These are the best-known-good keys.
 - The stock kits have no conga, bongo, claves, cabasa or agogo samples. MI1 uses those heavily: side stick 676 hits, congas 1207, claves 422, cabasa 188.
+- **COMBO Drum Kit 1 by ear** (user audition of `AUDIT00.SEQ`, 2026-11-06; raw notes in `docs/midisynth-drum-keys-audit.md`). Audition key = 28 + (measure − 2) × 4 + (beat − 1).
+
+  | heard | measure:beat | keys | decoded zone (wave name) |
+  |---|---|---|---|
+  | kicks | 2–6 | 28–47 | 0–48 "Kick" |
+  | hard snares | 7–8 | 48–55 | 49–56 "Snare" |
+  | toms, low → high | 9–12 | 56–71 | 57–72 "Toms" |
+  | ride | 13:1–14:2 | 72–77 | 73–78 "Cymbal" |
+  | crash (a poor one) | 14:3–15 | 78–83 | 79–84 "Hi-hat" |
+  | unrecognisable | 16–20 | 84–103 | 85–127 "Rim" |
+
+  - The zone boundaries match the decoded TopKeys to within a key, which is about the resolution of measure-level notes.
+  - **The wave names are misleading:** the "Hi-hat" zone sounds like a crash, and "Rim" is unusable. **This kit has no hi-hat or rim sound.**
+  - Drum Kit 2 (`AUDIT09.SEQ`) hasn't been auditioned yet.
 - `just drum-audition` builds `AUDITnn.SEQ` (nn = kit slot). It plays one hit per beat across a key range, so synthLAB's measure:beat counter identifies the key. `gs/seq/AUDITnn.txt` lists measure:beat → key.
 
 ## Open questions
