@@ -192,6 +192,22 @@ The `num_inst` byte doesn't always match the number of named slots: COMBO says 9
 - **MIDI Surgeon** (GS+ magazine): converter and editor.
 - **CiderPress II** (`vendor/cp2/cp2`): extracts and adds files on ProDOS images with file types.
 
+## IIGS test results (2026-11-06, GSSquared, `just emu-music`, COMBO bank)
+- synthLAB opens our `MInnn.SEQ` files from `Seq.and.Instr` and plays them; it loads COMBO.BNK/.WAV from the same folder. It does **not** open a sequence by itself at startup; use File → Open.
+- **Timing and tempo are correct.** Tempo 75 with unchanged 120-PPQN ticks is confirmed, and so is the half-note tempo field.
+- Voice stealing is only a noticeable problem in sound 160 (16 simultaneous notes peak).
+- **The first drum mapping was poor.** See "Drum kits" below.
+
+## Drum kits [DATA]
+- A kit is an ordinary instrument whose Gen-1 TopKey zones each play a different one-shot sample (`OscConfig` 2). **Within a zone the sample is pitched by the key**, so each zone has a narrow range of keys where it sounds right.
+- Stock kit zones (Gen 1):
+  - COMBO Drum Kit 1: Kick 0–48, Snare 49–56, Toms 57–72, Cymbal 73–78, Hi-hat 79–84, Rim 85–127.
+  - COMBO Drum Kit 2: Toms 0–48 (+ Kick on B), Snare 49–56, Rim/Toms 57–72, Cymbal 73–78, Hi-hat 79–84, Cymbal/Rim 85–127.
+  - SYNTH Drum Kit 3: Kick 2 0–48, Snare 2 49–56, Toms 2 57–72, Clap 73–78, Hi-hat 2 79–96.
+- **Apple's own kit usage** (`SYNTH.SEQ`, channel 0 = Drum Kit 3, note-on counts): 43 ×120 (kick), 52 ×123 (snare), 60 ×6 (tom), 77 ×30 (clap), 85 ×291, 87 ×162, 89 ×3 (hi-hat). These are the best-known-good keys.
+- The stock kits have no conga, bongo, claves, cabasa or agogo samples. MI1 uses those heavily: side stick 676 hits, congas 1207, claves 422, cabasa 188.
+- `just drum-audition` builds `AUDITnn.SEQ` (nn = kit slot). It plays one hit per beat across a key range, so synthLAB's measure:beat counter identifies the key. `gs/seq/AUDITnn.txt` lists measure:beat → key.
+
 ## Open questions
 - What the bank header bytes at `$030`–`$2FF` (`INST_TOPKEYWV_OFFSET`) hold.
 - Whether MIDI Synth honours `t_channel` from the file, or only synthLAB/synthfile apply it via `TrackToChan`. (Our files will put events on the right channels directly, so it doesn't matter.)

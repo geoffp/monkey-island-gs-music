@@ -43,39 +43,42 @@ fallback_slot = 2
 "96" = 8    # FX 1 (rain)      -> Dx Marimba
 
 # Drum Kit 1 zones: Kick 0-48 | Snare 49-56 | Toms 57-72 | Cymbal 73-78 | Hi-hat 79-84 | Rim 85-127
-# Samples are pitched by key within a zone; these picks are first guesses to tune by ear.
+# Each zone is one sample pitched by key. Keys marked [A] are the ones Apple's SYNTH.SEQ uses
+# on the same zone layout (docs/iigs-midisynth.md "Drum kits"); the rest are near the zone
+# bottom and should be tuned with `just drum-audition` (gs/seq/AUDIT00.txt).
+# COMBO has no conga/bongo/claves/cabasa samples: those are stand-ins.
 [banks.COMBO.drums]      # GM drum key -> kit key
-"35" = 34   # Acoustic Bass Drum -> Kick
-"36" = 36   # Bass Drum 1        -> Kick
-"37" = 90   # Side Stick         -> Rim
-"38" = 52   # Acoustic Snare     -> Snare
+"35" = 41   # Acoustic Bass Drum -> Kick
+"36" = 43   # Bass Drum 1        -> Kick [A]
+"38" = 52   # Acoustic Snare     -> Snare [A]
 "40" = 54   # Electric Snare     -> Snare
-"41" = 58   # Low Floor Tom      -> Toms
-"43" = 60   # High Floor Tom
-"45" = 62   # Low Tom
-"47" = 64   # Low-Mid Tom
-"48" = 66   # Hi-Mid Tom
-"50" = 68   # High Tom
-"42" = 80   # Closed Hi-Hat      -> Hi-hat
-"44" = 82   # Pedal Hi-Hat
-"46" = 84   # Open Hi-Hat
-"49" = 75   # Crash Cymbal       -> Cymbal
-"51" = 77   # Ride Cymbal
-"54" = 79   # Tambourine         -> Hi-hat
-"56" = 98   # Cowbell            -> Rim (high)
-"60" = 71   # Hi Bongo           -> Toms (high)
-"61" = 69   # Low Bongo
-"62" = 67   # Mute Hi Conga
-"63" = 66   # Open Hi Conga
-"64" = 63   # Low Conga
-"65" = 72   # High Timbale
-"66" = 70   # Low Timbale
-"67" = 100  # High Agogo         -> Rim (high)
-"68" = 96   # Low Agogo
-"69" = 83   # Cabasa             -> Hi-hat
-"70" = 81   # Maracas            -> Hi-hat
-"73" = 81   # Short Guiro        -> Hi-hat
-"75" = 105  # Claves             -> Rim (high)
+"37" = 86   # Side Stick         -> Rim
+"41" = 57   # Low Floor Tom      -> Toms
+"43" = 59   # High Floor Tom
+"45" = 60   # Low Tom [A]
+"47" = 62   # Low-Mid Tom
+"48" = 64   # Hi-Mid Tom
+"50" = 66   # High Tom
+"42" = 84   # Closed Hi-Hat      -> Hi-hat (top of zone, like Apple's 85-89 on Kit 3)
+"44" = 83   # Pedal Hi-Hat
+"46" = 81   # Open Hi-Hat
+"49" = 77   # Crash Cymbal       -> Cymbal [A]
+"51" = 75   # Ride Cymbal
+"54" = 83   # Tambourine         -> Hi-hat
+"56" = 90   # Cowbell            -> Rim
+"60" = 70   # Hi Bongo           -> Toms (high)   stand-in
+"61" = 68   # Low Bongo                           stand-in
+"62" = 67   # Mute Hi Conga                       stand-in
+"63" = 66   # Open Hi Conga                       stand-in
+"64" = 64   # Low Conga                           stand-in
+"65" = 71   # High Timbale
+"66" = 69   # Low Timbale
+"67" = 92   # High Agogo         -> Rim           stand-in
+"68" = 90   # Low Agogo                           stand-in
+"69" = 82   # Cabasa             -> Hi-hat        stand-in
+"70" = 84   # Maracas            -> Hi-hat        stand-in
+"73" = 82   # Short Guiro        -> Hi-hat        stand-in
+"75" = 88   # Claves             -> Rim           stand-in
 
 # Per-song overrides, e.g.:
 # [songs.160]

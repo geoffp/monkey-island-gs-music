@@ -13,6 +13,7 @@ dependencies = [
 [project.scripts]
 extract-music = "migs.extract_music:main"
 mid2seq = "migs.mid2seq:main"
+audition = "migs.audition:main"
 
 [dependency-groups]
 dev = ["pytest>=8"]

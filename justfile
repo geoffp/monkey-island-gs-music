@@ -203,9 +203,14 @@ stock-banks: fetch-cp2
 seq: stock-banks
     uv run mid2seq music/midi/gm/*.mid -o gs/seq -b "{{vendor}}/synthlab"
 
+# Drum-kit audition sequences (gs/seq/AUDITnn.SEQ + .txt key tables) for the default bank's kits
+drum-audition: stock-banks
+    uv run audition "{{vendor}}/synthlab/COMBO.BNK" 0 --wave "{{vendor}}/synthlab/COMBO.WAV" -o gs/seq --lo 28 --hi 100
+    uv run audition "{{vendor}}/synthlab/COMBO.BNK" 9 --wave "{{vendor}}/synthlab/COMBO.WAV" -o gs/seq --lo 28 --hi 100
+
 # Build gs/disks/MI.SYNTHLAB.PO: a copy of the synthLAB disk whose /Seq.and.Instr holds
 # our sequences plus the bank/wave files they use (Apple's samples removed to make room)
-gsdisk: seq
+gsdisk: seq drum-audition
     #!/usr/bin/env bash
     set -euo pipefail
     cp2="$PWD/{{cp2}}"; img="$PWD/gs/disks/MI.SYNTHLAB.PO"; stage="$PWD/gs/disks/stage"
