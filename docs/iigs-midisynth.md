@@ -218,7 +218,7 @@ The `num_inst` byte doesn't always match the number of named slots: COMBO says 9
   | unrecognisable | 16–20 | 84–103 | 85–127 "Rim" |
 
   - The zone boundaries match the decoded TopKeys to within a key, which is about the resolution of measure-level notes.
-  - **The wave names are misleading:** the "Hi-hat" zone sounds like a crash, and "Rim" is unusable. **This kit has no hi-hat or rim sound.**
+  - Interpretation: the "Hi-hat" zone (79–84) heard as a poor crash is probably the hat sample pitched low. Apple plays hats near the top of the zone (85–89 on Kit 3, zone 79–96). So hats are mapped to 83–84 and the crash to 79. **Key 84 itself (16:1) needs a re-listen.** The "Rim" zone (85+) is unusable, so there's no rim/side-stick sound.
   - Drum Kit 2 (`AUDIT09.SEQ`) hasn't been auditioned yet.
 - `just drum-audition` builds `AUDITnn.SEQ` (nn = kit slot). It plays one hit per beat across a key range, so synthLAB's measure:beat counter identifies the key. `gs/seq/AUDITnn.txt` lists measure:beat → key.
 

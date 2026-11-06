@@ -44,7 +44,8 @@ fallback_slot = 2
 
 # Drum Kit 1 zones by ear (docs/midisynth-drum-keys-audit.md, translated in
 # docs/iigs-midisynth.md "Drum kits"): kick 28-47 | snare 48-55 | toms 56-71 low->high |
-# ride 72-77 | crash 78-83 | 84+ unusable. No usable hi-hat or rim sound in this kit.
+# ride 72-77 | "crash" 78-83 (the Hi-hat zone 79-84: probably a hat pitched low, so hats go at
+# its top, like Apple's 85-89 on Kit 3) | 85+ Rim, unusable.
 # [A] = key Apple's SYNTH.SEQ uses on the same zone layout. "stand-in" = no real equivalent.
 [banks.COMBO.drums]      # GM drum key -> kit key
 "35" = 41   # Acoustic Bass Drum -> kick
@@ -58,13 +59,13 @@ fallback_slot = 2
 "47" = 63   # Low-Mid Tom
 "48" = 66   # Hi-Mid Tom
 "50" = 69   # High Tom
-"42" = 77   # Closed Hi-Hat      -> ride, top of zone       stand-in
-"44" = 76   # Pedal Hi-Hat       -> ride                    stand-in
-"46" = 74   # Open Hi-Hat        -> ride                    stand-in
+"42" = 84   # Closed Hi-Hat      -> hi-hat zone, top
+"44" = 83   # Pedal Hi-Hat       -> hi-hat zone
+"46" = 81   # Open Hi-Hat        -> hi-hat zone, lower = longer
 "51" = 73   # Ride Cymbal        -> ride
-"49" = 80   # Crash Cymbal       -> crash
-"57" = 81   # Crash Cymbal 2     -> crash
-"54" = 77   # Tambourine         -> ride                    stand-in
+"49" = 79   # Crash Cymbal       -> hi-hat zone, bottom ("crash" by ear)
+"57" = 79   # Crash Cymbal 2
+"54" = 84   # Tambourine         -> hi-hat zone, top        stand-in
 "56" = 71   # Cowbell            -> top tom                 stand-in
 "60" = 70   # Hi Bongo           -> high toms               stand-in
 "61" = 68   # Low Bongo                                     stand-in
@@ -75,9 +76,9 @@ fallback_slot = 2
 "66" = 69   # Low Timbale
 "67" = 71   # High Agogo         -> top toms                stand-in
 "68" = 70   # Low Agogo                                     stand-in
-"69" = 76   # Cabasa             -> ride                    stand-in
-"70" = 76   # Maracas            -> ride                    stand-in
-"73" = 75   # Short Guiro        -> ride                    stand-in
+"69" = 84   # Cabasa             -> hi-hat zone, top        stand-in
+"70" = 84   # Maracas            -> hi-hat zone, top        stand-in
+"73" = 82   # Short Guiro        -> hi-hat zone             stand-in
 "75" = 71   # Claves             -> top tom                 stand-in
 
 # Per-song overrides, e.g.:
