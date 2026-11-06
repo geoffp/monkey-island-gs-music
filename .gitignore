@@ -14,3 +14,5 @@ __pycache__/
 /music/wav/
 # Generated sequences (derived from the soundtrack)
 /gs/seq/
+# Build intermediates (Munt sample renders)
+/gs/build/

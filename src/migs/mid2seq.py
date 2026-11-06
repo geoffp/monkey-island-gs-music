@@ -39,10 +39,22 @@ class BankMap:
 
     @classmethod
     def from_config(cls, name: str, cfg: dict) -> BankMap:
+        programs, drums = dict(cfg.get("programs", {})), dict(cfg.get("drums", {}))
+        if "map_file" in cfg:                       # generated mapping (e.g. by mt32bank)
+            m = tomllib.loads(Path(cfg["map_file"]).read_text())
+            programs.update(m.get("programs", {}))
+            drums.update(m.get("drums", {}))
         return cls(name, cfg["file"], cfg["rhythm_slot"], cfg["fallback_slot"],
-                   {int(k): v for k, v in cfg.get("programs", {}).items()},
-                   {int(k): v for k, v in cfg.get("drums", {}).items()},
+                   {int(k): v for k, v in programs.items()},
+                   {int(k): v for k, v in drums.items()},
                    cfg.get("wave_file", ""))
+
+    def drum(self, key: int) -> tuple[int, int] | None:
+        """(slot, key) for a rhythm key; plain ints mean the rhythm slot."""
+        v = self.drums.get(key)
+        if v is None:
+            return None
+        return (v[0], v[1]) if isinstance(v, list) else (self.rhythm_slot, v)
 
 
 @dataclass
@@ -132,9 +144,10 @@ def convert(mf: mido.MidiFile, bank: BankMap, overrides: dict[int, int] | None =
             rep.warnings.append(f"channels {shared} share slot {s} (volume/notes interact)")
 
     track_of = {ch: i for i, ch in enumerate(used)}      # one seq track per source channel
+    kit_slots = sorted({bank.rhythm_slot} | {v[0] for v in bank.drums.values() if isinstance(v, list)})
     zones = {}
     if bank_file:
-        for s in set(slots):
+        for s in set(slots) | set(kit_slots):
             z = bank_file.instruments[s].zones()
             zones[s] = (min(lo for lo, _, _ in z), max(hi for _, hi, _ in z)) if z else None
 
@@ -152,10 +165,11 @@ def convert(mf: mido.MidiFile, bank: BankMap, overrides: dict[int, int] | None =
         if m.type in ("note_on", "note_off"):
             note = m.note
             if ch == RHYTHM_CHANNEL and ch not in overrides:
-                if note not in bank.drums:
+                hit = bank.drum(note)
+                if hit is None:
                     rep.drop(f"unmapped drum key {note}")
                     continue
-                note = bank.drums[note]
+                slot, note = hit
             on = m.type == "note_on" and m.velocity > 0
             if on:
                 rep.notes += 1
@@ -172,9 +186,12 @@ def convert(mf: mido.MidiFile, bank: BankMap, overrides: dict[int, int] | None =
             if m.control not in KEEP_CC:
                 rep.drop(f"CC{m.control}")
                 continue
-            if m.control == 7:
-                first_vol.setdefault(slot, m.value)
-            items.append(SeqItem(trk, tick, 0xB0 | slot, bytes([m.control, m.value])))
+            # rhythm-channel controllers go to every kit slot it plays through
+            targets = kit_slots if ch == RHYTHM_CHANNEL and ch not in overrides else [slot]
+            for sl in targets:
+                if m.control == 7:
+                    first_vol.setdefault(sl, m.value)
+                items.append(SeqItem(trk, tick, 0xB0 | sl, bytes([m.control, m.value])))
         elif m.type == "pitchwheel":
             v = m.pitch + 8192
             items.append(SeqItem(trk, tick, 0xE0 | slot, bytes([v & 0x7F, v >> 7])))

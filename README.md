@@ -78,7 +78,8 @@ These go in `original files/`, which is gitignored and never committed:
 - [ ] Name the 16 tracks (`music/song_names.toml`)
 - [x] SMF → MIDI Synth sequence converter (`just seq`), disk image (`just gsdisk`)
 - [ ] Play in synthLAB (`just emu-music`, open `/synthLAB/Seq.and.Instr/MI160.SEQ`)
-- [ ] Custom MI instrument bank (organ, strings, choir, pad, piano…)
+- [x] Custom MT-32-sampled bank MI1 (`just mt32bank`), `mt32` export profile (first build, needs listening)
+- [ ] Measure MIDI Synth CPU cost vs. tracker players (SoundSmith/NinjaTracker)
 - [ ] Test on a IIGS emulator with synthLAB
 
 ## License

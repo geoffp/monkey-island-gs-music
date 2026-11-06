@@ -51,6 +51,8 @@ Pipeline:
   - `just seq`: IIGS sequences in `gs/seq/`;
   - `just gsdisk`: the `gs/disks/MI.SYNTHLAB.PO` disk;
   - `just emu-music`: boot it in GSSquared.
+  - `just mt32bank`: sample the MT-32 through Munt into the shared MI1 bank (spec `gs/mt32bank.toml`).
+- Export profiles (`[profiles]` in `gs/instruments.toml`): `stock` (COMBO, from the GM MIDI) and `mt32` (MI1, from the MT-32 MIDI). Each goes to `gs/seq/<profile>/` and `/synthLAB/<Folder>` on the HD. **Keep one shared bank**: a game port can't load banks between songs.
 - MIDI Synth facts (7 voices, channel = instrument, file layouts) live in `docs/iigs-midisynth.md`. **Record every new MIDI Synth/synthLAB finding there, with its source.**
 - Python: package `migs` in `src/migs/`, managed by uv (`pyproject.toml` + `uv.lock`). Entry points are listed in `[project.scripts]`. Add deps with `uv add`, never pip.
 - Tests live in `tests/`. They use synthetic SCUMM/RO data so they run without the game. The real-game test skips when the data is absent. Add tests for every format rule you implement.

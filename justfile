@@ -216,8 +216,13 @@ stock-banks: fetch-cp2
     rm -rf "$d.tmp"; ls "$d"
 
 # Convert the GM MIDI files to MIDI Synth sequences, per export profile (gs/seq/<profile>/MInnn.SEQ)
-seq: stock-banks
+seq: stock-banks mt32bank
     rm -rf gs/seq/stock && uv run mid2seq music/midi/gm/*.mid -p stock -o gs/seq/stock -b "{{vendor}}/synthlab"
+    rm -f gs/seq/mt32/*.SEQ && uv run mid2seq music/midi/mt32/*.mid -p mt32 -o gs/seq/mt32 -b gs/seq/mt32
+
+# Sample the MT-32 (Munt) into our MI1 bank per gs/mt32bank.toml -> gs/seq/mt32/MI1.{BNK,WAV,map.toml}
+mt32bank: fetch-munt
+    uv run mt32bank -o gs/seq/mt32
 
 # Tuning experiment bank/sequence (gs/seq/tune/TUNE.*), see src/migs/tunetest.py
 tunetest:

@@ -8,6 +8,8 @@ license-files = ["LICENSE"]
 requires-python = ">=3.11"   # tomllib
 dependencies = [
     "mido>=1.3",
+    "numpy>=2.4.6",
+    "scipy>=1.17.1",
 ]
 
 [project.scripts]
@@ -17,6 +19,7 @@ audition = "migs.audition:main"
 gs2-config = "migs.emu:main"
 tunetest = "migs.tunetest:main"
 gs2-docscope = "migs.gs2client:main"
+mt32bank = "migs.mt32bank:main"
 
 [dependency-groups]
 dev = ["pytest>=8"]

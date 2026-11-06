@@ -255,6 +255,24 @@ Measured in GSSquared by playing `/synthLAB/Tune/TUNE.SEQ` and sampling the Enso
   - Keep the played byte rate below the 26 320 Hz DOC rate, or bytes are skipped (aliasing).
 - `vol` is 109 for a full-volume (127) oscillator at velocity 100, and 16 for our "silent" Gen-2 copies, so volume 0 isn't fully silent.
 
+## Custom MT-32 bank: MI1 (`just mt32bank`, gs/mt32bank.toml, src/migs/mt32bank.py)
+- **Why one shared bank:** a game port can't stop to load banks between songs. The bank is loaded once and every sequence references `MI1.BNK`.
+- **Effects reserve:** `reserve_pages` (16 = 4 KB) keeps DOC pages free at the top for game sound effects, which MIDI Synth's generator 7 plays from the same 64 KB.
+- **Slot layout:**
+  - Slots 0 and 9 are drum kits.
+  - Slots 1–8 and 10–15 hold 14 melodic sounds. The 22 MT-32 programs MI1 uses are merged onto them (`covers`).
+  - The `mt32` export profile converts the **MT-32 MIDI**, so it maps MT-32 programs and rhythm keys directly, via the generated `MI1.map.toml`.
+- **Sampling:** each sound is rendered through Munt with MT-32 reverb level set to 0 (SysEx `10 00 03 00`), at velocity 100, CC7 = 100.
+- **Melodic instrument** = OscConfig 3, i.e. osc A plays the attack once, then osc B loops:
+  - the **attack**: the first ~120 ms, ending at a rising zero crossing, **flattened** (divided by its RMS contour) and resampled to 2 KB (~16.8 kHz);
+  - the **loop**: one sustain period, averaged over 4 cycles and band-limited to 256 B (single-cycle mode). The loop is tuned to the MT-32's measured pitch, so it matches the attack;
+  - **MIDI Synth's envelope** is fitted to the MT-32's RMS contour (rise time, levels at +0.15 s and +0.6 s, sustain level, release time) using the ERS rate table;
+  - **volume** comes from the relative MT-32 loudness.
+  - The MT-32 renders were in tune to within a few cents of A440. For inharmonic sounds (Xylophone, Taiko) the period search falls back to the nominal pitch.
+- **Drum zone** = a one-shot (OscConfig 2). Its sample rate is chosen so the trimmed sound fills its power-of-two wave (6 kHz floor; longer sounds are cut, with a fade). Keys that share a sample (toms, hi/lo bongo, conga, agogo) are pitched by an offset measured from the Munt renders (log-frequency spectrum correlation).
+- **Kit key layout:** a wave is only in tune where its tuning fits octaves 0–6. Higher keys need faster playback, so slow, small waves need low keys: `max key = 69 + 12 × (log2(rate/B0) − (size − res) + 4)`. Zones are laid out in order of that limit, which puts the drums on keys 0–23.
+- **Budget (first build):** 237 of 238 pages (pages $00–$01 metronome, 16 reserved). Melodic ≈ 34 KB, drums ≈ 26 KB, plus one silence page used by the muted Generator-2 oscillators.
+
 ## Open questions
 - What the bank header bytes at `$030`–`$2FF` (`INST_TOPKEYWV_OFFSET`) hold.
 - Whether MIDI Synth honours `t_channel` from the file, or only synthLAB/synthfile apply it via `TrackToChan`. (Our files will put events on the right channels directly, so it doesn't matter.)
