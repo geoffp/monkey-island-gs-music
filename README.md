@@ -29,7 +29,9 @@ music/midi/mt32/  extracted SMFs, original MT-32 programs
 music/midi/gm/    the same, converted to General MIDI
 music/patches/ per-song channel → instrument notes (TOML)
 music/song_names.toml  hand-kept names for sound ids (optional)
-gs/            IIGS MIDI Synth output and instrument mapping
+gs/instruments.toml  MI1 channel → MIDI Synth bank slot / drum-key mapping
+gs/seq/        generated MIDI Synth sequences (gitignored)
+gs/disks/      working disk images (gitignored): boot copy with Tool035, MI.SYNTHLAB.PO
 gs/system6/    System 6.0.4 disk images (synthLAB, stock instruments)
 ref/scummvm/   ScummVM source (git submodule, reference only)
 vendor/        fetched/built tools (gitignored; `just fetch`)
@@ -64,7 +66,7 @@ These go in `original files/`, which is gitignored and never committed:
 ## Listening tests
 1. **MT-32**: `just mt32-wav <mid> <wav>` renders with [Munt](https://github.com/munt/munt)'s `mt32emu-smf2wav`. Needs your ROMs. Plays `music/midi/mt32/`.
 2. **General MIDI**: `just gm-wav <mid> <wav>` renders with FluidSynth and the [GeneralUser GS](https://github.com/mrbumpy409/GeneralUser-GS) soundfont. Plays `music/midi/gm/`.
-3. **IIGS**: synthLAB under GSSquared (see CLAUDE.md).
+3. **IIGS**: `just emu-music` boots System 6 with our synthLAB disk in drive 2; open a sequence from `Seq.and.Instr` in synthLAB.
 
 ## Status
 - [x] Repo setup, ScummVM reference submodule
@@ -72,5 +74,13 @@ These go in `original files/`, which is gitignored and never committed:
 - [ ] Docs: SCUMM v4 resources, `RO` format, MT-32, MIDI Synth formats
 - [x] Extract `RO` → SMF (MT-32 + GM) + patch notes (`just extract`, `just render`)
 - [ ] Name the 16 tracks (`music/song_names.toml`)
-- [ ] SMF → MIDI Synth sequence converter
+- [x] SMF → MIDI Synth sequence converter (`just seq`), disk image (`just gsdisk`)
+- [ ] Play in synthLAB (`just emu-music`, open `/synthLAB/Seq.and.Instr/MI160.SEQ`)
+- [ ] Custom MI instrument bank (organ, strings, choir, pad, piano…)
 - [ ] Test on a IIGS emulator with synthLAB
+
+## License
+Our source code (`src/`, `tests/`, `justfile`, docs, configs) is licensed under the **GNU General Public License v3.0 or later**; see `LICENSE`.
+- Tables in `src/migs/mt32.py` come from [ScummVM](https://www.scummvm.org) (GPL-2.0-or-later), used here under GPLv3.
+- The MIDI Synth format code was written from Dave Tribby's synthfile 1.5 and Apple's MIDI Synth ERS (see `docs/sources.md`), with credit as synthfile's terms ask.
+- Not covered by this license, and not ours: the System 6.0.4 disk images in `gs/system6/` (© Apple), and the game data and music derived from it (© LucasArts/Disney), which are never committed.

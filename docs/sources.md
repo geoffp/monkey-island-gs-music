@@ -19,3 +19,6 @@ Retrieved 2026-11-06 unless noted.
 ## MT-32 / General MIDI
 - ScummVM `audio/mididrv.cpp` (`_mt32ToGm`, `_gmToMt32`), `audio/mt32gm.cpp` (MT-32 defaults, reversed pan), `engines/sci/sound/drivers/map-mt32-to-gm.h` (preset/rhythm names, SCI mapping, `Mt32PresetRhythmKeymap`)
 - Munt MT-32 emulator: https://github.com/munt/munt (latest tag munt_2_8_3)
+- *SynthLAB and MIDI Synth ERS* (APDA, Mark Cecys), OCR scan, Brutal Deluxe: https://www.brutaldeluxe.fr/documentation/synthlab.html (`just fetch-docs` → vendor/docs/)
+- synthLAB User's Manual scan, same page
+- synthfile 1.5 (Dave Tribby), GNO archive mirror: https://mirrors.apple2.org.za/ground.icaen.uiowa.edu/apple16/gno/sounds/synthfile15.shk (`just fetch-synthfile`)

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """MT-32 / General MIDI tables and conversion rules (docs/mt32-to-gm.md).
 
 Table provenance (ScummVM, GPL-2.0-or-later; see ref/scummvm):

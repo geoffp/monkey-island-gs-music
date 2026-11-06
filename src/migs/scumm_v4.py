@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """SCUMM v4 resource access (Monkey Island 1, DOS VGA floppy).
 
 Format notes: docs/scumm-v4-resources.md.

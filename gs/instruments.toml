@@ -1,0 +1,83 @@
+# MI1 → MIDI Synth instrument mapping (hand-maintained; see docs/iigs-midisynth.md).
+#
+# In MIDI Synth the MIDI channel IS the instrument slot (0-15) in the bank, and Program
+# Change does nothing, so each source channel is rewritten onto the slot that should
+# play it. Drum kits are key zones, so GM drum keys are remapped onto each kit's zones.
+#
+# Keys here are GM program numbers (0-based) and GM drum keys, written as strings.
+
+default_bank = "COMBO"
+
+[banks.COMBO]
+# Stock synthLAB bank (gs/system6/SYNTHLAB.PO /SEQ.AND.INSTR/), slots:
+#  0 Drum Kit 1 | 1 Slap Bass | 2 Synth Lead | 3 Marimba | 4 Xylophone | 5 Flute
+#  6 Trombones  | 7 Chiff Flute | 8 Dx Marimba | 9 Drum Kit 2
+file = "COMBO.BNK"
+wave_file = "COMBO.WAV"
+rhythm_slot = 0
+fallback_slot = 2
+
+[banks.COMBO.programs]   # GM program -> slot
+"75" = 7    # Pan Flute        -> Chiff Flute
+"77" = 5    # Shakuhachi       -> Flute
+"76" = 5    # Blown Bottle     -> Flute
+"32" = 1    # Acoustic Bass    -> Slap Bass
+"34" = 1    # Electric Bass    -> Slap Bass
+"35" = 1    # Fretless Bass    -> Slap Bass
+"12" = 3    # Marimba
+"13" = 4    # Xylophone
+"11" = 8    # Vibraphone       -> Dx Marimba
+"57" = 6    # Trombone         -> Trombones
+"60" = 6    # French Horn      -> Trombones
+"63" = 6    # Synth Brass 2    -> Trombones
+"64" = 2    # Soprano Sax      -> Synth Lead
+"116" = 9   # Taiko            -> Drum Kit 2 (low keys = toms)
+# No close match in COMBO (needs the custom bank); nearest stock sounds for now:
+"0" = 8     # Acoustic Grand   -> Dx Marimba
+"17" = 2    # Percussive Organ -> Synth Lead
+"19" = 2    # Church Organ     -> Synth Lead
+"52" = 2    # Choir Aahs       -> Synth Lead
+"88" = 2    # Pad 1 (new age)  -> Synth Lead
+"40" = 2    # Violin           -> Synth Lead
+"49" = 2    # String Ens. 2    -> Synth Lead
+"96" = 8    # FX 1 (rain)      -> Dx Marimba
+
+# Drum Kit 1 zones: Kick 0-48 | Snare 49-56 | Toms 57-72 | Cymbal 73-78 | Hi-hat 79-84 | Rim 85-127
+# Samples are pitched by key within a zone; these picks are first guesses to tune by ear.
+[banks.COMBO.drums]      # GM drum key -> kit key
+"35" = 34   # Acoustic Bass Drum -> Kick
+"36" = 36   # Bass Drum 1        -> Kick
+"37" = 90   # Side Stick         -> Rim
+"38" = 52   # Acoustic Snare     -> Snare
+"40" = 54   # Electric Snare     -> Snare
+"41" = 58   # Low Floor Tom      -> Toms
+"43" = 60   # High Floor Tom
+"45" = 62   # Low Tom
+"47" = 64   # Low-Mid Tom
+"48" = 66   # Hi-Mid Tom
+"50" = 68   # High Tom
+"42" = 80   # Closed Hi-Hat      -> Hi-hat
+"44" = 82   # Pedal Hi-Hat
+"46" = 84   # Open Hi-Hat
+"49" = 75   # Crash Cymbal       -> Cymbal
+"51" = 77   # Ride Cymbal
+"54" = 79   # Tambourine         -> Hi-hat
+"56" = 98   # Cowbell            -> Rim (high)
+"60" = 71   # Hi Bongo           -> Toms (high)
+"61" = 69   # Low Bongo
+"62" = 67   # Mute Hi Conga
+"63" = 66   # Open Hi Conga
+"64" = 63   # Low Conga
+"65" = 72   # High Timbale
+"66" = 70   # Low Timbale
+"67" = 100  # High Agogo         -> Rim (high)
+"68" = 96   # Low Agogo
+"69" = 83   # Cabasa             -> Hi-hat
+"70" = 81   # Maracas            -> Hi-hat
+"73" = 81   # Short Guiro        -> Hi-hat
+"75" = 105  # Claves             -> Rim (high)
+
+# Per-song overrides, e.g.:
+# [songs.160]
+# bank = "COMBO"
+# channels = { "3" = 4 }   # source MIDI channel (1-based) -> slot

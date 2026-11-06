@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Extract the MT-32 ('RO') music of a SCUMM v4 game to Standard MIDI Files.
 
 For each distinct RO sound, writes:

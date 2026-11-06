@@ -23,6 +23,10 @@ sf2_rev       := "684543d5e5efaef08d02be50dcda8d552478fa60"   # mrbumpy409/Gener
 sf2_sha       := "9575028c7a1f589f5770fccc8cff2734566af40cd26ed836944e9a5152688cfe"
 synthfile_url := "https://mirrors.apple2.org.za/ground.icaen.uiowa.edu/apple16/gno/sounds/synthfile15.shk"
 synthfile_sha := "e4e729aa9e800e5d124f1cf189f97ceea3a93cabc306ff594de6bd9db4bc679d"
+ers_url       := "https://www.brutaldeluxe.fr/documentation/synthlab/apda_midisynth_synthlab_ocr.pdf"
+ers_sha       := "47f7d2eb6e37ccffdb51901177ba2b3239fbe9112fd8276a6d552cf06c07e428"
+manual_url    := "https://www.brutaldeluxe.fr/documentation/synthlab/synthlab_usersmanual.pdf"
+manual_sha    := "54a5ec84e5fd152043a9a5b666bec0dab366656effeae5bd4a759894aa488a93"
 
 # List recipes
 default:
@@ -56,7 +60,7 @@ sync:
     uv sync
 
 # All downloaded/built dependencies
-fetch: fetch-gssquared fetch-mcp fetch-cp2 fetch-soundfont fetch-munt fetch-synthfile
+fetch: fetch-gssquared fetch-mcp fetch-cp2 fetch-soundfont fetch-munt fetch-synthfile fetch-docs
 
 # GSSquared emulator AppImage
 fetch-gssquared:
@@ -128,14 +132,38 @@ fetch-synthfile: fetch-cp2
     mkdir -p "$d/src"
     "$PWD/{{cp2}}" extract --exdir="$d/src" "$d/synthfile15.shk"
 
-# Working copies of the System 6.0.4 disks (originals in gs/system6 stay untouched)
-disks:
+# Reference PDFs: MIDI Synth ERS and synthLAB manual (Brutal Deluxe scans)
+fetch-docs:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    d="{{vendor}}/docs"; mkdir -p "$d"
+    get() { [ -f "$d/$1" ] && echo "$3  $d/$1" | sha256sum -c --quiet - && return 0
+            curl -fL -o "$d/$1" "$2" && echo "$3  $d/$1" | sha256sum -c -; }
+    get apda_midisynth_synthlab_ocr.pdf "{{ers_url}}" "{{ers_sha}}"
+    get synthlab_usersmanual.pdf "{{manual_url}}" "{{manual_sha}}"
+
+# Working copies of the System 6.0.4 disks (originals in gs/system6 stay untouched).
+# The boot disk copy also gets the MIDI Synth tool (Tool035) from the synthLAB disk.
+disks: fetch-cp2
+    #!/usr/bin/env bash
+    set -euo pipefail
     mkdir -p gs/disks
     cp -n gs/system6/*.PO gs/disks/
+    cp2="$PWD/{{cp2}}"
+    if ! "$cp2" list gs/disks/SYSTEM.DISK.PO | grep -qi '^System:Tools:Tool035$'; then
+      t=$(mktemp -d)
+      "$cp2" extract --exdir="$t" --preserve=naps gs/system6/SYNTHLAB.PO System/Tools/Tool035 >/dev/null
+      (cd "$t" && "$cp2" add "$OLDPWD/gs/disks/SYSTEM.DISK.PO" System >/dev/null)
+      rm -rf "$t"; echo "installed Tool035 on gs/disks/SYSTEM.DISK.PO"
+    fi
 
 # Boot the IIgs in GSSquared with System 6 + synthLAB in the 3.5" drives
 emu: fetch-gssquared disks
     "{{gs2}}" -p 5 -ds5d1="$PWD/gs/disks/SYSTEM.DISK.PO" -ds5d2="$PWD/gs/disks/SYNTHLAB.PO"
+
+# Boot the IIgs with System 6 and the MI music synthLAB disk (open /Seq.and.Instr/MInnn.SEQ)
+emu-music: fetch-gssquared disks gsdisk
+    "{{gs2}}" -p 5 -ds5d1="$PWD/gs/disks/SYSTEM.DISK.PO" -ds5d2="$PWD/gs/disks/MI.SYNTHLAB.PO"
 
 # Render an MT-32 MIDI file to WAV with Munt (needs ROMs)
 mt32-wav mid wav: fetch-munt
@@ -160,6 +188,38 @@ render: extract fetch-munt fetch-soundfont
       fluidsynth -ni -q -F "music/wav/gm/$n.wav" "{{sf2}}" "music/midi/gm/$n.mid" >/dev/null
     done
     ls music/wav/*/ | head -50
+
+# Stock synthLAB banks/waves/sample sequences, extracted from gs/system6/SYNTHLAB.PO
+stock-banks: fetch-cp2
+    #!/usr/bin/env bash
+    set -euo pipefail
+    d="{{vendor}}/synthlab"; [ -f "$d/COMBO.BNK" ] && exit 0
+    rm -rf "$d.tmp" && mkdir -p "$d.tmp" "$d"
+    "$PWD/{{cp2}}" extract --exdir="$d.tmp" gs/system6/SYNTHLAB.PO SEQ.AND.INSTR >/dev/null
+    for f in "$d.tmp"/Seq.and.Instr/*; do cp "$f" "$d/$(basename "$f" | tr a-z A-Z)"; done
+    rm -rf "$d.tmp"; ls "$d"
+
+# Convert the GM MIDI files to MIDI Synth sequences (gs/seq/MInnn.SEQ)
+seq: stock-banks
+    uv run mid2seq music/midi/gm/*.mid -o gs/seq -b "{{vendor}}/synthlab"
+
+# Build gs/disks/MI.SYNTHLAB.PO: a copy of the synthLAB disk whose /Seq.and.Instr holds
+# our sequences plus the bank/wave files they use (Apple's samples removed to make room)
+gsdisk: seq
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cp2="$PWD/{{cp2}}"; img="$PWD/gs/disks/MI.SYNTHLAB.PO"; stage="$PWD/gs/disks/stage"
+    mkdir -p gs/disks && rm -rf "$stage" && cp gs/system6/SYNTHLAB.PO "$img"
+    "$cp2" list "$img" | grep '^Seq.and.Instr:' | tr : / | while read -r f; do "$cp2" delete "$img" "$f" >/dev/null; done
+    mkdir -p "$stage/Seq.and.Instr"
+    for f in gs/seq/*.SEQ; do cp "$f" "$stage/Seq.and.Instr/$(basename "$f")#d50001"; done
+    for b in $(uv run python -I -c "import tomllib;c=tomllib.load(open('gs/instruments.toml','rb'));print(' '.join(v['file']+' '+v['wave_file'] for v in c['banks'].values()))"); do
+      case "$b" in *.BNK) t=d60001;; *.WAV) t=d80004;; esac
+      cp "{{vendor}}/synthlab/$b" "$stage/Seq.and.Instr/$b#$t"
+    done
+    (cd "$stage" && "$cp2" add "$img" Seq.and.Instr >/dev/null)
+    rm -rf "$stage"
+    "$cp2" catalog "$img" | grep -E 'Seq.and.Instr|blocks free'
 
 # Run the unit tests
 test *args:

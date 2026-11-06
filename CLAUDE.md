@@ -48,7 +48,11 @@ Pipeline:
 - Tasks: `justfile` (run `just` to list). Key recipes:
   - `just test`: unit tests;
   - `just extract`: MT-32 + GM MIDI and patch notes into `music/`;
-  - `just render`: WAVs through Munt and FluidSynth.
+  - `just render`: WAVs through Munt and FluidSynth;
+  - `just seq`: IIGS sequences in `gs/seq/`;
+  - `just gsdisk`: the `gs/disks/MI.SYNTHLAB.PO` disk;
+  - `just emu-music`: boot it in GSSquared.
+- MIDI Synth facts (7 voices, channel = instrument, file layouts) live in `docs/iigs-midisynth.md`. **Record every new MIDI Synth/synthLAB finding there, with its source.**
 - Python: package `migs` in `src/migs/`, managed by uv (`pyproject.toml` + `uv.lock`). Entry points are listed in `[project.scripts]`. Add deps with `uv add`, never pip.
 - Tests live in `tests/`. They use synthetic SCUMM/RO data so they run without the game. The real-game test skips when the data is absent. Add tests for every format rule you implement.
 - Tools take input and output paths as arguments; no hard-coded game paths outside defaults.

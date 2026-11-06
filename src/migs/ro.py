@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Parser for the SCUMM v3/v4 'RO' (Roland MT-32) music stream.
 
 Grammar follows ScummVM engines/scumm/midiparser_ro.cpp; see docs/ro-format.md.

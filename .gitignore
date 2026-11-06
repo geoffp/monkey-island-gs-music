@@ -12,3 +12,5 @@ __pycache__/
 /music/midi/
 /music/patches/
 /music/wav/
+# Generated sequences (derived from the soundtrack)
+/gs/seq/
