@@ -20,15 +20,3 @@ def test_patch_sets_startup_slot_and_disables_slot6_with_a_valid_checksum():
     assert is_valid(new) and new[:0x26] == REAL[:0x26]
     assert not is_valid(new[:0x28] + bytes([4]) + new[0x29:])     # any edit needs a new checksum
 
-
-def test_seeding_a_gs2_without_bram_puts_it_before_tables(tmp_path):
-    from migs.bram import main
-    f = tmp_path / "m.gs2"
-    f.write_text('gs2_version = 1\nplatform = "apple2gs"\n\n[[storage]]\nslot = 5\n')
-    seed = tmp_path / "seed.hex"
-    seed.write_text(REAL.hex())
-    main([str(f), "--seed", str(seed), "--startup-slot", "5", "--your-card", "6"])
-    text = f.read_text()
-    assert text.index("bram = ") < text.index("[[storage]]")
-    b = bytes.fromhex(text.split('bram = "')[1][:512])
-    assert is_valid(b) and b[0x28] == 5 and b[0x26] == 1

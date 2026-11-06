@@ -47,7 +47,8 @@ Then:
 just setup    # checks tools, fetches the ScummVM submodule, builds the Python env, fetches and builds everything in vendor/
 just          # list all recipes
 just emu      # boot the IIgs (System 6.0.4 + synthLAB) in GSSquared, unlimited speed
-just emu-music  # same, with our music disk (`just emu-music 2.8mhz` for stock speed)
+just emu-music  # boot our 32 MB BazFast hard-disk image: System 6 + synthLAB + the MI1 sequences
+                # (`just emu-music 2.8mhz` for stock speed; `just emu-music-floppy` for 800K floppies)
 ```
 `just setup` fetches into the gitignored `vendor/`, with pinned versions and checksums where published:
 - GSSquared (IIgs emulator)
@@ -67,7 +68,7 @@ These go in `original files/`, which is gitignored and never committed:
 ## Listening tests
 1. **MT-32**: `just mt32-wav <mid> <wav>` renders with [Munt](https://github.com/munt/munt)'s `mt32emu-smf2wav`. Needs your ROMs. Plays `music/midi/mt32/`.
 2. **General MIDI**: `just gm-wav <mid> <wav>` renders with FluidSynth and the [GeneralUser GS](https://github.com/mrbumpy409/GeneralUser-GS) soundfont. Plays `music/midi/gm/`.
-3. **IIGS**: `just emu-music` boots System 6 with our synthLAB disk in drive 2; open a sequence from `Seq.and.Instr` in synthLAB.
+3. **IIGS**: `just emu-music` boots the hard-disk image; open `MI.HD/synthLAB/synthLAB`, then a sequence from `Seq.and.Instr`.
 
 ## Status
 - [x] Repo setup, ScummVM reference submodule

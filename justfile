@@ -157,33 +157,29 @@ disks: fetch-cp2
       rm -rf "$t"; echo "installed Tool035 on gs/disks/SYSTEM.DISK.PO"
     fi
 
-# Write/refresh a GSSquared machine config (gs/disks/<name>.gs2): IIgs, host speed, 3.5" drives,
-# startup slot 5 and no 5.25" drives (battery RAM).
-# GSSquared stores battery RAM in the .gs2 on quit, so an existing file is kept and only
-# its speed line is updated. speed: 1.024mhz | 2.8mhz | 7.159mhz | 14.3mhz | ludicrous
-_gs2 name speed disk1 disk2:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    f="gs/disks/{{name}}.gs2"
-    if [ -f "$f" ]; then
-      sed -i 's/^speed = .*/speed = "{{speed}}"/' "$f"
-    else
-      printf 'gs2_version = 1\nname = "%s"\nplatform = "apple2gs"\nspeed = "%s"\n\n[[storage]]\nslot = 5\ndrive = 1\nimage = "%s"\n\n[[storage]]\nslot = 5\ndrive = 2\nimage = "%s"\n' \
-        "MI1 {{name}}" "{{speed}}" "{{disk1}}" "{{disk2}}" > "$f"
-    fi
-    # Boot straight from slot 5 and turn off the built-in 5.25" drives (slot 6 = Your Card),
-    # so the boot scan doesn't wait on empty floppies. New configs are seeded with a known-good BRAM.
-    uv run gs2-bram "$f" --startup-slot 5 --your-card 6 --seed gs/emu/default-bram.hex
+# GSSquared machine configs are generated into gs/disks/<name>.gs2 by `gs2-config` (migs.emu),
+# keeping the id/battery RAM GSSquared saves on quit. Battery RAM is patched so the IIgs
+# boots straight from the right slot with the built-in 5.25" drives off (slot 6 = Your Card).
+# speed: 1.024mhz | 2.8mhz | 7.159mhz | 14.3mhz | ludicrous
+seed_bram := "gs/emu/default-bram.hex"
 
-# Boot the IIgs in GSSquared with System 6 + stock synthLAB (default: unlimited speed)
+# Boot the IIgs from floppies: System 6 + stock synthLAB (default: unlimited speed)
 emu speed="ludicrous": fetch-gssquared disks
-    just _gs2 synthlab {{speed}} SYSTEM.DISK.PO SYNTHLAB.PO
+    uv run gs2-config gs/disks/synthlab.gs2 --name "MI1 synthLAB floppies" --speed {{speed}} \
+      --disk 5:1=SYSTEM.DISK.PO --disk 5:2=SYNTHLAB.PO --startup-slot 5 --your-card 6 --seed {{seed_bram}}
     "{{gs2}}" "$PWD/gs/disks/synthlab.gs2"
 
-# Boot the IIgs with System 6 and the MI music synthLAB disk (open /Seq.and.Instr/MInnn.SEQ)
-emu-music speed="ludicrous": fetch-gssquared disks gsdisk
-    just _gs2 mi-music {{speed}} SYSTEM.DISK.PO MI.SYNTHLAB.PO
+# Boot the IIgs from the BazFast hard disk image (System 6 + synthLAB + our music)
+emu-music speed="ludicrous": fetch-gssquared hdimage
+    uv run gs2-config gs/disks/mi-music.gs2 --name "MI1 music (BazFast HD)" --speed {{speed}} \
+      --card 7=bazfast3 --disk 7:1=MI.HD.PO --startup-slot 7 --your-card 6 --your-card 7 --seed {{seed_bram}}
     "{{gs2}}" "$PWD/gs/disks/mi-music.gs2"
+
+# Same, from floppies (System 6 boot disk + the MI synthLAB floppy)
+emu-music-floppy speed="ludicrous": fetch-gssquared disks gsdisk
+    uv run gs2-config gs/disks/mi-music-floppy.gs2 --name "MI1 music (floppies)" --speed {{speed}} \
+      --disk 5:1=SYSTEM.DISK.PO --disk 5:2=MI.SYNTHLAB.PO --startup-slot 5 --your-card 6 --seed {{seed_bram}}
+    "{{gs2}}" "$PWD/gs/disks/mi-music-floppy.gs2"
 
 # Render an MT-32 MIDI file to WAV with Munt (needs ROMs)
 mt32-wav mid wav: fetch-munt
@@ -245,6 +241,32 @@ gsdisk: seq drum-audition
     (cd "$stage" && "$cp2" add "$img" Seq.and.Instr >/dev/null)
     rm -rf "$stage"
     "$cp2" catalog "$img" | grep -E 'Seq.and.Instr|blocks free'
+
+# 32 MB ProDOS hard disk image for BazFast (gs/disks/MI.HD.PO): System 6.0.4 merged from the
+# boot disk + SystemTools1 (Finder, CDevs, DAs, FSTs, tools, fonts; not its SCSI/printer
+# drivers) + SystemTools3 (sounds, fonts), Tool035, and /synthLAB with our Seq.and.Instr.
+hdimage: seq drum-audition
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cp2="$PWD/{{cp2}}"; img="$PWD/gs/disks/MI.HD.PO"; st="$PWD/gs/disks/hdstage"
+    rm -rf "$st" "$img" && mkdir -p "$st/synthLAB/Seq.and.Instr"
+    x() { "$cp2" extract --preserve=naps --overwrite --exdir="$1" "${@:2}" >/dev/null; }
+    x "$st" gs/system6/SYSTEM.DISK.PO
+    x "$st" gs/system6/SYSTEMTOOLS1.PO System/Finder System/CDevs System/Desk.Accs System/FSTs System/Tools System/Fonts Icons
+    x "$st" gs/system6/SYSTEMTOOLS3.PO System
+    x "$st" gs/system6/SYNTHLAB.PO System/Tools/Tool035
+    x "$st/synthLAB" gs/system6/SYNTHLAB.PO synthLAB Icons Reference
+    for f in gs/seq/*.SEQ; do cp "$f" "$st/synthLAB/Seq.and.Instr/$(basename "$f")#d50001"; done
+    for b in $(uv run python -I -c "import tomllib;c=tomllib.load(open('gs/instruments.toml','rb'));print(' '.join(v['file']+' '+v['wave_file'] for v in c['banks'].values()))"); do
+      case "$b" in *.BNK) t=d60001;; *.WAV) t=d80004;; esac
+      cp "{{vendor}}/synthlab/$b" "$st/synthLAB/Seq.and.Instr/$b#$t"
+    done
+    "$cp2" create-disk-image "$img" 32m prodos >/dev/null
+    "$cp2" rename "$img" : MI.HD >/dev/null
+    (cd "$st" && "$cp2" add "$img" * >/dev/null)
+    rm -rf "$st"
+    "$cp2" catalog "$img" | grep -E '^Disk|blocks free'
+    "$cp2" list "$img" | grep -c . | sed 's/^/files: /'
 
 # Run the unit tests
 test *args:

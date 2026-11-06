@@ -14,7 +14,7 @@ dependencies = [
 extract-music = "migs.extract_music:main"
 mid2seq = "migs.mid2seq:main"
 audition = "migs.audition:main"
-gs2-bram = "migs.bram:main"
+gs2-config = "migs.emu:main"
 
 [dependency-groups]
 dev = ["pytest>=8"]
