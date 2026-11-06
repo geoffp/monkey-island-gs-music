@@ -171,13 +171,13 @@ _gs2 name speed disk1 disk2:
         "MI1 {{name}}" "{{speed}}" "{{disk1}}" "{{disk2}}" > "$f"
     fi
 
-# Boot the IIgs in GSSquared with System 6 + stock synthLAB (default 14.3 MHz)
-emu speed="14.3mhz": fetch-gssquared disks
+# Boot the IIgs in GSSquared with System 6 + stock synthLAB (default: unlimited speed)
+emu speed="ludicrous": fetch-gssquared disks
     just _gs2 synthlab {{speed}} SYSTEM.DISK.PO SYNTHLAB.PO
     "{{gs2}}" "$PWD/gs/disks/synthlab.gs2"
 
 # Boot the IIgs with System 6 and the MI music synthLAB disk (open /Seq.and.Instr/MInnn.SEQ)
-emu-music speed="14.3mhz": fetch-gssquared disks gsdisk
+emu-music speed="ludicrous": fetch-gssquared disks gsdisk
     just _gs2 mi-music {{speed}} SYSTEM.DISK.PO MI.SYNTHLAB.PO
     "{{gs2}}" "$PWD/gs/disks/mi-music.gs2"
 

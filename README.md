@@ -46,8 +46,8 @@ Then:
 ```sh
 just setup    # checks tools, fetches the ScummVM submodule, builds the Python env, fetches and builds everything in vendor/
 just          # list all recipes
-just emu      # boot the IIgs (System 6.0.4 + synthLAB) in GSSquared at 14.3 MHz
-just emu-music ludicrous   # our music disk, unlimited speed
+just emu      # boot the IIgs (System 6.0.4 + synthLAB) in GSSquared, unlimited speed
+just emu-music  # same, with our music disk (`just emu-music 2.8mhz` for stock speed)
 ```
 `just setup` fetches into the gitignored `vendor/`, with pinned versions and checksums where published:
 - GSSquared (IIgs emulator)
