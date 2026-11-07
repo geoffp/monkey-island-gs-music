@@ -325,12 +325,50 @@ def is_steady(env: np.ndarray, a: int, off: int, sustain_s: float, max_drop_db: 
     return 20 * math.log10(float(seg.max()) / max(float(seg.min()), 1e-9)) <= max_drop_db
 
 
+def floor_time(x: np.ndarray, a: int, off: int, floor_lsb: float = 1.5) -> float:
+    """Seconds after the onset until the sound stays below `floor_lsb` RMS (20 ms) in a sample
+    normalised to its peak, i.e. below what 8-bit DOC samples can carry (1.5 LSB of 127:
+    -38.5 dB re peak). `off - a` (the whole note) if it never gets there before note-off."""
+    SR = mb.SR
+    seg = x[a:off]
+    pk = float(np.max(np.abs(seg))) or 1.0
+    env = np.sqrt(np.maximum(smooth(seg * seg, int(0.02 * SR)), 0.0)) / pk
+    above = np.nonzero(env > floor_lsb / 127)[0]
+    return (above[-1] + 1) / SR if len(above) else 0.0
+
+
+def one_shot_tuning(t_floor: float, rate: float, budget_pages: int, tables, key0: int, key_lo: int,
+                    key_hi: int, min_rate: float, max_drop: float = 0.1) -> tuple[float, int, int, int] | None:
+    """Can a decaying sound be a one-shot instead of attack + loop? It can when the whole sound,
+    up to the 8-bit floor (`t_floor` s), fits in one DOC block no larger than the attack + loop
+    blocks (`budget_pages`), at a rate no more than `max_drop` below the looped sample's rate.
+    Returns (rate, bytes, base_note, finetune): the highest exact table rate that fits (a
+    one-shot has no loop to fit, so it plays exactly in tune), or None."""
+    block = 1 << int(math.log2(budget_pages * 256))
+    cap = min(rate, (block - STOPPER) / max(t_floor, 1e-6))
+    if cap < max(min_rate, rate * (1 - max_drop)):
+        return None
+    n = np.arange(NOTES)
+    best = None
+    for ft, per in tables.items():
+        for i in n:
+            if not (0 <= i + key_lo - key0 and i + key_hi - key0 < NOTES):
+                continue
+            r = PAL / per[i]
+            if r <= cap and (best is None or r > best[0]):
+                best = (r, int(i), ft)
+    if best is None or best[0] < max(min_rate, rate * (1 - max_drop)):
+        return None
+    r, i, ft = best
+    return r, min(block - STOPPER, int(math.ceil(t_floor * r))), i, ft
+
+
 def plan_loops(samples: list[ModSample], usage: dict[int, float], last_page: int,
                max_loop: int) -> dict[int, int]:
     """Loop size per melodic sample index, spending the song's free DOC RAM (pages up to
     `last_page`) on its steady sounds: repeatedly double the loop with the most sustained
     playing time per byte, as long as everything still packs the way NTP packs it."""
-    sizes = {i: s.loop_len for i, s in enumerate(samples) if s.kind == "melodic"}
+    sizes = {i: s.loop_len for i, s in enumerate(samples) if s.kind == "melodic" and s.loop_len}
     grow = {i for i, s in enumerate(samples) if s.kind == "melodic" and s.steady and usage.get(i, 0) > 0}
 
     def fits(sz: dict[int, int]) -> bool:
@@ -420,6 +458,29 @@ def build_samples(spec: dict, cfg: dict, key_ranges: dict[int, tuple[int, int]],
         s.steady, s.rate = steady, rate
         s.max_loop = 1 << int(math.log2(max(1.0, ((off - a) / SR - sustain_s - 0.05) * rate)))
         s.max_loop = s.max_loop if steady else cfg["loop_bytes"]
+        # One-shot instead? A decaying sound that falls below the 8-bit floor while its attack
+        # still plays only loops quantisation noise (Xylophone: 2.6 LSB RMS). If the whole
+        # sound fits in no more DOC RAM than attack + loop, store it whole: it frees the loop's
+        # oscillator and plays exactly in tune.
+        shot = None
+        if not steady and cfg.get("one_shots", True):
+            t_floor = floor_time(x, a, off, cfg.get("one_shot_floor_lsb", 1.5))
+            shot = one_shot_tuning(t_floor, rate, sum(s.ntp_blocks()) // 256, tables, m["key"],
+                                   min(lo, m["key"]), max(hi, m["key"]), cfg["min_rate"],
+                                   cfg.get("one_shot_max_rate_drop", 0.1))
+        if shot is not None:
+            r1, nb, n0, ft = shot
+            seg = x[a: a + int(round(nb / r1 * SR))]
+            fade = np.ones(len(seg))
+            kk = max(1, len(seg) // 20)
+            fade[-kk:] = np.linspace(1, 0, kk)
+            data = resample(seg * fade, nb)
+            peak = float(np.max(np.abs(data))) or 1.0
+            s = ModSample(m["name"], data / peak, finetune=ft, base_note=n0, key0=m["key"], kind="melodic",
+                          env_t=np.zeros(1), env_g=np.ones(1), rel_g=np.clip(rel_g, 0, 1),
+                          seconds=nb / r1, tune_cents=0.0, level=peak)
+            s.rate, s.max_loop = r1, 0
+            rate = r1
         s.vel_v, s.vel_g = velocity_response(lambda v: _render(smf2wav, roms, cache, program=m["program"],
                                                                  key=m["key"], hold=0.5, velocity=v))
         s.key_v, s.key_g = key_response(lambda kk: _render(smf2wav, roms, cache, program=m["program"],
@@ -432,9 +493,13 @@ def build_samples(spec: dict, cfg: dict, key_ranges: dict[int, tuple[int, int]],
                 programs.setdefault(p, []).append((*m["keys"], idx))
             else:
                 programs[p] = idx
-        log(f"  {m['name']:<12} loop {loop_bytes:5d} B{' raw' if loop_bytes > cfg['loop_bytes'] else '    '} "
-            f"k={k:3d} rate {rate:7.0f} Hz note {n0:2d} ft {ft:+d} "
-            f"err {err:+5.1f} cents, swell x{g_max:.2f}, keys {lo}-{hi}")
+        if shot is not None:
+            log(f"  {m['name']:<12} one-shot {len(s.data):5d} B @ {rate:6.0f} Hz ({s.seconds * 1000:4.0f} ms to the "
+                f"8-bit floor) note {n0:2d} ft {ft:+d}, keys {lo}-{hi}")
+        else:
+            log(f"  {m['name']:<12} loop {loop_bytes:5d} B{' raw' if loop_bytes > cfg['loop_bytes'] else '    '} "
+                f"k={k:3d} rate {rate:7.0f} Hz note {n0:2d} ft {ft:+d} "
+                f"err {err:+5.1f} cents, swell x{g_max:.2f}, keys {lo}-{hi}")
 
     for d in spec["drum"]:
         x = _render(smf2wav, roms, cache, program=None, key=d["key"], hold=0.5)
@@ -570,6 +635,7 @@ class Report:
     tempo_changes: int = 0
     track_kinds: list = field(default_factory=list)   # "melodic" (2 oscillators) / "drum" (1), in MOD order
     sample_volumes: dict = field(default_factory=dict)  # sample index -> note-on volumes in this song
+    dropped_by: dict = field(default_factory=dict)      # sound name -> notes dropped for lack of oscillators
     nudged: int = 0
     tracks_used: int = 0
     oscillators: int = 0
@@ -774,6 +840,9 @@ def convert_song(path: Path, samples, programs, drums, cfg: dict, song_cfg: dict
         s = samples[si]
         r, d = place(n.t)
         err_sum += abs((r * speed + d) * tick_s - (n.t + shift))
+        # Melodic one-shots (Xylophone) use melodic tracks like looped sounds: measured, putting
+        # them on 1-oscillator drum tracks starved the percussion (MI160: 16 -> 31-77 dropped
+        # notes). Their gain is a track that frees when the sample ends: MI162 8 -> 0 dropped.
         kind = "drum" if s.kind == "drum" else "melodic"
         # choose a track: free & same sample, else free of the same kind, else a new track,
         # else steal a same-kind track that is only releasing (cut its release)
@@ -787,6 +856,7 @@ def convert_song(path: Path, samples, programs, drums, cfg: dict, song_cfg: dict
             releasing = [t for t in tracks if trk_kind[t] == kind and 0 <= trk_off[t] <= r]
             if not releasing:
                 rep.dropped += 1
+                rep.dropped_by[s.name] = rep.dropped_by.get(s.name, 0) + 1
                 continue
             tr = min(releasing, key=lambda t: trk_off[t])
             for row in [x for x in grid.cells[tr] if x >= r]:
@@ -804,7 +874,7 @@ def convert_song(path: Path, samples, programs, drums, cfg: dict, song_cfg: dict
             rep.vel_in_cell += 1
         else:
             rep.delayed += 1
-            silent_before = (kind == "drum" and same and trk_oneshot_end[tr] <= (r - 1) * row_s
+            silent_before = (s.kind == "drum" and same and trk_oneshot_end[tr] <= (r - 1) * row_s
                              and r - 1 > trk_busy[tr] and grid.effect_free(tr, r - 1))
             if silent_before:
                 pc = grid.get(tr, r - 1)
@@ -818,21 +888,27 @@ def convert_song(path: Path, samples, programs, drums, cfg: dict, song_cfg: dict
         trk_inst[tr] = si + 1
         last = r
         trk_off[tr] = -1
-        if kind == "drum":
+        if not s.loop_len:
             trk_oneshot_end[tr] = (r * speed + d) * tick_s + s.seconds
+        if s.kind == "drum":
             if d and not silent_before and grid.effect_free(tr, r + 1) and v != s.default_volume:
                 c = grid.get(tr, r + 1)
                 c[2], c[3] = 0xC, v
                 last = r + 1
         else:
-            # envelope rows until note-off, then release
-            r_off, _ = place(n.off)
+            # envelope rows until note-off, then release. A melodic one-shot (no loop) is silent
+            # once its sample ends: it holds the track only until then (or its note-off, if
+            # earlier), carries its own decay (no envelope rows), and needs a release only when
+            # the note-off comes first.
+            oneshot_end = None if s.loop_len else n.t + s.seconds
+            cut = oneshot_end is not None and n.off < oneshot_end
+            r_off, _ = place(n.off if oneshot_end is None else min(n.off, oneshot_end))
             r_off = max(r_off, r + 1)
             trk_off[tr] = r_off
             prev = None
             # the attack plays slower on lower notes: it hands over to the loop later
             t_loop = s.env_t[0] * 2 ** (-(n.key - s.key0) / 12)
-            for rr in range(r + 1, r_off):
+            for rr in range(r + 1, r_off if oneshot_end is None else r + 1):
                 dt = (rr - r) * row_s
                 g = env_at(s, dt, row_s, t_loop)
                 target = vf * g
@@ -850,7 +926,7 @@ def convert_song(path: Path, samples, programs, drums, cfg: dict, song_cfg: dict
             g_off = env_at(s, (r_off - r) * row_s, row_s, t_loop)
             v_off = vf * g_off
             steps = max(1, int(round(len(s.rel_g) * 0.01 / row_s)))
-            for i in range(steps + 1):
+            for i in range(steps + 1 if oneshot_end is None or cut else 0):
                 rr = r_off + i
                 gg = float(np.interp(i * row_s, np.arange(len(s.rel_g)) * 0.01, s.rel_g, right=0.0)) if i < steps else 0.0
                 vv = max(0, min(64, round(v_off * gg)))
@@ -860,6 +936,8 @@ def convert_song(path: Path, samples, programs, drums, cfg: dict, song_cfg: dict
                 last = rr
                 if vv == 0:
                     break
+        if not s.loop_len and s.kind != "drum":
+            last = max(last, r_off - 1)                  # sounding until its sample (or note) ends
         trk_busy[tr] = last
 
     rep.timing_err_ms = 1000 * err_sum / max(1, rep.notes - rep.dropped)
@@ -945,7 +1023,7 @@ def ntp_spec(spec: dict, conf: dict, mode: str | None = None) -> dict:
 
 
 def loop_summary(samples: list[ModSample], cfg: dict) -> str:
-    return " ".join(f"{s.name}:{s.loop_len}{'r' if s.loop_len > cfg['loop_bytes'] else ''}"
+    return " ".join(f"{s.name}:{s.loop_len or '1shot'}{'r' if s.loop_len > cfg['loop_bytes'] else ''}"
                     for s in samples if s.kind == "melodic")
 
 
@@ -969,15 +1047,19 @@ def sample_set(spec: dict, cfg: dict, songs: list[tuple[list, dict]], last_page:
             usage_notes.append((chan_prog.get(n.channel, -1), n))
     song_spec = {**spec, "melodic": [m for m in spec["melodic"] if m["slot"] in used],
                  "drum": [d for d in spec["drum"] if keys & set(d["covers"])]}
-    build = lambda sp: build_samples(sp, cfg, ranges, args.smf2wav, args.roms, args.cache, tables, log=lambda *a: None)
-    samples, programs, drums = build(song_spec)
+    build = lambda sp, c=cfg: build_samples(sp, c, ranges, args.smf2wav, args.roms, args.cache, tables, log=lambda *a: None)
+    # Loops are planned with every melodic sound looped; one-shots are decided afterwards, so a
+    # one-shot never takes more than its attack + loop and what it saves stays free (reserve)
+    # instead of growing some other loop into a short raw loop.
+    one_shots = cfg.get("one_shots", True)
+    samples, programs, drums = build(song_spec, {**cfg, "one_shots": False})
     usage: dict[int, float] = {}
     for prog, n in usage_notes:
         si = sample_for(programs, prog, n.key)
         if si is not None:
             usage[si] = usage.get(si, 0.0) + (n.off - n.t)
     sizes = plan_loops(samples, usage, last_page, cfg.get("max_loop_bytes", 16384))
-    if any(sizes[i] != samples[i].loop_len for i in sizes):
+    if one_shots or any(sizes[i] != samples[i].loop_len for i in sizes):
         by_name = {samples[i].name: sz for i, sz in sizes.items()}
         song_spec = {**song_spec, "melodic": [{**m, "ntp_loop_bytes": by_name.get(m["name"], cfg["loop_bytes"])}
                                               for m in song_spec["melodic"]]}
@@ -1063,6 +1145,9 @@ def main(argv: list[str] | None = None) -> int:
               f"{rep.oscillators:3d} {rep.notes:5d} {rep.dropped:4d} {rep.stolen:5d} {rep.tempo_changes:4d} {rep.delayed:5d} "
               f"{rep.vel_in_cell:6d} {rep.vel_preceding:6d} "
               f"{rep.vel_default:6d} {rep.timing_err_ms:6.1f}")
+    for sid, rep in reports:
+        if rep.dropped_by:
+            print(f"MI{sid} dropped (no oscillator): " + ", ".join(f"{k} {v}" for k, v in sorted(rep.dropped_by.items(), key=lambda kv: -kv[1])))
     return 0
 
 

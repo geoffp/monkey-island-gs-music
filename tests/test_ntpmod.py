@@ -324,3 +324,35 @@ def test_vectorized_tuning_search_matches_the_scan():
     for freq, L, key0, lo_k, hi_k in ((261.6, 512, 60, 48, 84), (65.4, 16384, 36, 30, 47), (1046.5, 2048, 84, 70, 96)):
         a, b = scan(freq, L, key0, lo_k, hi_k), nm._best_tuning(freq, tables, 9000, 22000, L, key0, lo_k, hi_k)
         assert a[1:] == b[1:] and abs(a[0] - b[0]) < 1e-9
+
+
+# --- one-shot detection -------------------------------------------------------
+
+def _decay(f0, secs, db_per_s, sr=32000):
+    t = np.arange(int(secs * sr)) / sr
+    return np.sin(2 * np.pi * f0 * t) * 10 ** (-db_per_s * t / 20)
+
+
+def test_floor_time_finds_the_8bit_floor():
+    x = np.concatenate([np.zeros(100), _decay(660, 2.0, 150.0)])     # 150 dB/s: -38.5 dB at ~0.26 s
+    t = nm.floor_time(x, 100, len(x))
+    assert 0.2 < t < 0.3
+    slow = np.concatenate([np.zeros(100), _decay(660, 2.0, 8.0)])     # bass-like: never gets there
+    assert nm.floor_time(slow, 100, len(slow)) > 1.9
+
+
+def _tables():
+    return {ft: [int(round(nm.PAL / (8363 * 2 ** ((n - 24 + ft / 8) / 12)))) for n in range(nm.NOTES)]
+            for ft in range(-8, 8)}
+
+
+def test_one_shot_when_the_whole_sound_fits_the_attack_and_loop_budget():
+    tables = _tables()
+    # 0.21 s at ~9.6 kHz = 2 KB: fits the 10 pages of a 2040 B attack + 512 B loop
+    shot = nm.one_shot_tuning(0.21, 9644.0, 10, tables, 76, 72, 84, 9000)
+    assert shot is not None
+    rate, nbytes, note, ft = shot
+    assert nbytes <= 2048 - nm.STOPPER and rate <= 9644.0 and rate >= 9644.0 * 0.9
+    assert abs(nm.PAL / tables[ft][note] - rate) < 1e-6                  # an exact table rate
+    # a 1.6 s decay would need far more than the budget at any acceptable rate
+    assert nm.one_shot_tuning(1.6, 16744.0, 10, tables, 48, 40, 60, 9000) is None

@@ -116,8 +116,32 @@ How E′+ is built:
 - **Covering the whole detected attack would cost 172 pages, against 138 today.** The shared bank can't afford it, and it barely helps: most of the "attack error" is the beating a static loop can't hold, not the attack.
 - A greedy re-allocation within today's budget, by error saved per page, gives only 18.5 → 18.1 dB summed. **Today's attack sizes are near the optimum; keep them.**
 - The RAM to win is elsewhere:
-  - **Xylophone as a one-shot:** it is 40 dB down at 0.5 s. It frees its 512 B loop and the loop's oscillator, and its 2040 B attack can shrink.
-  - **Taiko as a one-shot** if 1.1 s holds its decay.
+  - **Xylophone as a one-shot:** done (see "One-shots").
+  - **Taiko:** it doesn't qualify. It reaches the 8-bit floor only at 1.62 s.
+
+## One-shots (in the build since 2026-11-07)
+A looped sound that is already below 8-bit resolution when its loop starts only loops quantisation noise. Xylophone's loop was 2.6 LSB RMS. The rule (`ntpmod.floor_time`, `ntpmod.one_shot_tuning`, config `one_shots`, `one_shot_floor_lsb`, `one_shot_max_rate_drop`) is deterministic, from the same Munt render the sample is cut from.
+
+A melodic sound becomes a one-shot when all of these hold:
+1. **It decays.** It isn't `is_steady`.
+2. **It reaches the 8-bit floor while the recording lasts.** That is the time after which its 20 ms RMS stays below 1.5 LSB of a peak-normalised sample (−38.5 dB re peak).
+3. **It fits the space its attack + loop took.** The whole sound up to that point fits in one DOC block no larger than its attack + loop blocks, at a rate at most 10 % below the looped rate.
+
+The one-shot then plays at an **exact** period-table rate: with no loop to fit, there is no tuning error.
+
+**Loops are planned first,** with every sound looped, and one-shots are decided afterwards (`sample_set`). So what a one-shot saves stays free, rather than growing another loop. Measured: re-spending the 2 freed pages would have turned shared Pipe Organ's buzz-free 512 B loop into a 1024 B raw loop with −9.8 dB loop-rate content. The user chose to keep them free (2026-11-07).
+
+**Result:**
+
+| sound | 8-bit floor | decision |
+|---|---|---|
+| Xylophone | 0.21 s | one-shot: 2027 B at 9509 Hz in a 2 KB block, exactly in tune (was −1.0 cents, and a 2.6 LSB loop) |
+| Taiko | 1.62 s | stays looped (a one-shot would need ~27 KB) |
+| Acou Bass, Marimba, Vibes | after note-off (2 s) | stay looped |
+
+- **Shared bank:** 240 → 238 pages, every other sample byte-identical.
+- **Track allocation:** melodic one-shots use melodic tracks like before, but free them when the sample ends instead of holding them through note-off and release. MI162 now drops 0 notes, against 8. MI160's steals fall from 864 to 777 (per-song) and from 694 to 622 (shared), with its 16 drops unchanged.
+- **Rejected:** putting them on 1-oscillator drum tracks. It starved the percussion (MI160: 16 → 31–77 dropped notes), measured with the new per-sound drop line in the build log.
 
 ## Recommendation
 **For the 512 B loops** (all shared sounds, and short per-song loops), build E′+:
@@ -126,7 +150,7 @@ How E′+ is built:
 3. exact band-limited zero crossing;
 4. attack shifted into phase with the loop.
 
-Keep today's attack sizes, and move Xylophone (and possibly Taiko) to one-shots.
+Keep today's attack sizes. (Xylophone is now a one-shot, see above; Taiko doesn't qualify.)
 
 **For long per-song raw loops,** use the seam search (C) with the adaptive crossfade. Choose the length at a whole number of beat periods (the Elec Organ / Shakuhachi follow-up in `plans/TODO.md`). Measure them with the same metrics.
 

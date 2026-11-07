@@ -100,7 +100,8 @@ class Settle:
     depth_db: float         # 5-95 % range of the level in the sustain (wobble depth)
     steady: bool            # the beat-averaged level holds (slope above `decay` dB/s after `sus_from`)
     decay_db_s: float       # level slope in the sustain (dB/s)
-    dead_s: float | None    # level 40 dB below its peak (a one-shot candidate), or None
+    dead_s: float | None    # level 40 dB below its peak, or None (the build's one-shot rule is
+                            # ntpmod.floor_time / one_shot_tuning, reported by `main`)
     level_db: np.ndarray    # beat-averaged level (dB), on Tracks.t
     weights: np.ndarray     # harmonic power shares in the sustain (sum 1)
 
@@ -742,7 +743,9 @@ def main(argv: list[str] | None = None) -> int:
     tables = nm.period_tables(args.make_tables)
     paths = SimpleNamespace(smf2wav=args.smf2wav, roms=args.roms, cache=args.cache)
     songs = [nm.read_notes(p)[:2] for p in args.inputs]
-    samples, _, _ = nm.sample_set(spec, cfg, songs, 255 - cfg.get("reserve_pages", 16), tables, paths)
+    # every melodic sound looped (the build's one-shot decision is reported separately)
+    samples, _, _ = nm.sample_set(spec, {**cfg, "one_shots": False}, songs, 255 - cfg.get("reserve_pages", 16),
+                                  tables, paths)
     built = {s.name: s for s in samples if s.kind == "melodic"}
     render = lambda prog, key, hold: nm._render(args.smf2wav, args.roms, args.cache, program=prog, key=key, hold=hold)
     out = args.out_dir
@@ -752,6 +755,7 @@ def main(argv: list[str] | None = None) -> int:
     listen = [c for c in args.listen.split(",") if c]
 
     det, res, sizing = [], [], []
+    shot_note: dict[str, str] = {}
     for m in spec["melodic"]:
         s = built.get(m["name"])
         if s is None:
@@ -772,6 +776,15 @@ def main(argv: list[str] | None = None) -> int:
             rows[c] = r
             res.append(r)
         det.append((snd, s))
+        if not s.steady:                                   # the build's one-shot rule
+            hold = spec.get("hold_seconds", 2.0)
+            x2 = render(m["program"], m["key"], hold)
+            a2 = mb.onset(x2)
+            t_floor = nm.floor_time(x2, a2, a2 + int(hold * SR), cfg.get("one_shot_floor_lsb", 1.5))
+            shot = nm.one_shot_tuning(t_floor, s.rate, sum(s.ntp_blocks()) // 256, tables, m["key"], klo, khi,
+                                      cfg["min_rate"], cfg.get("one_shot_max_rate_drop", 0.1))
+            shot_note[m["name"]] = (f"one-shot: {shot[1]} B @ {shot[0]:.0f} Hz ({t_floor * 1000:.0f} ms to the 8-bit floor)"
+                                    if shot else f"looped: 8-bit floor at {t_floor:.2f} s")
         # attack sizing for the recommended construction: every block size, measured
         if "E'+" in rows:
             per = {}
@@ -827,7 +840,7 @@ def main(argv: list[str] | None = None) -> int:
                   + " | allocated B | note |",
                   "|---|---|---|" + "---|" * len(ATTACK_SIZES) + "---|---|"]
         for snd, s, need, per in sizing:
-            note = "one-shot candidate" if snd.st.dead_s is not None and snd.st.dead_s < 0.6 else ""
+            note = shot_note.get(snd.name, "")
             cells = " | ".join(f"{per[b]['att_err']:.1f} / {per[b]['hand_db']:+.1f} / {per[b]['hand_flux']:.1f}"
                                + ("" if handover_ok(per[b]) else " ✗") for b in ATTACK_SIZES)
             lines.append(f"| {snd.name} | {s.loop_start} | {need} | {cells} | {alloc[snd.name]} | {note} |")

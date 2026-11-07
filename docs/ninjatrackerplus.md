@@ -295,3 +295,6 @@ Measured with `just looplab`; details, sources and the full method comparison ar
 
   With a power-averaged harmonic cycle as well, there is no buzz in any sound, the timbre is within 0.6 dB of the MT-32's sustain average, and handover steps are ≤ 0.3 dB. Not integrated yet: waiting for the user's listening verdict.
 - **Not swells but beats:** the "slow swells" in Strings, Horn, Fantasy, Shakuhachi and Chorale are deep beating between detuned partials, at 0.4–0.9 s and 5–13 dB. A 512 B loop can't hold it.
+
+### One-shots (2026-11-07)
+Decaying melodic sounds that reach the 8-bit floor within the DOC RAM their attack + loop would take are stored whole, with exact tuning. Today that is only Xylophone. Rule and measurements: `docs/loop-detection.md`, "One-shots". The freed pages stay free (the shared bank is now 238/256). The build log now lists dropped notes per sound (`MInnn dropped (no oscillator): ...`).
