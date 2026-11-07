@@ -176,32 +176,11 @@ fetch-docs:
     get apda_midisynth_synthlab_ocr.pdf "{{ers_url}}" "{{ers_sha}}"
     get synthlab_usersmanual.pdf "{{manual_url}}" "{{manual_sha}}"
 
-# Working copies of the System 6.0.4 disks (originals in system6 stay untouched).
-# The boot disk copy also gets the MIDI Synth tool (Tool035) from the synthLAB disk.
-disks: fetch-cp2
-    #!/usr/bin/env bash
-    set -euo pipefail
-    mkdir -p build/disks
-    cp -n system6/*.PO build/disks/
-    cp2="$PWD/{{cp2}}"
-    if ! "$cp2" list build/disks/SYSTEM.DISK.PO | grep -qi '^System:Tools:Tool035$'; then
-      t=$(mktemp -d)
-      "$cp2" extract --exdir="$t" --preserve=naps system6/SYNTHLAB.PO System/Tools/Tool035 >/dev/null
-      (cd "$t" && "$cp2" add "$OLDPWD/build/disks/SYSTEM.DISK.PO" System >/dev/null)
-      rm -rf "$t"; echo "installed Tool035 on build/disks/SYSTEM.DISK.PO"
-    fi
-
 # GSSquared machine configs are generated into build/disks/<name>.gs2 by `gs2-config` (migs.emu),
 # keeping the id/battery RAM GSSquared saves on quit. Battery RAM is patched so the IIgs
 # boots straight from the right slot with the built-in 5.25" drives off (slot 6 = Your Card).
 # speed: 1.024mhz | 2.8mhz | 7.159mhz | 14.3mhz | ludicrous
 seed_bram := "config/emu/default-bram.hex"
-
-# Boot the IIgs from floppies: System 6 + stock synthLAB (default: unlimited speed)
-emu speed="ludicrous": fetch-gssquared disks
-    uv run gs2-config build/disks/synthlab.gs2 --name "MI1 synthLAB floppies" --speed {{speed}} \
-      --disk 5:1=SYSTEM.DISK.PO --disk 5:2=SYNTHLAB.PO --startup-slot 5 --your-card 6 --seed {{seed_bram}}
-    "{{gs2}}" "$PWD/build/disks/synthlab.gs2"
 
 # Boot the IIgs from the BazFast hard disk image (System 6 + synthLAB + our music)
 emu-music speed="ludicrous": fetch-gssquared hdimage
@@ -235,12 +214,6 @@ ntpdisk: ntp
      "$cp2" add "$img" PRODOS* sensei.system* ntpplayer* dgr.radio.dgr* >/dev/null)
     rm -rf "$st"
     "$cp2" catalog "$img" | head -12
-
-# Same, from floppies (System 6 boot disk + the MI synthLAB floppy)
-emu-music-floppy speed="ludicrous": fetch-gssquared disks gsdisk
-    uv run gs2-config build/disks/mi-music-floppy.gs2 --name "MI1 music (floppies)" --speed {{speed}} \
-      --disk 5:1=SYSTEM.DISK.PO --disk 5:2=MI.SYNTHLAB.PO --startup-slot 5 --your-card 6 --seed {{seed_bram}}
-    "{{gs2}}" "$PWD/build/disks/mi-music-floppy.gs2"
 
 # Render an MT-32 MIDI file to WAV with Munt (needs ROMs)
 mt32-wav mid wav: fetch-munt
@@ -357,27 +330,6 @@ docscope seconds="240": fetch-gssquared fetch-mcp hdimage
 drum-audition: stock-banks
     uv run audition "{{vendor}}/synthlab/COMBO.BNK" 0 --wave "{{vendor}}/synthlab/COMBO.WAV" -o build/seq/stock --lo 28 --hi 100
     uv run audition "{{vendor}}/synthlab/COMBO.BNK" 9 --wave "{{vendor}}/synthlab/COMBO.WAV" -o build/seq/stock --lo 28 --hi 100
-
-# Build build/disks/MI.SYNTHLAB.PO: a copy of the synthLAB disk whose /Seq.and.Instr holds
-# our sequences plus the bank/wave files they use (Apple's samples removed to make room)
-gsdisk: seq drum-audition
-    #!/usr/bin/env bash
-    set -euo pipefail
-    cp2="$PWD/{{cp2}}"; img="$PWD/build/disks/MI.SYNTHLAB.PO"; stage="$PWD/build/disks/stage"
-    mkdir -p build/disks && rm -rf "$stage" && cp system6/SYNTHLAB.PO "$img"
-    "$cp2" list "$img" | grep '^Seq.and.Instr:' | tr : / | while read -r f; do "$cp2" delete "$img" "$f" >/dev/null; done
-    mkdir -p "$stage/Seq.and.Instr"
-    for f in build/seq/stock/*.SEQ; do cp "$f" "$stage/Seq.and.Instr/$(basename "$f")#d50001"; done
-    for b in $(uv run python -I -c "import tomllib;c=tomllib.load(open('config/instruments.toml','rb'));print(' '.join(v['file']+' '+v['wave_file'] for v in c['banks'].values()))"); do
-      case "$b" in *.BNK) t=d60001;; *.WAV) t=d80004;; esac
-      # stock synthLAB banks only: this floppy carries the stock profile; the MT-32 bank
-      # (generated into build/seq/mt32/) goes on the HD image (`just hdimage`)
-      [ -f "{{vendor}}/synthlab/$b" ] || continue
-      cp "{{vendor}}/synthlab/$b" "$stage/Seq.and.Instr/$b#$t"
-    done
-    (cd "$stage" && "$cp2" add "$img" Seq.and.Instr >/dev/null)
-    rm -rf "$stage"
-    "$cp2" catalog "$img" | grep -E 'Seq.and.Instr|blocks free'
 
 # 32 MB ProDOS hard disk image for BazFast (build/disks/MI.HD.PO): System 6.0.4 merged from the
 # boot disk + SystemTools1 (Finder, CDevs, DAs, FSTs, tools, fonts; not its SCSI/printer

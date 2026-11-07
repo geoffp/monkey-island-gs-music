@@ -80,7 +80,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--card", type=_slot_kv, action="append", default=[], metavar="SLOT=TYPE",
                     help="e.g. 7=bazfast3")
     ap.add_argument("--disk", type=_disk, action="append", default=[], metavar="SLOT:DRIVE=IMAGE",
-                    help="image path relative to the .gs2's directory, e.g. 5:1=SYSTEM.DISK.PO")
+                    help="image path relative to the .gs2's directory, e.g. 7:1=MI.HD.PO")
     ap.add_argument("--startup-slot", type=int, help="BRAM startup slot (0 = scan)")
     ap.add_argument("--your-card", type=int, action="append", default=[], metavar="SLOT",
                     help="BRAM: set slot to 'Your Card' (built-in device off / slot card used)")

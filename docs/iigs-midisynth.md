@@ -170,9 +170,9 @@ The `num_inst` byte doesn't always match the number of named slots: COMBO says 9
 7. `SeqPlayer` with `PbufStart` = the item buffer and `SeqFlags = $0100` (play).
 
 ## Disks and installation [DATA]
-- System 6.0.4's `System.Disk` does **not** contain `Tool035`. The synthLAB disk carries it in its own `System:Tools:Tool035`. `just disks` installs it into the working copy of the boot disk (`build/disks/SYSTEM.DISK.PO`).
+- System 6.0.4's `System.Disk` does **not** contain `Tool035`. The synthLAB disk carries it in its own `System:Tools:Tool035`. `just hdimage` copies it into the hard-disk image's `System/Tools`.
 - The synthLAB disk layout: `/synthLAB` (S16 `$DB02`), `Icons`, `Reference` (a GWP+ document), `System/Tools/Tool035`, `System/CDevs/MIDI`, `Seq.and.Instr/` (the banks, waves and sample sequences).
-- `just gsdisk` builds `build/disks/MI.SYNTHLAB.PO`: the synthLAB disk with `Seq.and.Instr` replaced by our `MInnn.SEQ` files and the bank/wave files they use.
+- `just hdimage` builds `build/disks/MI.HD.PO`: `/synthLAB` with a folder per export profile holding our `MInnn.SEQ` files and the bank/wave files they use. (Until 2026-11-07, `just gsdisk` also built an 800K synthLAB floppy, `MI.SYNTHLAB.PO`. It was removed with the other floppy targets.)
 - File types are set with CiderPress II NAPS suffixes (`MI160.SEQ#d50001`, `COMBO.BNK#d60001`, `COMBO.WAV#d80004`), then `cp2 add`. `cp2 list` paths use `:` separators; `cp2 delete` takes `/`.
 - The stored-byte junk we ignore: leftover memory in Pascal-string padding, and unused data bytes in 1-byte messages. Semantic round trips of every sample pass (`tests/test_midisynth.py`).
 

@@ -44,8 +44,8 @@ build/             everything generated, not in git (`just clean`, `just clean-a
   music/wav/{mt32,gm}/   Munt / FluidSynth renders of the songs
   seq/{stock,mt32,tune}/ MIDI Synth sequences, banks and wave files
   ntp/<variant>/         MODs, .NTP files, desktop previews (wav/), build logs
-  disks/                 disk images (MI.HD.PO, MI.NTP.PO, MI.SYNTHLAB.PO, System 6 working
-                         copies) and the GSSquared machine configs (*.gs2) that boot them
+  disks/                 hard-disk images (MI.HD.PO, MI.NTP.PO) and the GSSquared machine
+                         configs (*.gs2) that boot them
   cache/mt32samples/     Munt sample renders (kept by `just clean`)
   looplab/               loop-lab report, A/B WAVs and plots
 ```
@@ -65,9 +65,9 @@ Then:
 ```sh
 just setup    # checks tools, fetches the ScummVM submodule, builds the Python env, fetches and builds everything in vendor/
 just          # list all recipes
-just emu      # boot the IIgs (System 6.0.4 + synthLAB) in GSSquared, unlimited speed
-just emu-music  # boot our 32 MB BazFast hard-disk image: System 6 + synthLAB + the MI1 sequences
-                # (`just emu-music 2.8mhz` for stock speed; `just emu-music-floppy` for 800K floppies)
+just emu-music  # boot our 32 MB BazFast hard-disk image in GSSquared: System 6 + synthLAB +
+                # the MI1 sequences + SenseiPlay (unlimited speed; `just emu-music 2.8mhz` for stock)
+just emu-ntp    # boot straight into SenseiPlay with the NTP songs
 ```
 `just setup` fetches into the gitignored `vendor/`, with pinned versions and checksums where published:
 - GSSquared (IIgs emulator)
@@ -88,7 +88,7 @@ These go in `original files/`, which is gitignored and never committed:
 ## Listening tests
 1. **MT-32**: `just mt32-wav <mid> <wav>` renders with [Munt](https://github.com/munt/munt)'s `mt32emu-smf2wav`. Needs your ROMs. Plays `build/music/midi/mt32/`.
 2. **General MIDI**: `just gm-wav <mid> <wav>` renders with FluidSynth and the [GeneralUser GS](https://github.com/mrbumpy409/GeneralUser-GS) soundfont. Plays `build/music/midi/gm/`.
-3. **IIGS**: `just emu-music` boots the hard-disk image; open `MI.HD/synthLAB/synthLAB`, then a sequence from `Seq.and.Instr`.
+3. **IIGS**: `just emu-music` boots the hard-disk image; open `MI.HD/synthLAB/synthLAB`, then a sequence from the `Stock` or `MT32` folder.
 4. **NinjaTrackerPlus, desktop**: `just ntpmod` writes MODs in two sample-set modes:
    - `build/ntp/per-song/`: each song carries only its own sounds, with longer loops;
    - `build/ntp/shared/`: one set for every song, like the MIDI Synth bank;
@@ -105,8 +105,8 @@ These go in `original files/`, which is gitignored and never committed:
 - [ ] Docs: SCUMM v4 resources, `RO` format, MT-32, MIDI Synth formats
 - [x] Extract `RO` → SMF (MT-32 + GM) + patch notes (`just extract`, `just render`)
 - [ ] Name the 16 tracks (`config/song_names.toml`)
-- [x] SMF → MIDI Synth sequence converter (`just seq`), disk image (`just gsdisk`)
-- [ ] Play in synthLAB (`just emu-music`, open `/synthLAB/Seq.and.Instr/MI160.SEQ`)
+- [x] SMF → MIDI Synth sequence converter (`just seq`), hard-disk image (`just hdimage`)
+- [ ] Play in synthLAB (`just emu-music`, open `/synthLAB/MT32/MI160.SEQ`)
 - [x] Custom MT-32-sampled bank MI1 (`just mt32bank`), `mt32` export profile (first build, needs listening)
 - [x] MT-32 → ProTracker MOD → NinjaTrackerPlus pipeline (`just ntpmod`, `just ntp`): first build plays; known problems in `docs/ninjatrackerplus.md`
 - [ ] Measure MIDI Synth CPU cost vs. tracker players (SoundSmith/NinjaTracker)
