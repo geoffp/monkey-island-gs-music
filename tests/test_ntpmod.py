@@ -111,6 +111,9 @@ def test_loop_is_exactly_periodic_and_the_attack_flows_into_it():
     step = np.median(np.abs(np.diff(loop)))
     assert abs(loop[0] - loop[-1]) < 3 * step                 # loop seam
     assert abs(loop[0] - attack[-1]) < 3 * step               # attack -> loop seam
+    # loop starts at a rising zero crossing with loop[0] == 0, so the NTP converter's
+    # "rotate to the sample nearest zero" is a no-op and the header stays 2040 B
+    assert loop[0] == 0.0 and loop[-1] < 0 and loop[1] >= 0
 
 
 def test_drum_rate_follows_bandwidth():

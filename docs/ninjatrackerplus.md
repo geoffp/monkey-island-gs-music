@@ -176,3 +176,15 @@ User report: velocity jumps up and down unnaturally in MI153, which is a single 
 - **Cause 1, the wrong sound's envelope.** MI1.BNK merges Pipe Org 2 into Elec Org 2's sample. Measured in Munt, Elec Org 2 has a deep, irregular rotary-style wobble: level 0.24–1.0, peak modulation about 1.8 Hz, depth 36%. Pipe Org 2 is steady: about 0.6 Hz and 13% depth. The two have the same velocity response (127/100 ≈ 1.45) and similar key response (within about 30%).
 - **Cause 2, aliasing.** Per-row `Cxx` point-sampled that wobble every 154 ms (MI153's row length), producing volume sequences like C0A → C25 → C13 → C0E → C28.
 - **Fix:** an NTP-only Pipe Organ sample, log-domain smoothing, and row-mean envelope sampling (above). The organ now follows Pipe Org 2's real slow swell (volume 29 → 40 → 29 over about 1 s).
+
+## On the IIGS (verified in GSSquared, 2026-11-06)
+- **`just emu-ntp`** boots `gs/disks/MI.NTP.PO` (`just ntpdisk`). This is a ProDOS 8 BazFast disk made from SenseiPlay's own `PRODOS` + `sensei.system` + `ntpplayer` + `dgr.radio.dgr`, with our songs in `/songs/PART1` and `/songs/PART2`. It boots straight into SenseiPlay. `just emu-music` also has them, under `/SenseiPlay/MI/PARTn`.
+- **Checked in the emulator** by driving it through gs2-mcp (`tap_key`, `video_text`, `state_get`, `read_mem ENSONIQ`):
+  - MI150, MI160 and MI165 play, with 10–17 oscillators running and frequencies and volumes changing;
+  - DOC RAM holds every sample byte for byte at the page the `.NTP` header gives;
+  - the whole file is consumed by the header layout in `file_format.txt`.
+
+  Not yet listened to by ear.
+- **Converter loop rotation** (`split_rotate_loop`, since Nov 2019, "to reduce the swap bug"): each loop is rotated to start at its first sample nearest zero (unsigned 128), and the skipped bytes are appended to the loop header. It has no switch. With our 2040 B headers that made 2094 B + 8 stopper bytes, i.e. a 4 KB block per melodic sound, so DOC RAM overflowed ("Too large"). Fix: our loops start at a rising zero crossing with `loop[0] = 0` exactly, so the rotation is a no-op. The attack window shifts up to one period earlier to meet it.
+- **SenseiPlay v2.0 directory bug:** it skips the first entry of each directory block after the first. A ProDOS directory's first block holds the header + 12 entries, so the 13th file is the first entry of block 2. With all 16 songs in one folder, MI165 was missing from the list. Workaround: at most 12 songs per folder (`ntp_folders` in the justfile).
+- **Navigation:** Down/Return move through the browser (".." comes first); Return on a song plays it.

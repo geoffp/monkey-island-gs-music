@@ -29,6 +29,10 @@ manual_url    := "https://www.brutaldeluxe.fr/documentation/synthlab/synthlab_us
 manual_sha    := "54a5ec84e5fd152043a9a5b666bec0dab366656effeae5bd4a759894aa488a93"
 ntpsrc_sha    := "461260e35dc0b10176c05865d01c4e31694f704c0c3a9e5760fc093623dc52fb"
 ntpdemo_sha   := "350843388bde213b10101212fcd6e3f5affa3b4f25b74ea970b0b6ab85d14d97"
+# Copy music/ntp/*.ntp (typed $D5/$0008) into <dir>/PART1, PART2, ... at most 12 per folder:
+# SenseiPlay v2.0 skips the first entry of each later directory block (a ProDOS block holds
+# the header + 12 entries, then 13), so a 16-song folder hid MI165. Verified in GSSquared.
+ntp_folders   := 'ntpf() { local i=0 d; for f in music/ntp/*.ntp; do d="$1/PART$((i / 12 + 1))"; mkdir -p "$d"; cp "$f" "$d/$(basename "$f" .ntp | tr a-z A-Z).NTP#d50008"; i=$((i + 1)); done; }; ntpf'
 sensei_ver    := "v2.0"     # digarok/senseiplay (no published checksums)
 
 # List recipes
@@ -190,6 +194,27 @@ emu-music speed="ludicrous": fetch-gssquared hdimage
       --card 7=bazfast3 --disk 7:1=MI.HD.PO --startup-slot 7 --your-card 6 --your-card 7 --seed {{seed_bram}}
     "{{gs2}}" "$PWD/gs/disks/mi-music.gs2"
 
+# Boot straight into SenseiPlay (ProDOS 8 NTP player) with our songs in /songs, from BazFast
+emu-ntp speed="ludicrous": fetch-gssquared ntpdisk
+    uv run gs2-config gs/disks/mi-ntp.gs2 --name "MI1 NinjaTrackerPlus (SenseiPlay)" --speed {{speed}} \
+      --card 7=bazfast3 --disk 7:1=MI.NTP.PO --startup-slot 7 --your-card 6 --your-card 7 --seed {{seed_bram}}
+    "{{gs2}}" "$PWD/gs/disks/mi-ntp.gs2"
+
+# ProDOS 8 disk that boots into SenseiPlay: its PRODOS + player, our .NTP songs in /songs
+ntpdisk: ntp
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cp2="$PWD/{{cp2}}"; img="$PWD/gs/disks/MI.NTP.PO"; st="$PWD/gs/disks/ntpstage"
+    rm -rf "$st" "$img" && mkdir -p "$st"
+    "$cp2" extract --preserve=naps --overwrite --exdir="$st" "{{vendor}}/ntp/senseiplay800.2mg" \
+      PRODOS sensei.system ntpplayer dgr.radio.dgr >/dev/null
+    {{ntp_folders}} "$st/songs"
+    "$cp2" create-disk-image "$img" 32m prodos >/dev/null
+    "$cp2" rename "$img" : MI.NTP >/dev/null
+    (cd "$st" && "$cp2" add "$img" PRODOS* sensei.system* ntpplayer* dgr.radio.dgr* songs >/dev/null)
+    rm -rf "$st"
+    "$cp2" catalog "$img" | head -12
+
 # Same, from floppies (System 6 boot disk + the MI synthLAB floppy)
 emu-music-floppy speed="ludicrous": fetch-gssquared disks gsdisk
     uv run gs2-config gs/disks/mi-music-floppy.gs2 --name "MI1 music (floppies)" --speed {{speed}} \
@@ -330,9 +355,9 @@ hdimage: seq drum-audition tunetest
     mkdir -p "$st/synthLAB/Tune"; for f in gs/seq/tune/*; do typed "$f" "$st/synthLAB/Tune"; done
     # NinjaTrackerPlus: SenseiPlay (ProDOS 8 player) + our songs, if `just ntp` has run
     if ls music/ntp/*.ntp >/dev/null 2>&1; then
-      mkdir -p "$st/SenseiPlay/MI"
+      mkdir -p "$st/SenseiPlay"
       x "$st/SenseiPlay" "{{vendor}}/ntp/senseiplay800.2mg" sensei.system ntpplayer dgr.radio.dgr
-      for f in music/ntp/*.ntp; do cp "$f" "$st/SenseiPlay/MI/$(basename "$f" .ntp | tr a-z A-Z).NTP#d50008"; done
+      {{ntp_folders}} "$st/SenseiPlay/MI"
     fi
     "$cp2" create-disk-image "$img" 32m prodos >/dev/null
     "$cp2" rename "$img" : MI.HD >/dev/null

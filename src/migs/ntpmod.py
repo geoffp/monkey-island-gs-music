@@ -152,13 +152,39 @@ def periodic_loop(x: np.ndarray, start: float, period: float, k: int, out: int, 
     return loop * (e_src / e_loop) if e_loop > 0 else loop
 
 
+def rising_zero(y: np.ndarray, nearest_to: int | None = None) -> int:
+    """Index i of a rising zero crossing (y[i-1] < 0 <= y[i], cyclically) with the smallest |y[i]|,
+    or the one nearest (cyclically) to `nearest_to`."""
+    idx = np.nonzero((np.roll(y, 1) < 0) & (y >= 0))[0]
+    if not len(idx):
+        return int(np.argmin(np.abs(y)))
+    if nearest_to is not None:
+        n = len(y)
+        return int(min(idx, key=lambda i: min((i - nearest_to) % n, (nearest_to - i) % n)))
+    return int(idx[np.argmin(np.abs(y[idx]))])
+
+
 def attack_and_loop(x: np.ndarray, a: int, period: float, rate: float, k: int, attack_bytes: int,
                     loop_bytes: int, xfade_cycles: float = 2.0) -> tuple[np.ndarray, np.ndarray, float]:
     """(attack, loop, source index where the attack ends). The attack is resampled with a
     margin (no FFT edge ringing at the seam), and its last `xfade_cycles` periods crossfade
-    into the loop's periodic continuation, so attack -> loop is continuous in value and phase."""
+    into the loop's periodic continuation, so attack -> loop is continuous in value and phase.
+
+    The loop starts at a rising zero crossing, with loop[0] exactly 0: Ninjaforce's converter
+    rotates every loop to its first sample nearest zero and moves the skipped bytes into the
+    loop header, which pushed our 2040 B headers past their 2 KB block (into 4 KB) and
+    overflowed DOC RAM. The attack window starts up to one period earlier (into the
+    near-silence before the onset) so its end meets that crossing."""
+    step = k * period / loop_bytes                       # source samples per loop byte
     att_end = a + attack_bytes / rate * mb.SR
+    p = rising_zero(periodic_loop(x, att_end, period, k, loop_bytes))
+    shift = (p * step) % period                          # phase of the crossing after att_end
+    if shift > 0:
+        a = max(0, int(round(a + shift - period)))
+        att_end = a + attack_bytes / rate * mb.SR
     loop = periodic_loop(x, att_end, period, k, loop_bytes)
+    loop = np.roll(loop, -rising_zero(loop, nearest_to=0))   # sub-sample remainder
+    loop[0] = 0.0
     margin = int(4 * period)
     hi = min(len(x), int(round(att_end)) + margin)
     seg = x[a:hi]
