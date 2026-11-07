@@ -115,3 +115,14 @@ The MOD is the primary artefact: it renders on the desktop (ffmpeg's libopenmpt 
 - 9–19 tracks per song, using up to 31 oscillators. Dropped notes are 0–16 per song, except MI167 (89).
 - **MI160:** 797 releases stolen, 16 notes dropped.
 - About 60% of notes need an `EDx` delay. Most of those start at the default volume for one row (70–150 ms) before the envelope corrects them.
+
+### First listening (2026-11-06)
+The user listened to the desktop previews (`music/ntp/wav/`): **the pipeline works**, but there are problems still to fix. The `.NTP` conversion and SenseiPlay on the IIGS are wired up (`just ntp`, `just emu-music`) but haven't been run yet; they need `php-cli`.
+
+Known problems and open work, from the build log and analysis:
+- **MI167 drops 89 notes** (MI152 and MI160 drop 16 each). Not investigated yet. Candidates: more simultaneous held notes than the 31-oscillator budget allows, or long releases that aren't stolen early enough.
+- **Velocity on delayed notes:** about 60% of notes need `EDx`. Most of those start at the instrument's default volume for one row (70–150 ms) until the next row's `Cxx` corrects it. This may sound like uneven attacks. Fix options: put velocity in the preceding cell more often (needs an idle track), or pick the default volume per song from the median velocity.
+- **Drums are low-fi**: one-shots at about 5.9–8.3 kHz, to fit 64 KB.
+- **Level:** previews peak around −10 dB.
+- **Pattern size and player CPU** haven't been measured on the IIGS. Rows are 32nds of the detected grid unit (`rows_per_unit = 2`). `gs/ntp.toml` per-song overrides can coarsen this.
+- The specific problems heard in listening still need to be written down here as they're triaged.
