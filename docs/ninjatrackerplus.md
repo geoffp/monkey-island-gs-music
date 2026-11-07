@@ -109,13 +109,17 @@ The MOD is the primary artefact: it renders on the desktop (ffmpeg's libopenmpt 
 
     Pitched pairs are offset by whole notes.
   - **Memory:** sized and packed by NTP's rules (stopper bytes, loop split, power-of-two blocks, largest at page 0), giving **242 of 256 DOC pages** for 28 samples.
-- **Timing:** rows sit on each song's detected grid unit / `rows_per_unit` (default 32nds), speed 3, MOD tempo per song (49–137). `EDx` keeps micro-timing (`quantize = 0`). The measured mean error is 4.6–13.6 ms.
+- **Timing:** rows sit on each song's detected grid unit / `rows_per_unit` (default 32nds), speed 3, MOD tempo per song (48–136). `EDx` keeps micro-timing (`quantize = 0`). The measured mean error is 4.6–12 ms.
+  - **Tempo dithering** (`tempo_commands`): MOD tempos are integers, so a single tempo misses the ideal row length by up to 0.65%. Notes are placed on the ideal grid, and `Fxx` commands switch between the two neighbouring integer tempos whenever the playback clock drifts more than `tempo_tolerance_ms` (default 2 ms) from it. They go in any free effect cell. This takes 1–106 commands per song.
 - **Levels (measured, `just ntpmod` prints the CC7 curve):** a note's loudness = sample peak (Munt, velocity 100, CC7 100) × its **velocity response** × **key response** (melodic) or per-key rhythm level (drum covers) × the MT-32 **CC7 curve**. All three are measured in Munt (`velocity_response`, `key_response`, `cc7_curve`). Each song is normalised so its loudest moment (99.5th percentile, including sounds that swell after the attack) is volume 64 (`level_ref` in `gs/ntp.toml` pins it).
 - **Velocity placement:**
   - in the note's own cell when it needs no delay;
   - else, on a drum track that has gone silent, a `Cxx` in the preceding cell plus an instrument-less note (NTP keeps the track volume; `setup_effect` in `ninjatrackerplus.s`);
   - else the instrument's default volume (the sample's median volume in that song), corrected by the next row's envelope `Cxx`.
-- **Envelope:** per-row `Cxx` follows the MT-32 loudness contour after the attack, including swells above the attack level (strings and organ reach about 2×). Release is a ramp of up to 0.3 s, then `C00`.
+- **Envelope:** per-row `Cxx` follows the MT-32 loudness contour after the attack, including swells above the attack level (strings and organ reach about 2×).
+  - The contour is smoothed in the **log domain over 250 ms**: tremolo and partial beating average out, and exponential decays stay unbiased.
+  - Each row's `Cxx` is the contour's **mean over that row** (`env_at`), not a point sample. Release is a ramp of up to 0.3 s, then `C00`.
+- **NTP-only sounds:** `[[melodic]]` entries in `gs/ntp.toml` split programs out of the shared bank's merges (`ntp_spec`), using DOC RAM the MIDI Synth bank doesn't have. Currently Pipe Org 2 (MI153), giving 252/256 pages and 29 samples.
 - **Tracks:** created on demand within NTP's **31-oscillator** budget (drum tracks 1, looped melodic tracks 2). When the budget is full, a track that's only releasing is stolen. There's no separate control track: speed and tempo sit in row 0 (the lead-in), and the loop `B00` goes in a free cell of the last row.
 - **Channel tag:** `nCHN` below 10 channels, `nnCH` from 10. libopenmpt didn't recognise `09CH` (it rendered silence), so the format matters.
 
@@ -152,3 +156,23 @@ Diagnosed by rendering the same notes through Munt and through the MOD (ffmpeg/l
 
   **After the fixes**, every sound is within ±2.5 dB of the MT-32 in single-note tests. In MI160, drums sit 6.8 dB under the melodic parts (MT-32: 6.1 dB); in MI150, 7.8 dB (MT-32: 6.7 dB).
 - **Preview pitfall:** libopenmpt scales its MOD mix by channel count. Compare stems only at equal channel counts. This doesn't affect the mix within one song.
+
+### Grid analysis for quantization (2026-11-06)
+Measured on the onsets of all 16 songs (scripts were ad hoc; method below).
+- **The detected unit is the music's real subdivision; finer grids only catch jitter.** Median snap error to unit/2 is barely below unit/1 (e.g. MI150 9.8 → 9.8 ms; uniformly random onsets would give u/4 → u/8, 38 → 19 ms). unit/3 and unit/4 give what random onsets would. So there are no systematic 32nds, and no triplets inside duple songs.
+- **Triplet feel is already captured by the unit.** Circular concentration at 3 × unit is high (R 0.22–0.47) for 159, 161–165, 167 and 168: there the unit is a triplet 8th, a beat is 3 units. For the others the beat is 2 or 4 units (153: R 0.46 at 4u).
+- **Tempo drifts.** A local phase (fitted over ±4 units) wanders 22–85 ms (5–95th percentile) across a song. Following it cuts the median deviation sharply for some songs (MI160 18.9 → 7.9 ms, MI163 13.2 → 4.2, MI150 9.8 → 5.9), so a fixed grid is wrong by up to ~40 ms in places.
+- **Some songs barely sit on any grid** (152, 158: the median deviation is about half of random even with a local phase). Expect rubato, or a unit to recheck.
+- **Pattern cost:** NTP patterns are uncompressed: 64 rows × tracks × 4 B = 256 B per track per pattern. MI160 now: 18 patterns × 17 tracks ≈ 78 KB. 32 rows per beat would be ~4× the current 8 (≈ 310 KB) and force speed 1 (a new row every tick: more player CPU).
+- **Grid drift from tempo rounding** (fixed by tempo dithering, above). With one fixed integer tempo, the row-length error and the drift it accumulates over each song were:
+  - MI160 −0.37% (−347 ms, 4.1 rows); MI152 +0.52% (+375 ms, 3.1 rows); MI153 −0.65% (−368 ms, 2.4 rows);
+  - MI150, 165 and 167 about ±0.4% (1.7 rows);
+  - 161–164 negligible.
+
+  This came on top of the performance's own drift. After the fix, delayed (`EDx`) notes fell, e.g. MI150 586 → 280, MI153 97 → 30, MI159 291 → 98, MI165 245 → 79, MI160 1962 → 1540.
+
+### MI153: velocity "jumping" (2026-11-06)
+User report: velocity jumps up and down unnaturally in MI153, which is a single Pipe Org 2 part.
+- **Cause 1, the wrong sound's envelope.** MI1.BNK merges Pipe Org 2 into Elec Org 2's sample. Measured in Munt, Elec Org 2 has a deep, irregular rotary-style wobble: level 0.24–1.0, peak modulation about 1.8 Hz, depth 36%. Pipe Org 2 is steady: about 0.6 Hz and 13% depth. The two have the same velocity response (127/100 ≈ 1.45) and similar key response (within about 30%).
+- **Cause 2, aliasing.** Per-row `Cxx` point-sampled that wobble every 154 ms (MI153's row length), producing volume sequences like C0A → C25 → C13 → C0E → C28.
+- **Fix:** an NTP-only Pipe Organ sample, log-domain smoothing, and row-mean envelope sampling (above). The organ now follows Pipe Org 2's real slow swell (volume 29 → 40 → 29 over about 1 s).

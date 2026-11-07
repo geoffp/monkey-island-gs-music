@@ -23,3 +23,12 @@ drum_max_rate = 26000   # bandwidth, trading length for it (hats, shakers need ~
 # rows_per_unit = 1
 # unit_ticks = 40.6     # override the detected grid unit (MI1 ticks, 120 per beat)
 # phase_ticks = 12.0
+
+# NTP-only sounds: split out of the shared bank's merges (gs/mt32bank.toml). `slot` only
+# needs to be unique; it isn't a MIDI Synth slot.
+[[melodic]]
+slot = 101
+name = "Pipe Organ"
+program = 13
+covers = [13]             # MI153. Elec Org 2's sample has a deep rotary wobble Pipe Org 2 lacks
+key = 60

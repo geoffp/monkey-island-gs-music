@@ -119,6 +119,22 @@ def _best_tuning(freq: float, tables, min_rate, max_rate, loop_bytes, key0, key_
     return best
 
 
+def smooth(x: np.ndarray, n: int) -> np.ndarray:
+    """Centered moving average over n samples (edges averaged over what exists)."""
+    if n <= 1:
+        return x
+    k = np.ones(n)
+    return np.convolve(x, k, mode="same") / np.convolve(np.ones(len(x)), k, mode="same")
+
+
+def env_at(s: "ModSample", dt: float, width: float) -> float:
+    """Mean envelope gain over [dt - width/2, dt + width/2]: one Cxx per row stands for the
+    whole row, so averaging (not point sampling) keeps tremolo from aliasing into jumps."""
+    lo, hi = dt - width / 2, dt + width / 2
+    ts = np.linspace(lo, hi, 9)
+    return float(np.mean(np.interp(ts, s.env_t, s.env_g, left=s.env_g[0], right=s.env_g[-1])))
+
+
 def periodic_loop(x: np.ndarray, start: float, period: float, k: int, out: int, cycles: int = 4) -> np.ndarray:
     """`out` points holding k identical cycles: the average of `cycles` source periods from
     `start`, tiled k times and band-limited. Exactly periodic, so the loop seam is continuous;
@@ -229,7 +245,10 @@ def build_samples(spec: dict, cfg: dict, key_ranges: dict[int, tuple[int, int]],
         e_loop = float(np.sqrt(np.mean(loop ** 2))) or 1e-9
         # envelope after the attack, relative to the loop's own level
         t = np.arange(int(att_end), off, int(0.01 * SR))
-        g = env[t] / e_loop
+        # Smooth in the log domain over 250 ms: MT-32 organs/strings have tremolo and partial
+        # beating (Pipe Org 2: gain 0.7-2.3, ~4 Hz) that the static loop can't follow and that
+        # per-row Cxx would alias into random jumps; exponential decays stay unbiased in log.
+        g = np.exp(smooth(np.log(np.maximum(env, 1e-6)), int(0.25 * SR)))[t] / e_loop
         g_max = float(g.max()) if len(g) else 1.0
         rel = env[off: off + int(cfg["release_max"] * SR): int(0.01 * SR)]
         rel_g = rel / max(env[off], 1e-9)
@@ -368,6 +387,7 @@ class Report:
     vel_preceding: int = 0
     vel_default: int = 0
     level_ref: float = 1.0      # note loudness that maps to MOD volume 64
+    tempo_changes: int = 0
     nudged: int = 0
     tracks_used: int = 0
     oscillators: int = 0
@@ -378,6 +398,31 @@ class Report:
     speed: int = 0
     row_ms: float = 0.0
     timing_err_ms: float = 0.0
+
+
+def tempo_commands(ideal: float, speed: int, rows: int, can_set, tol: float) -> list[tuple[int, int]]:
+    """[(row, tempo)] keeping the playback clock within ~`tol` s of a grid of rows lasting
+    2.5 * speed / `ideal` s each, using the two integer tempos around `ideal`. A change is
+    only written where `can_set(row)` (a free effect cell); row 0 always gets the start tempo.
+    Hysteresis (`tol`) keeps the changes sparse: every ~tol / (per-row error) rows."""
+    lo, hi = math.floor(ideal), math.ceil(ideal)
+    row_ideal = 2.5 * speed / ideal
+    if lo == hi:
+        return [(0, lo)]
+    cur = lo if ideal - lo >= 0.5 else hi
+    out = [(0, cur)]
+    err = 0.0                                            # actual - ideal time at the start of row r
+    for r in range(1, rows):
+        err += 2.5 * speed / cur - row_ideal
+        want = cur
+        if err > tol:
+            want = hi                                    # running late: shorter rows
+        elif err < -tol:
+            want = lo
+        if want != cur and can_set(r):
+            cur = want
+            out.append((r, cur))
+    return out
 
 
 class Grid:
@@ -417,8 +462,11 @@ def convert_song(path: Path, samples, programs, drums, cfg: dict, song_cfg: dict
     while tempo < 32:
         speed += 1
         tempo = round(2.5 * speed / row_s)
-    tick_s = 2.5 / tempo
-    row_s = tick_s * speed
+    # Notes are placed on the ideal grid (row_s = unit / rpu exactly). MOD tempos are integers,
+    # so one fixed tempo makes rows drift against the music (up to 0.65%, ~4 rows over MI160);
+    # tempo_commands() alternates the neighbouring integer tempos to stay on the ideal grid.
+    tempo_ideal = 2.5 * speed / row_s
+    tick_s = row_s / speed
     shift = (row_s - (phase * MI1_TICK) % row_s) % row_s + row_s      # grid aligned, >= 1 row lead-in
     rep.tempo, rep.speed, rep.row_ms = tempo, speed, row_s * 1000
 
@@ -556,14 +604,14 @@ def convert_song(path: Path, samples, programs, drums, cfg: dict, song_cfg: dict
             prev = None
             for rr in range(r + 1, r_off):
                 dt = (rr - r) * row_s
-                g = float(np.interp(dt, s.env_t, s.env_g, right=s.env_g[-1]))
+                g = env_at(s, dt, row_s)
                 vv = max(0, min(64, round(vf * g)))
                 if vv != prev and grid.effect_free(tr, rr):
                     c = grid.get(tr, rr)
                     c[2], c[3] = 0xC, vv
                     prev = vv
                 last = rr
-            g_off = float(np.interp((r_off - r) * row_s, s.env_t, s.env_g, right=s.env_g[-1]))
+            g_off = env_at(s, (r_off - r) * row_s, row_s)
             v_off = vf * g_off
             steps = max(1, int(round(len(s.rel_g) * 0.01 / row_s)))
             for i in range(steps + 1):
@@ -589,6 +637,15 @@ def convert_song(path: Path, samples, programs, drums, cfg: dict, song_cfg: dict
     if len(grid.cells) < 2:
         new_track("drum")
     # speed + tempo on row 0 (the lead-in row is always free), loop jump at the very end
+    changes = tempo_commands(tempo_ideal, speed, patterns * ROWS,
+                             lambda r: any(grid.effect_free(t, r) for t in range(len(grid.cells))),
+                             song_cfg.get("tempo_tolerance_ms", cfg.get("tempo_tolerance_ms", 2.0)) / 1000)
+    tempo = changes[0][1]
+    rep.tempo, rep.tempo_changes = tempo, len(changes) - 1
+    for r, t in changes[1:]:
+        tr = next(t_ for t_ in range(len(grid.cells)) if grid.effect_free(t_, r))
+        c = grid.get(tr, r)
+        c[2], c[3] = 0xF, t
     for tr, (eff, par) in enumerate(((0xF, speed), (0xF, tempo))):
         c = grid.get(tr, 0)
         if c[0] or c[2] >= 0:
@@ -633,6 +690,16 @@ def mod_file(title: str, samples: list[ModSample], grid: Grid, patterns: int, ta
     return bytes(out)
 
 
+def ntp_spec(spec: dict, conf: dict) -> dict:
+    """The MI1 bank spec plus gs/ntp.toml's NTP-only `[[melodic]]` sounds. An extra sound takes
+    its `covers` away from the shared bank's merges (NTP has DOC RAM the 16-slot MIDI Synth
+    bank doesn't), e.g. Pipe Org 2, which MI1.BNK plays with Elec Org 2's sample."""
+    extra = conf.get("melodic", [])
+    taken = {p for m in extra for p in m["covers"]}
+    melodic = [{**m, "covers": [p for p in m["covers"] if p not in taken]} for m in spec["melodic"]]
+    return {**spec, "melodic": [m for m in melodic if m["covers"]] + list(extra)}
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("inputs", nargs="+", type=Path, help="MT-32 MIDI files (music/midi/mt32)")
@@ -646,7 +713,7 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
     conf = tomllib.loads(args.config.read_text())
     cfg = conf["defaults"]
-    spec = tomllib.loads(args.spec.read_text())
+    spec = ntp_spec(tomllib.loads(args.spec.read_text()), conf)
     tables = period_tables(args.make_tables)
     cc7 = cc7_curve(args.smf2wav, args.roms, args.cache)
     print("MT-32 CC7 curve: " + " ".join(f"{int(v)}:{g:.2f}" for v, g in zip(*cc7)))
@@ -668,14 +735,14 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  NTP DOC RAM: {pages} of 256 pages ({pages * 256} bytes), {len(samples)} samples")
     args.out_dir.mkdir(parents=True, exist_ok=True)
     print(f"{'song':<6} {'tempo':>5} {'spd':>3} {'row ms':>6} {'pat':>3} {'trk':>3} {'osc':>3} {'notes':>5} "
-          f"{'drop':>4} {'steal':>5} {'delay':>5} {'v:cell':>6} {'v:prev':>6} {'v:dflt':>6} {'err ms':>6}")
+          f"{'drop':>4} {'steal':>5} {'tchg':>4} {'delay':>5} {'v:cell':>6} {'v:prev':>6} {'v:dflt':>6} {'err ms':>6}")
     for p in args.inputs:
         sid = p.stem.split("-")[0]
         song_cfg = {**cfg, **conf.get("songs", {}).get(sid, {})}
         grid, patterns, rep = convert_song(p, samples, programs, drums, cfg, song_cfg, cc7)
         (args.out_dir / f"MI{sid}.mod").write_bytes(mod_file(f"MI1 {sid}", samples, grid, patterns, tables))
         print(f"{sid:<6} {rep.tempo:5d} {rep.speed:3d} {rep.row_ms:6.1f} {rep.patterns:3d} {rep.tracks_used:3d} "
-              f"{rep.oscillators:3d} {rep.notes:5d} {rep.dropped:4d} {rep.stolen:5d} {rep.delayed:5d} "
+              f"{rep.oscillators:3d} {rep.notes:5d} {rep.dropped:4d} {rep.stolen:5d} {rep.tempo_changes:4d} {rep.delayed:5d} "
               f"{rep.vel_in_cell:6d} {rep.vel_preceding:6d} "
               f"{rep.vel_default:6d} {rep.timing_err_ms:6.1f}")
     return 0

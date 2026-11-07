@@ -160,3 +160,37 @@ def test_channel_volume_and_swell_set_levels(tmp_path):
     (a0, a_max), (b0, b_max) = sorted(vols, reverse=True)
     assert a_max == 64 and a0 == pytest.approx(32, abs=2)     # loudest moment (the swell) = 64
     assert b0 == pytest.approx(a0 * 0.35, abs=1.5)              # CC7 64 vs 100 per the curve
+
+
+def test_tempo_commands_stay_on_the_ideal_grid():
+    ideal, speed, rows, tol = 97.56, 3, 2000, 0.002
+    ch = nm.tempo_commands(ideal, speed, rows, lambda r: True, tol)
+    assert ch[0][0] == 0 and {t for _, t in ch} <= {97, 98}
+    tempo, actual, worst = dict(ch), 0.0, 0.0
+    cur = ch[0][1]
+    for r in range(rows):
+        cur = tempo.get(r, cur)
+        worst = max(worst, abs(actual - r * 2.5 * speed / ideal))
+        actual += 2.5 * speed / cur
+    assert worst < tol + 2.5 * speed / 97                 # within tolerance + one row's error
+    assert worst < 0.01                                   # vs ~0.35 s of drift with a fixed tempo
+    assert len(ch) < rows / 5                             # hysteresis keeps changes sparse
+    assert nm.tempo_commands(98.0, 3, 100, lambda r: True, tol) == [(0, 98)]
+
+
+def test_envelope_rows_average_tremolo_instead_of_aliasing_it():
+    s = _fake()
+    s.env_t = np.arange(0, 3, 0.01)
+    s.env_g = 1 + 0.8 * np.sin(2 * np.pi * 7 * s.env_t)          # 7 Hz tremolo around 1
+    rows = [nm.env_at(s, r * 0.154, 0.154) for r in range(1, 18)]  # MI153's 154 ms rows
+    assert max(rows) - min(rows) < 0.3                             # point sampling: ~1.6
+
+
+def test_ntp_only_sounds_split_out_of_bank_merges():
+    spec = {"melodic": [{"slot": 2, "name": "Elec Organ", "program": 9, "covers": [9, 13], "key": 60},
+                        {"slot": 3, "name": "Solo", "program": 20, "covers": [20], "key": 60}], "drum": []}
+    conf = {"melodic": [{"slot": 101, "name": "Pipe Organ", "program": 13, "covers": [13], "key": 60},
+                        {"slot": 102, "name": "Solo2", "program": 20, "covers": [20], "key": 60}]}
+    out = nm.ntp_spec(spec, conf)
+    assert {m["name"]: m["covers"] for m in out["melodic"]} == {"Elec Organ": [9], "Pipe Organ": [13], "Solo2": [20]}
+    assert spec["melodic"][0]["covers"] == [9, 13]                  # shared bank spec untouched
