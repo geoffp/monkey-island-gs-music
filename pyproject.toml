@@ -23,9 +23,13 @@ mt32bank = "migs.mt32bank:main"
 voices = "migs.voices:main"
 ntpmod = "migs.ntpmod:main"
 ntpcheck = "migs.ntpfile:main"
+looplab = "migs.looplab:main"
 
 [dependency-groups]
 dev = ["pytest>=8"]
+lab = [
+    "matplotlib>=3.11.2",
+]
 
 [build-system]
 requires = ["uv_build>=0.9,<0.14"]

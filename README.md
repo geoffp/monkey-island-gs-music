@@ -78,6 +78,7 @@ These go in `original files/`, which is gitignored and never committed:
    - `music/ntp/shared/`: one set for every song, like the MIDI Synth bank.
 
    It renders previews of each to `<mode>/wav/` (ffmpeg/libopenmpt). `just ntpmod per-song` builds just one mode.
+   `just looplab` measures attack/loop construction methods on the MT-32 samples (`gs/build/looplab/report.md`, A/B WAVs, plots; see `docs/loop-detection.md`).
 5. **NinjaTrackerPlus, IIGS**: `just emu-ntp` converts the MODs to `.NTP` and boots straight into SenseiPlay. Open `songs`, then `PER.SONG` or `SHARED`, then `PART1` or `PART2`, and press Return on a song. `just emu-music` also has SenseiPlay and the songs in `/SenseiPlay/MI` (launch `sensei.system`).
 
 ## Status

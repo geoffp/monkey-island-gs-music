@@ -281,3 +281,17 @@ Results (flicker % of held-note volume triples; median note volume):
 Single-note levels vs Munt are unchanged (all within about ±3 dB, as before). The shared bank check still passes.
 
 Not done, noted for later: a longer attack→loop crossfade (12 vs 4 cycles) made no measurable difference to the handover spectral flux.
+
+## Loop lab: why the shared loops still buzzed (2026-11-07)
+Measured with `just looplab`; details, sources and the full method comparison are in `docs/loop-detection.md`.
+- **The converter is innocent:** NTP header and loop bytes equal the MOD bytes + 128.
+- **8-bit rounding:** the averaged-cycle loops were exactly periodic only in float. With a fractional number of samples per cycle (e.g. 512 B / 15 = 34.13), each cycle rounds differently. The error repeats once per loop: a loop-rate buzz at −37 to −48 dB in 10 of the 16 shared sounds (Xylophone −21 dB). Loops with a whole number of samples per cycle had none.
+- **`zero_start` forced `loop[0] = 0`** at a linear-interpolation crossing. The band-limited wave isn't 0 there (up to 1 LSB), so one sample per pass was wrong.
+- **What fixes both:**
+  - k must divide the loop length;
+  - band-limit one cycle and tile it;
+  - put an exact (Newton) band-limited zero crossing at `loop[0]`;
+  - shift the attack by up to one period so it ends in phase with the loop.
+
+  With a power-averaged harmonic cycle as well, there is no buzz in any sound, the timbre is within 0.6 dB of the MT-32's sustain average, and handover steps are ≤ 0.3 dB. Not integrated yet: waiting for the user's listening verdict.
+- **Not swells but beats:** the "slow swells" in Strings, Horn, Fantasy, Shakuhachi and Chorale are deep beating between detuned partials, at 0.4–0.9 s and 5–13 dB. A 512 B loop can't hold it.

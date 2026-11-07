@@ -298,6 +298,11 @@ ntpmod modes=ntp_modes: fetch-ntp fetch-munt
     for m in {{modes}}; do echo "== samples: $m"; cat "music/ntp/$m.log"; echo "previews: music/ntp/$m/wav/"; done
     exit $fail
 
+# Loop lab (research, not part of the build): attack detection + loop-construction candidates
+# measured on the MT-32 sample set -> gs/build/looplab/ (report.md, wav/, plots/). docs/loop-detection.md
+looplab mode="shared": fetch-ntp fetch-munt
+    uv run --group lab looplab music/midi/mt32/*.mid --samples "{{mode}}"
+
 # MOD -> .NTP with Ninjaforce's converter (needs php-cli). Streaming forbidden: everything in DOC RAM
 ntp modes=ntp_modes: (ntpmod modes)
     #!/usr/bin/env bash
