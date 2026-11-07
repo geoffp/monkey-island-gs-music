@@ -56,16 +56,18 @@ def _reverb_off() -> mido.Message:
 
 
 def render(smf2wav: Path, roms: Path, cache: Path, *, program: int | None, key: int,
-           hold: float, velocity: int = 100) -> np.ndarray:
-    """Render one note (melodic `program` on part 1, or rhythm `key` if program is None)."""
+           hold: float, velocity: int = 100, volume: int = 100) -> np.ndarray:
+    """Render one note (melodic `program` on part 1, or rhythm `key` if program is None) at
+    channel volume (CC7) `volume`."""
     tag = f"{'p%03d' % program if program is not None else 'rhythm'}-k{key}-h{hold}-v{velocity}"
+    tag += f"-c{volume}" if volume != 100 else ""
     wav = cache / f"{tag}.wav"
     if not wav.exists():
         cache.mkdir(parents=True, exist_ok=True)
         tpq, s = 480, 960                               # 120 BPM: 960 ticks per second
         ch = RHYTHM_CH if program is None else MELODIC_CH
         trk = mido.MidiTrack([_reverb_off(),
-                              mido.Message("control_change", channel=ch, control=7, value=100, time=0),
+                              mido.Message("control_change", channel=ch, control=7, value=volume, time=0),
                               mido.Message("control_change", channel=ch, control=10, value=64, time=0)])
         if program is not None:
             trk.append(mido.Message("program_change", channel=ch, program=program, time=0))

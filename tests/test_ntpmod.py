@@ -94,3 +94,69 @@ def test_conversion_invariants(tmp_path):
             if eff == 0xC:
                 assert 0 <= par <= 64
     assert rep.timing_err_ms < rep.row_ms / rep.speed                # micro-timing kept
+
+
+def test_loop_is_exactly_periodic_and_the_attack_flows_into_it():
+    sr = nm.mb.SR
+    t = np.arange(sr) / sr
+    # a chorused tone: two slightly detuned partials, so raw cycles drift (what made loops buzz)
+    x = np.sin(2 * np.pi * 220 * t) + 0.5 * np.sin(2 * np.pi * 221.3 * t + 1) + 0.3 * np.sin(2 * np.pi * 660 * t)
+    period, k, loop_bytes, attack_bytes = sr / 220, 8, 512, 2040
+    rate = loop_bytes * 220 / k
+    attack, loop, _ = nm.attack_and_loop(x, 100, period, rate, k, attack_bytes, loop_bytes)
+    assert len(attack) == attack_bytes and len(loop) == loop_bytes
+    P = np.abs(np.fft.rfft(loop)) ** 2
+    P[0] = 0
+    assert P[k::k].sum() / P.sum() > 0.999                    # only harmonics of the k-cycle loop
+    step = np.median(np.abs(np.diff(loop)))
+    assert abs(loop[0] - loop[-1]) < 3 * step                 # loop seam
+    assert abs(loop[0] - attack[-1]) < 3 * step               # attack -> loop seam
+
+
+def test_drum_rate_follows_bandwidth():
+    sr = nm.mb.SR
+    rng = np.random.default_rng(0)
+    n = int(0.05 * sr)
+    hat = rng.standard_normal(n) * np.exp(-np.arange(n) / (0.01 * sr))
+    hat = np.diff(hat, prepend=0)                               # high-passed noise burst
+    kick = np.sin(2 * np.pi * 60 * np.arange(sr) / sr) * np.exp(-np.arange(sr) / (0.3 * sr))
+    assert nm.drum_rate(hat, 1016, 6000, 26000) > 20000
+    assert nm.drum_rate(kick, 2040, 6000, 26000) == 6000
+    long_noise = np.diff(rng.standard_normal(sr), prepend=0)   # can't fit: trade, but at most half
+    assert 13000 <= nm.drum_rate(long_noise, 2040, 6000, 26000) < 26000
+
+
+def _song(tmp_path, events, name="s.mid"):
+    import mido
+    mf = mido.MidiFile(ticks_per_beat=120)
+    mf.tracks.append(mido.MidiTrack(events))
+    p = tmp_path / name
+    mf.save(p)
+    return p
+
+
+def test_channel_volume_and_swell_set_levels(tmp_path):
+    import mido
+    ev = [mido.Message("program_change", channel=1, program=9), mido.Message("program_change", channel=2, program=9),
+          mido.Message("control_change", channel=1, control=7, value=100),
+          mido.Message("control_change", channel=2, control=7, value=64)]
+    for ch in (1, 2):
+        ev += [mido.Message("note_on", channel=ch, note=60, velocity=100, time=0),
+               mido.Message("note_off", channel=ch, note=60, time=240)]
+    p = _song(tmp_path, ev)
+    notes, _, _ = nm.read_notes(p)
+    assert sorted(n.volume for n in notes) == [64, 100]
+    cc7 = (np.array([0.0, 64, 100, 127]), np.array([0.0, 0.35, 1.0, 1.8]))
+    s = _fake()
+    s.env_g = np.array([1.0, 2.0])                 # swells to twice its attack level
+    cfg = {"rows_per_unit": 2, "speed": 3, "quantize": 0.0, "oscillators": 31}
+    grid, _, _ = nm.convert_song(p, [s], {9: 0}, {}, cfg, dict(cfg), cc7)
+    vols = []
+    for cells in grid.cells:
+        on = [c for c in cells.values() if c[0]]
+        if on:
+            seq = [c[3] for _, c in sorted(cells.items()) if c[2] == 0xC]
+            vols.append((seq[0], max(seq)))
+    (a0, a_max), (b0, b_max) = sorted(vols, reverse=True)
+    assert a_max == 64 and a0 == pytest.approx(32, abs=2)     # loudest moment (the swell) = 64
+    assert b0 == pytest.approx(a0 * 0.35, abs=1.5)              # CC7 64 vs 100 per the curve

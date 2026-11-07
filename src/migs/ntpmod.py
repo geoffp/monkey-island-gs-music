@@ -6,8 +6,12 @@ to .NTP for the IIGS. Samples come from Munt renders of the sounds in gs/mt32ban
 are packed as NTP will pack them into the 64 KB DOC RAM. See docs/ninjatrackerplus.md.
 
 Melodic sample = raw MT-32 attack (`attack_bytes`, loop header) + a 512-byte loop holding
-k whole sustain cycles, at a rate that makes 512 bytes = k periods; note base + finetune make
-it play in tune. Loudness after the attack follows the MT-32 envelope via per-row Cxx.
+k identical sustain cycles (one averaged cycle, tiled: the loop is exactly periodic), at a rate
+that makes 512 bytes = k periods; note base + finetune make it play in tune. The attack's end
+is crossfaded into the loop's periodic continuation, so neither seam clicks or buzzes.
+Loudness after the attack follows the MT-32 envelope via per-row Cxx.
+Levels are measured in Munt, not guessed: each sample's peak, its velocity response, and the
+MT-32's channel-volume (CC7) curve; each song is normalised so its loudest note is volume 64.
 Velocity: Cxx in the note's cell; if the note needs an EDx micro-delay, Cxx goes in the
 preceding cell when that's silent-safe (one-shot track), else the note uses the instrument's
 default volume and the next row corrects it.
@@ -66,10 +70,13 @@ class ModSample:
     base_note: int = 0          # NTP note index (0-71) that plays MT-32 key `key0`
     key0: int = 60
     kind: str = "melodic"
-    balance: float = 1.0        # relative loudness (loudest = 1)
-    headroom: float = 1.0       # volume scale at note-on so the envelope can rise to 64
+    level: float = 1.0          # peak amplitude of the source (Munt, velocity 100, CC7 100) / data peak
+    vel_v: np.ndarray = field(default_factory=lambda: np.array([0.0, 127.0]))  # velocity response:
+    vel_g: np.ndarray = field(default_factory=lambda: np.array([0.0, 1.27]))   # gain vs velocity 100
+    key_v: np.ndarray = field(default_factory=lambda: np.array([0.0]))         # key response:
+    key_g: np.ndarray = field(default_factory=lambda: np.array([1.0]))         # gain vs key0
     env_t: np.ndarray = field(default_factory=lambda: np.zeros(1))   # seconds after note-on
-    env_g: np.ndarray = field(default_factory=lambda: np.ones(1))    # relative to note-on volume
+    env_g: np.ndarray = field(default_factory=lambda: np.ones(1))    # loudness vs note-on (may exceed 1: swells)
     rel_g: np.ndarray = field(default_factory=lambda: np.zeros(1))   # release, per 10 ms
     seconds: float = 0.0        # one-shot length (drums)
     default_volume: int = 48
@@ -112,9 +119,96 @@ def _best_tuning(freq: float, tables, min_rate, max_rate, loop_bytes, key0, key_
     return best
 
 
+def periodic_loop(x: np.ndarray, start: float, period: float, k: int, out: int, cycles: int = 4) -> np.ndarray:
+    """`out` points holding k identical cycles: the average of `cycles` source periods from
+    `start`, tiled k times and band-limited. Exactly periodic, so the loop seam is continuous;
+    the source's own cycle-to-cycle drift (chorus, vibrato) would otherwise jump at the seam
+    and buzz at the loop rate."""
+    fine = 1024
+    acc = np.zeros(fine)
+    for c in range(cycles):
+        acc += np.interp(start + period * (c + np.arange(fine) / fine), np.arange(len(x)), x)
+    cyc = acc / cycles
+    loop = resample(np.tile(cyc, k), out)
+    # averaging detuned partials loses level: match the source's RMS over the same span
+    src = np.interp(start + np.arange(fine * cycles) * (period / fine), np.arange(len(x)), x)
+    e_src, e_loop = float(np.sqrt(np.mean(src ** 2))), float(np.sqrt(np.mean(loop ** 2)))
+    return loop * (e_src / e_loop) if e_loop > 0 else loop
+
+
+def attack_and_loop(x: np.ndarray, a: int, period: float, rate: float, k: int, attack_bytes: int,
+                    loop_bytes: int, xfade_cycles: float = 2.0) -> tuple[np.ndarray, np.ndarray, float]:
+    """(attack, loop, source index where the attack ends). The attack is resampled with a
+    margin (no FFT edge ringing at the seam), and its last `xfade_cycles` periods crossfade
+    into the loop's periodic continuation, so attack -> loop is continuous in value and phase."""
+    att_end = a + attack_bytes / rate * mb.SR
+    loop = periodic_loop(x, att_end, period, k, loop_bytes)
+    margin = int(4 * period)
+    hi = min(len(x), int(round(att_end)) + margin)
+    seg = x[a:hi]
+    attack = resample(seg, int(round(len(seg) * rate / mb.SR)))[:attack_bytes]
+    if len(attack) < attack_bytes:
+        attack = np.pad(attack, (0, attack_bytes - len(attack)))
+    n = min(attack_bytes, max(4, int(round(xfade_cycles * loop_bytes / k))))
+    ext = loop[np.arange(-n, 0) % loop_bytes]           # what the loop would have been before its start
+    w = np.linspace(0, 1, n + 1)[1:]
+    attack[-n:] = attack[-n:] * (1 - w) + ext * w
+    return attack, loop, att_end
+
+
+def drum_rate(seg: np.ndarray, nbytes: int, lo: float, hi: float) -> float:
+    """Sample rate for a one-shot of `nbytes`: fast enough for the sound's bandwidth (2.2 x the
+    frequency below which 95% of its energy lies), then lowered, by at most half, if the bytes
+    can't hold 95% of its energy at that rate. Filling the bytes with the whole -46 dB tail
+    instead put hats and shakers (energy ~14 kHz) at 6 kHz, which made them all but silent."""
+    SR = mb.SR
+    P = np.abs(np.fft.rfft(seg)) ** 2
+    c = np.cumsum(P) / (P.sum() or 1.0)
+    f95 = float(np.fft.rfftfreq(len(seg), 1 / SR)[min(np.searchsorted(c, 0.95), len(c) - 1)])
+    bw = min(hi, max(lo, 2.2 * f95))
+    e = np.cumsum(seg ** 2) / (float(np.sum(seg ** 2)) or 1.0)
+    d95 = max(int(np.searchsorted(e, 0.95)), 1) / SR
+    fits = nbytes / d95                                  # rate at which the bytes hold 95%
+    return float(min(hi, max(lo, bw if fits >= bw else max(fits, bw / 2))))
+
+
+VEL_POINTS = (20, 40, 64, 80, 100, 127)
+
+
+def _peak(x: np.ndarray) -> float:
+    return float(np.max(mb.rms_envelope(x, 0.005)))
+
+
+def velocity_response(render_at) -> tuple[np.ndarray, np.ndarray]:
+    """Peak level vs velocity, relative to velocity 100, measured from renders (the MT-32's
+    velocity sensitivity differs per timbre: closed hat x2.5 at 127, bass x1.4)."""
+    ref = _peak(render_at(100)) or 1.0
+    return (np.array([0.0, *VEL_POINTS], float),
+            np.array([0.0, *(_peak(render_at(v)) / ref for v in VEL_POINTS)]))
+
+
+def key_response(render_at, key0: int, lo: int, hi: int) -> tuple[np.ndarray, np.ndarray]:
+    """Peak level vs key, relative to the sampled key `key0`: MT-32 timbres change level with
+    key (TVA key follow, partial balance), so one sample's level doesn't fit its whole range."""
+    keys = sorted({lo, hi, key0, *range(lo, hi, 12)})
+    ref = _peak(render_at(key0)) or 1.0
+    return np.array(keys, float), np.array([_peak(render_at(k)) / ref for k in keys])
+
+
+CC7_POINTS = (0, 10, 20, 32, 40, 52, 64, 77, 90, 100, 110, 120, 127)
+
+
+def cc7_curve(smf2wav, roms, cache, program: int = 50, key: int = 67) -> tuple[np.ndarray, np.ndarray]:
+    """The MT-32 part-volume (CC7) curve, gain relative to CC7 100, measured in Munt. It is
+    steep (about 0.35 at 64, 0.11 at 40) and the same on melodic and rhythm parts."""
+    lv = [_peak(mb.render(smf2wav, roms, cache, program=program, key=key, hold=0.5, volume=v)) for v in CC7_POINTS]
+    ref = lv[CC7_POINTS.index(100)] or 1.0
+    return np.array(CC7_POINTS, float), np.array(lv) / ref
+
+
 def build_samples(spec: dict, cfg: dict, key_ranges: dict[int, tuple[int, int]], smf2wav, roms, cache,
                   tables, log=print) -> tuple[list[ModSample], dict, dict]:
-    """Samples per gs/mt32bank.toml; returns (samples, program->index, rhythm key->(index, note))."""
+    """Samples per gs/mt32bank.toml; returns (samples, program->index, rhythm key->(index, note, level gain))."""
     SR = mb.SR
     hold = spec.get("hold_seconds", 2.0)
     samples, programs, drums = [], {}, {}
@@ -130,33 +224,32 @@ def build_samples(spec: dict, cfg: dict, key_ranges: dict[int, tuple[int, int]],
         lo, hi = key_ranges.get(m["slot"], (m["key"], m["key"]))
         err, k, rate, n0, ft = _best_tuning(fm, tables, cfg["min_rate"], cfg["max_rate"],
                                             cfg["loop_bytes"], m["key"], min(lo, m["key"]), max(hi, m["key"]))
-        # attack = source [a, a + attack_bytes/rate); loop = the next k periods (continuous)
-        t_att = cfg["attack_bytes"] / rate
-        att_end = a + t_att * SR
-        attack = resample(x[a:int(round(att_end))], cfg["attack_bytes"])
-        pos = att_end + np.arange(4096) * (k * period / 4096)
-        loop = resample(np.interp(pos, np.arange(len(x)), x), cfg["loop_bytes"])
+        # attack = source [a, a + attack_bytes/rate); loop = the next k periods
+        attack, loop, att_end = attack_and_loop(x, a, period, rate, k, cfg["attack_bytes"], cfg["loop_bytes"])
         e_loop = float(np.sqrt(np.mean(loop ** 2))) or 1e-9
         # envelope after the attack, relative to the loop's own level
         t = np.arange(int(att_end), off, int(0.01 * SR))
         g = env[t] / e_loop
         g_max = float(g.max()) if len(g) else 1.0
-        headroom = max(cfg["headroom_min"], min(1.0, 1.0 / g_max)) if g_max > 0 else 1.0
         rel = env[off: off + int(cfg["release_max"] * SR): int(0.01 * SR)]
         rel_g = rel / max(env[off], 1e-9)
         data = np.concatenate([attack, loop])
         peak = float(np.max(np.abs(data))) or 1.0
         s = ModSample(m["name"], data / peak, loop_start=cfg["attack_bytes"], loop_len=cfg["loop_bytes"],
-                      finetune=ft, base_note=n0, key0=m["key"], kind="melodic", headroom=headroom,
-                      env_t=(t - a) / SR, env_g=np.minimum(g * headroom, 1.0), rel_g=np.clip(rel_g, 0, 1),
-                      tune_cents=err)
-        s.balance = float(np.max(env[a:off]))
+                      finetune=ft, base_note=n0, key0=m["key"], kind="melodic",
+                      env_t=(t - a) / SR, env_g=g, rel_g=np.clip(rel_g, 0, 1),
+                      tune_cents=err, level=peak)
+        s.vel_v, s.vel_g = velocity_response(lambda v: mb.render(smf2wav, roms, cache, program=m["program"],
+                                                                 key=m["key"], hold=0.5, velocity=v))
+        s.key_v, s.key_g = key_response(lambda kk: mb.render(smf2wav, roms, cache, program=m["program"],
+                                                             key=kk, hold=0.5), m["key"], min(lo, m["key"]),
+                                        max(hi, m["key"]))
         idx = len(samples)
         samples.append(s)
         for p in m["covers"]:
             programs[p] = idx
         log(f"  {m['name']:<12} k={k:2d} rate {rate:7.0f} Hz note {n0:2d} ft {ft:+d} "
-            f"err {err:+5.1f} cents, headroom {headroom:.2f}, keys {lo}-{hi}")
+            f"err {err:+5.1f} cents, swell x{g_max:.2f}, keys {lo}-{hi}")
 
     for d in spec["drum"]:
         x = mb.render(smf2wav, roms, cache, program=None, key=d["key"], hold=0.5)
@@ -164,7 +257,8 @@ def build_samples(spec: dict, cfg: dict, key_ranges: dict[int, tuple[int, int]],
         env = mb.rms_envelope(x, 0.005)
         tail = np.nonzero(env[a:] > 0.005 * np.max(env))[0]
         dur = (tail[-1] + 1) / SR if len(tail) else 0.1
-        want = min(26000, max(mb.MIN_DRUM_RATE, (d["bytes"] - STOPPER) / dur))
+        want = drum_rate(x[a: a + int(dur * SR)], d["bytes"] - STOPPER,
+                         cfg.get("drum_min_rate", 6000), cfg.get("drum_max_rate", 26000))
         # pick the note whose ft-0 period gives a rate close to `want`, leaving room for offsets
         offs = {c: 0 if c == d["key"] else mb.pitch_offset(x, mb.render(smf2wav, roms, cache,
                                                                          program=None, key=c, hold=0.5))
@@ -177,18 +271,20 @@ def build_samples(spec: dict, cfg: dict, key_ranges: dict[int, tuple[int, int]],
         kk = max(1, len(seg) // 10)
         fade[-kk:] = np.linspace(1, 0, kk)
         data = resample(seg * fade, max(2, int(len(seg) / SR * rate) // 2 * 2))
-        s = ModSample(d["name"], data / (float(np.max(np.abs(data))) or 1.0), kind="drum",
-                      base_note=n0, key0=d["key"], seconds=len(data) / rate)
-        s.balance = float(np.max(env))
+        peak = float(np.max(np.abs(data))) or 1.0
+        s = ModSample(d["name"], data / peak, kind="drum", base_note=n0, key0=d["key"],
+                      seconds=len(data) / rate, level=peak)
+        s.vel_v, s.vel_g = velocity_response(lambda v: mb.render(smf2wav, roms, cache, program=None,
+                                                                 key=d["key"], hold=0.5, velocity=v))
         idx = len(samples)
         samples.append(s)
+        ref = _peak(x) or 1.0                            # each rhythm key has its own MT-32 level
         for c, o in offs.items():
-            drums[c] = (idx, n0 + o)
-        log(f"  {d['name']:<12} {len(data)} B @ {rate:6.0f} Hz note {n0:2d}, covers {offs}")
+            gain = 1.0 if c == d["key"] else _peak(mb.render(smf2wav, roms, cache, program=None, key=c, hold=0.5)) / ref
+            drums[c] = (idx, n0 + o, gain)
+        log(f"  {d['name']:<12} {len(data)} B @ {rate:6.0f} Hz ({len(data) / rate * 1000:4.0f} ms) note {n0:2d}, "
+            f"covers {offs}")
 
-    top = max(s.balance for s in samples)
-    for s in samples:
-        s.balance /= top
     if len(samples) > 31:
         raise ValueError(f"{len(samples)} samples > 31 (MOD limit)")
     return samples, programs, drums
@@ -212,6 +308,7 @@ class Note:
     key: int
     vel: int
     channel: int
+    volume: int = 100   # channel CC7 at note-on (MT-32 power-on part volume is 100)
 
 
 def read_notes(path: Path) -> tuple[list[Note], dict[int, int], float]:
@@ -227,13 +324,16 @@ def read_notes(path: Path) -> tuple[list[Note], dict[int, int], float]:
             events.append((t, msg))
     events.sort(key=lambda e: e[0])
     sec = lambda tick: tick * tempo / 1e6 / mf.ticks_per_beat
-    programs, notes, open_ = {}, [], {}
+    programs, notes, open_, volume = {}, [], {}, {}
     end = 0.0
     for tick, m in events:
         if m.type == "program_change":
             programs.setdefault(m.channel, m.program)
+        elif m.type == "control_change" and m.control == 7:
+            volume[m.channel] = m.value
         elif m.type == "note_on" and m.velocity > 0:
-            open_.setdefault((m.channel, m.note), []).append(Note(sec(tick), sec(tick), m.note, m.velocity, m.channel))
+            open_.setdefault((m.channel, m.note), []).append(
+                Note(sec(tick), sec(tick), m.note, m.velocity, m.channel, volume.get(m.channel, 100)))
         elif m.type in ("note_on", "note_off") and open_.get((m.channel, m.note)):
             n = open_[(m.channel, m.note)].pop(0)
             n.off = sec(tick)
@@ -267,6 +367,7 @@ class Report:
     vel_in_cell: int = 0
     vel_preceding: int = 0
     vel_default: int = 0
+    level_ref: float = 1.0      # note loudness that maps to MOD volume 64
     nudged: int = 0
     tracks_used: int = 0
     oscillators: int = 0
@@ -297,7 +398,9 @@ class Grid:
         return c is None or c[2] < 0
 
 
-def convert_song(path: Path, samples, programs, drums, cfg: dict, song_cfg: dict) -> tuple[Grid, int, Report]:
+def convert_song(path: Path, samples, programs, drums, cfg: dict, song_cfg: dict,
+                 cc7: tuple[np.ndarray, np.ndarray] | None = None) -> tuple[Grid, int, Report]:
+    """`cc7`: (CC7 values, gains vs 100) from cc7_curve(); None ignores channel volume."""
     notes, chan_prog, end = read_notes(path)
     rep = Report()
     unit, phase = song_cfg.get("unit_ticks"), song_cfg.get("phase_ticks")
@@ -346,11 +449,34 @@ def convert_song(path: Path, samples, programs, drums, cfg: dict, song_cfg: dict
         osc_used += 1 if kind == "drum" else 2
         return len(grid.cells) - 1
 
-    def vol_for(s: ModSample, vel: int, g: float = 1.0) -> int:
-        return max(1, min(64, round(64 * s.balance ** 0.5 * s.headroom * (vel / 127) * g)))
+    # Loudness of a note as the MT-32 plays it: sample peak x velocity response x CC7 curve.
+    # The song is normalised so its loudest moment (99.5th percentile over notes, including
+    # sounds that swell after their attack) is MOD volume 64.
+    def sample_of(n: Note) -> int | None:
+        if n.channel == RHYTHM:
+            return drums[n.key][0] if n.key in drums else None
+        return programs.get(chan_prog.get(n.channel, -1))
 
-    for s in samples:
-        s.default_volume = vol_for(s, 80)
+    def amp(s: ModSample, n: Note) -> float:
+        g7 = float(np.interp(n.volume, *cc7)) if cc7 is not None else 1.0
+        gk = drums[n.key][2] if n.channel == RHYTHM else float(np.interp(n.key, s.key_v, s.key_g))
+        return s.level * float(np.interp(n.vel, s.vel_v, s.vel_g)) * g7 * gk
+
+    swell = lambda s: max(1.0, float(np.max(s.env_g))) if s.kind == "melodic" else 1.0
+    amps = [amp(samples[si], n) * swell(samples[si]) for n in notes if (si := sample_of(n)) is not None]
+    ref = song_cfg.get("level_ref") or (float(np.percentile(amps, 99.5)) if amps else 1.0)
+    rep.level_ref = ref
+
+    def vol_for(s: ModSample, n: Note) -> int:
+        return max(1, min(64, round(64 * amp(s, n) / ref)))
+
+    # default volume (used for one row by delayed notes): the sample's median in this song
+    by_sample: dict[int, list[int]] = {}
+    for n in notes:
+        if (si := sample_of(n)) is not None:
+            by_sample.setdefault(si, []).append(vol_for(samples[si], n))
+    for si, s in enumerate(samples):
+        s.default_volume = int(np.median(by_sample[si])) if si in by_sample else 32
 
     for n in notes:
         rep.notes += 1
@@ -359,7 +485,7 @@ def convert_song(path: Path, samples, programs, drums, cfg: dict, song_cfg: dict
             if hit is None:
                 rep.dropped += 1
                 continue
-            si, note_idx = hit
+            si, note_idx = hit[:2]
         else:
             si = programs.get(chan_prog.get(n.channel, -1))
             if si is None:
@@ -392,7 +518,8 @@ def convert_song(path: Path, samples, programs, drums, cfg: dict, song_cfg: dict
             rep.stolen += 1
         trk_kind[tr] = kind
         same = trk_inst[tr] == si + 1
-        v = vol_for(s, n.vel)
+        vf = 64 * amp(s, n) / ref                    # unrounded, for the envelope rows
+        v = vol_for(s, n)
         silent_before = False
         cell = grid.get(tr, r)
         cell[0] = note_idx + 1
@@ -430,14 +557,14 @@ def convert_song(path: Path, samples, programs, drums, cfg: dict, song_cfg: dict
             for rr in range(r + 1, r_off):
                 dt = (rr - r) * row_s
                 g = float(np.interp(dt, s.env_t, s.env_g, right=s.env_g[-1]))
-                vv = max(0, min(64, round(v * g / s.headroom)))    # note volume includes headroom
+                vv = max(0, min(64, round(vf * g)))
                 if vv != prev and grid.effect_free(tr, rr):
                     c = grid.get(tr, rr)
                     c[2], c[3] = 0xC, vv
                     prev = vv
                 last = rr
             g_off = float(np.interp((r_off - r) * row_s, s.env_t, s.env_g, right=s.env_g[-1]))
-            v_off = v * g_off / s.headroom
+            v_off = vf * g_off
             steps = max(1, int(round(len(s.rel_g) * 0.01 / row_s)))
             for i in range(steps + 1):
                 rr = r_off + i
@@ -521,6 +648,8 @@ def main(argv: list[str] | None = None) -> int:
     cfg = conf["defaults"]
     spec = tomllib.loads(args.spec.read_text())
     tables = period_tables(args.make_tables)
+    cc7 = cc7_curve(args.smf2wav, args.roms, args.cache)
+    print("MT-32 CC7 curve: " + " ".join(f"{int(v)}:{g:.2f}" for v, g in zip(*cc7)))
 
     # key ranges per melodic slot across all songs (so one sample mapping fits every song)
     prog_slot = {p: m["slot"] for m in spec["melodic"] for p in m["covers"]}
@@ -543,7 +672,7 @@ def main(argv: list[str] | None = None) -> int:
     for p in args.inputs:
         sid = p.stem.split("-")[0]
         song_cfg = {**cfg, **conf.get("songs", {}).get(sid, {})}
-        grid, patterns, rep = convert_song(p, samples, programs, drums, cfg, song_cfg)
+        grid, patterns, rep = convert_song(p, samples, programs, drums, cfg, song_cfg, cc7)
         (args.out_dir / f"MI{sid}.mod").write_bytes(mod_file(f"MI1 {sid}", samples, grid, patterns, tables))
         print(f"{sid:<6} {rep.tempo:5d} {rep.speed:3d} {rep.row_ms:6.1f} {rep.patterns:3d} {rep.tracks_used:3d} "
               f"{rep.oscillators:3d} {rep.notes:5d} {rep.dropped:4d} {rep.stolen:5d} {rep.delayed:5d} "

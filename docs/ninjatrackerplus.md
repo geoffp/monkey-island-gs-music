@@ -99,15 +99,23 @@ So the songs were played to a beat, but the outliers (50–150 ms: drift, grace 
 The MOD is the primary artefact: it renders on the desktop (ffmpeg's libopenmpt → `music/ntp/wav/`), and Ninjaforce's converter (`php-cli`, `STREAM_FORBIDDEN`) turns it into `.NTP`. Settings live in `gs/ntp.toml`; sounds come from `gs/mt32bank.toml` (the same 14 melodic and 14 drum sounds as MI1.BNK).
 
 - **Samples:**
-  - **Melodic:** the raw MT-32 attack (2040 B, so with NTP's 8 stopper bytes it fills a 2 KB block), then a 512 B loop holding k whole sustain cycles, continuous with the attack. The rate is set by 512 B = k periods. The note base + finetune (16 ProTracker finetune tables read from `make_tables.php`) tune it to within ±4 cents. NTP rate = PAL 3 546 894.6 / period.
-  - **Drums:** one-shots at about 5.9–8.3 kHz. Pitched pairs are offset by whole notes.
+  - **Melodic:** the raw MT-32 attack (2040 B, so with NTP's 8 stopper bytes it fills a 2 KB block), then a 512 B loop holding k sustain cycles. The rate is set by 512 B = k periods. The note base + finetune (16 ProTracker finetune tables read from `make_tables.php`) tune it to within ±4 cents. NTP rate = PAL 3 546 894.6 / period.
+    - The loop is **one averaged cycle tiled k times** (`periodic_loop`), so it is exactly periodic. Its RMS is matched to the source.
+    - The attack is resampled with a margin, so the FFT resampler doesn't ring at its end. Its last 2 cycles crossfade into the loop's periodic continuation (`attack_and_loop`).
+  - **Drums:** one-shots. The rate follows each drum's bandwidth (`drum_rate`): 2.2 × the frequency below which 95% of its energy lies, in 6–26 kHz (`drum_min_rate`/`drum_max_rate`). If the bytes can't hold 95% of the energy at that rate, it's lowered by at most half. Results:
+    - hats and agogo 26.3 kHz;
+    - cabasa 17.6, rim 15.7, snare 11.1, quijada 10.5 kHz;
+    - kick, toms, congas, bongos, timbale, claves 5.9 kHz.
+
+    Pitched pairs are offset by whole notes.
   - **Memory:** sized and packed by NTP's rules (stopper bytes, loop split, power-of-two blocks, largest at page 0), giving **242 of 256 DOC pages** for 28 samples.
 - **Timing:** rows sit on each song's detected grid unit / `rows_per_unit` (default 32nds), speed 3, MOD tempo per song (49–137). `EDx` keeps micro-timing (`quantize = 0`). The measured mean error is 4.6–13.6 ms.
-- **Velocity:**
+- **Levels (measured, `just ntpmod` prints the CC7 curve):** a note's loudness = sample peak (Munt, velocity 100, CC7 100) × its **velocity response** × **key response** (melodic) or per-key rhythm level (drum covers) × the MT-32 **CC7 curve**. All three are measured in Munt (`velocity_response`, `key_response`, `cc7_curve`). Each song is normalised so its loudest moment (99.5th percentile, including sounds that swell after the attack) is volume 64 (`level_ref` in `gs/ntp.toml` pins it).
+- **Velocity placement:**
   - in the note's own cell when it needs no delay;
   - else, on a drum track that has gone silent, a `Cxx` in the preceding cell plus an instrument-less note (NTP keeps the track volume; `setup_effect` in `ninjatrackerplus.s`);
-  - else the instrument's default volume, corrected by the next row's envelope `Cxx`.
-- **Envelope:** per-row `Cxx` follows the MT-32 loudness contour after the attack. Notes start with "headroom" so swelling sounds (strings, organ) can rise. Release is a ramp of up to 0.3 s, then `C00`.
+  - else the instrument's default volume (the sample's median volume in that song), corrected by the next row's envelope `Cxx`.
+- **Envelope:** per-row `Cxx` follows the MT-32 loudness contour after the attack, including swells above the attack level (strings and organ reach about 2×). Release is a ramp of up to 0.3 s, then `C00`.
 - **Tracks:** created on demand within NTP's **31-oscillator** budget (drum tracks 1, looped melodic tracks 2). When the budget is full, a track that's only releasing is stolen. There's no separate control track: speed and tempo sit in row 0 (the lead-in), and the loop `B00` goes in a free cell of the last row.
 - **Channel tag:** `nCHN` below 10 channels, `nnCH` from 10. libopenmpt didn't recognise `09CH` (it rendered silence), so the format matters.
 
@@ -125,4 +133,22 @@ Known problems and open work, from the build log and analysis:
 - **Drums are low-fi**: one-shots at about 5.9–8.3 kHz, to fit 64 KB.
 - **Level:** previews peak around −10 dB.
 - **Pattern size and player CPU** haven't been measured on the IIGS. Rows are 32nds of the detected grid unit (`rows_per_unit = 2`). `gs/ntp.toml` per-song overrides can coarsen this.
-- The specific problems heard in listening still need to be written down here as they're triaged.
+
+User's listening notes:
+1. **MI160's drums were almost inaudible.**
+2. **Sustains buzzed and didn't sound tonal**, as if the loops weren't aligned.
+
+### Fixes (2026-11-06, second build)
+Diagnosed by rendering the same notes through Munt and through the MOD (ffmpeg/libopenmpt) and comparing energy, one note per sound and one channel at a time:
+- **Buzzing sustains:** the loop was k raw source cycles. MT-32 tones drift from cycle to cycle (chorus, detuned partials, vibrato), so the loop's end didn't meet its start. Seam jumps were up to 70× a normal sample step, and only 26–57% of the loop's energy was harmonic for organ, strings and shakuhachi, so it buzzed at the loop rate (rate/512, about 20–40 Hz). The attack→loop junction also jumped, because the attack and the loop were FFT-resampled separately.
+  - **Fix:** a tiled averaged cycle and a crossfaded junction (above). All 14 loops are now >99.9% harmonic.
+  - **Trade-off:** chorus and ensemble movement inside the sustain are gone. A future option: a longer loop, or two detuned tracks.
+- **Wrong mix: ±7 dB per sound in single-note tests** (one note per sound, compared with Munt). Causes:
+  - **CC7 was ignored.** MI160 sets the drums to 120 and melodic parts to 52–127. The MT-32 curve is steep. Measured in Munt, gain relative to CC7 100, the same on melodic and rhythm parts: 127 → 1.83, 120 → 1.61, 90 → 0.77, 77 → 0.55, 64 → 0.35, 52 → 0.21, 40 → 0.11, 20 → 0.02.
+  - **Velocity was treated as linear.** The MT-32's velocity response differs per timbre. Velocity 127 vs 100: closed hat ×2.49, strings and snare ×1.76, kick ×1.54, bass ×1.41, horn ×1.23. Velocity 40: hat 0.13, bass 0.44.
+  - **Levels came from RMS, with a √ compression**, not from the sample's peak. MOD output = volume × normalised data, so volume ∝ source peak reproduces the MT-32's level exactly.
+  - **Drums at 5.9–8.3 kHz:** the old rule stretched each drum over its whole −46 dB tail. Hats, cabasa and agogo have 90% of their energy at 11–15 kHz but only 40–60 ms of real energy, so a 3 kHz Nyquist removed nearly all of them: 6–14 dB too quiet.
+  - **"Headroom" scaled swelling sounds down.** It multiplied the whole note, not just the attack, so organ, strings, shakuhachi and Fantasy were 6–9 dB too quiet. Fix: the envelope uses the true gain and normalisation includes the swell.
+
+  **After the fixes**, every sound is within ±2.5 dB of the MT-32 in single-note tests. In MI160, drums sit 6.8 dB under the melodic parts (MT-32: 6.1 dB); in MI150, 7.8 dB (MT-32: 6.7 dB).
+- **Preview pitfall:** libopenmpt scales its MOD mix by channel count. Compare stems only at equal channel counts. This doesn't affect the mix within one song.

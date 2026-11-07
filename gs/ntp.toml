@@ -15,7 +15,8 @@ loop_bytes = 512        # one ideal-size loop holding whole cycles
 min_rate = 9000         # sample-rate window for melodic samples (Hz)
 max_rate = 22000
 release_max = 0.3       # seconds of release ramp after note-off
-headroom_min = 0.5      # min attack volume headroom for instruments that swell after the attack
+drum_min_rate = 6000    # one-shot rate window (Hz); within it the rate follows each drum's
+drum_max_rate = 26000   # bandwidth, trading length for it (hats, shakers need ~26 kHz)
 
 # Per-song overrides, e.g.:
 # [songs.160]
