@@ -14,7 +14,11 @@ speed = 3               # tracker ticks per row; EDx resolution = row / speed
 quantize = 0.0          # 0 = full performance timing, 1 = hard snap to rows
 oscillators = 31        # NTP budget: drum (one-shot) tracks use 1, looped melodic tracks 2
 attack_bytes = 2040     # loop header; NTP adds 8 stopper bytes -> one 2 KB DOC block
-loop_bytes = 512        # short loop: one averaged cycle, tiled (decaying sounds; the minimum)
+loop_bytes = 512        # short loop: one cycle, tiled (decaying sounds; the minimum)
+loop_construction = "eprime"  # short loops. eprime: E'+ (whole samples per cycle, power-averaged
+                        # harmonic cycle, exact zero crossing, phase-aligned attack; no 8-bit
+                        # loop-rate buzz; docs/loop-detection.md). averaged: the original
+                        # averaged cycle (fractional samples per cycle). Long raw loops: same in both.
 max_loop_bytes = 16384  # long loops (raw sustain, crossfaded seam) for steady sounds, grown per
                         # song into the DOC RAM that song's own samples leave free
 raw_loop_slow_hz = 2.0  # a raw loop size is used only if it repeats at most this often (its
@@ -47,18 +51,11 @@ drum_max_rate = 26000   # bandwidth, trading length for it (hats, shakers need ~
 [modes.shared]
 ntp_attack_bytes = { "Elec Organ" = 1016, "Sax" = 1016, "Acou Bass" = 1016, "Vibes" = 1016 }
 
-# Trial variants (built side by side for listening): a variant = a `base` sample-set mode plus
-# overrides. loop_construction = "eprime": short (512 B) loops built as E'+ (whole samples per
-# cycle, power-averaged harmonic cycle, exact zero crossing, phase-aligned attack; see
-# docs/loop-detection.md); "averaged" (default): today's averaged-cycle loops. Long raw loops
-# are the same in both.
-[modes.per-song-e]
-base = "per-song"
-loop_construction = "eprime"
-
-[modes.shared-e]
-base = "shared"
-loop_construction = "eprime"
+# Trial variants, built side by side for listening: a `base` sample-set mode plus overrides.
+# Add the name to `ntp_modes` in the justfile. E.g. the original loops next to `shared`:
+# [modes.shared-avg]
+# base = "shared"
+# loop_construction = "averaged"
 
 # Per-song overrides, e.g.:
 # [songs.160]

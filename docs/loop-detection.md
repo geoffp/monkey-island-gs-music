@@ -157,7 +157,13 @@ Keep today's attack sizes. (Xylophone is now a one-shot, see above; Taiko doesn'
 
 **For long per-song raw loops,** use the seam search (C) with the adaptive crossfade. Choose the length at a whole number of beat periods (the Elec Organ / Shakuhachi follow-up in `plans/TODO.md`). Measure them with the same metrics.
 
-**Integration** into `ntpmod.build_samples` waits for the user's listening verdict: `build/looplab/wav/<sound>.wav` plays the Munt source, then A (today), then E′+. Each is played at the sampled key, the lowest song key and the highest, through a DOC-style no-interpolation player.
+**Integration:**
+- E′+ was trialled as the `per-song-e` / `shared-e` build variants (`docs/ninjatrackerplus.md`).
+- **Since 2026-11-07 it is the build's standard** for short loops (`loop_construction = "eprime"` in `config/ntp.toml`).
+- Its code moved from `looplab` into `src/migs/loopbuild.py`: attack detection, `loop_power`, `zero_start_exact`, `join_aligned`. `looplab` imports it from there to measure against the other candidates.
+- The original averaged cycle (candidate A) is still available as `loop_construction = "averaged"`.
+
+`build/looplab/wav/<sound>.wav` plays the Munt source, then A, then E′+. Each is played at the sampled key, the lowest song key and the highest, through a DOC-style no-interpolation player.
 
 [soodek]: https://music-tech-archive-2024.netlify.app/files/soodek/Soodek_Capstone_Paper_Final.pdf
 [la-guide]: https://loopauditioneer.sourceforge.io/userguide.html

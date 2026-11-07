@@ -463,3 +463,10 @@ def test_drums_borrow_idle_melodic_tracks_when_the_budget_is_full(tmp_path):
     _, _, last = nm.convert_song(p, [_fake(), kick, snare], {9: 0}, drums, base, {**base, "drum_borrow": "last"})
     assert never.dropped > 0
     assert last.dropped == 0 and last.oscillators <= 31
+
+
+def test_loop_construction_defaults_to_eprime_and_rejects_unknown_names():
+    assert nm.loop_construction({}) == "eprime"
+    assert nm.loop_construction({"loop_construction": "averaged"}) == "averaged"
+    with pytest.raises(ValueError, match="loop_construction"):
+        nm.loop_construction({"loop_construction": "eprim"})

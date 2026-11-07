@@ -286,10 +286,21 @@ def attack_and_loop(x: np.ndarray, a: int, period: float, rate: float, k: int, a
     return attack, loop, att_end, at
 
 
+LOOP_CONSTRUCTIONS = ("eprime", "averaged")
+
+
+def loop_construction(cfg: dict) -> str:
+    """The configured short-loop construction; an unknown name is an error, not a fallback."""
+    c = cfg.get("loop_construction", "eprime")
+    if c not in LOOP_CONSTRUCTIONS:
+        raise ValueError(f"loop_construction = {c!r}: expected one of {', '.join(LOOP_CONSTRUCTIONS)}")
+    return c
+
+
 def eprime_attack_and_loop(m: dict, x: np.ndarray, a: int, period: float, rate: float, k: int,
                            attack_bytes: int, loop_bytes: int, hold: float, render
                            ) -> tuple[np.ndarray, np.ndarray, float, float]:
-    """E'+ (docs/loop-detection.md; implemented in looplab, used from here while it's on trial):
+    """E'+ (loop_construction = "eprime", the default; docs/loop-detection.md, code in loopbuild):
     - one cycle with each harmonic at its RMS level over the sustain (power-averaged: beating
       partials keep their mean power), phases from the period where the attack ends;
     - tiled k times with whole samples per cycle (k | loop_bytes: see _best_tuning), and an
@@ -298,7 +309,7 @@ def eprime_attack_and_loop(m: dict, x: np.ndarray, a: int, period: float, rate: 
       loop[0]: the crossfade joins aligned waveforms (no level dip at the handover).
     The sustain span comes from the attack detection on a 6 s render (identical to the 2 s one
     up to note-off). Same return as attack_and_loop."""
-    from . import looplab as ll
+    from . import loopbuild as ll
     SR = mb.SR
     snd = ll.analyse(m, render, build_hold=hold)
     att_end = a + attack_bytes / rate * SR
@@ -483,8 +494,9 @@ def build_samples(spec: dict, cfg: dict, key_ranges: dict[int, tuple[int, int]],
         sustain_s = cfg.get("sustain_s", 0.4)
         steady = is_steady(env, a, off, sustain_s)
         loop_bytes = m.get("ntp_loop_bytes", cfg["loop_bytes"]) if steady else cfg["loop_bytes"]
-        # loop_construction = "eprime": short loops are built as in docs/loop-detection.md (E'+)
-        eprime = cfg.get("loop_construction", "averaged") == "eprime"
+        # short loops: "eprime" (default) = E'+ (docs/loop-detection.md); "averaged" = the
+        # original averaged cycle (attack_and_loop), fractional samples per cycle
+        eprime = loop_construction(cfg) == "eprime"
         while True:
             err, k, rate, n0, ft = _best_tuning(fm, tables, cfg["min_rate"], cfg["max_rate"],
                                                 loop_bytes, m["key"], min(lo, m["key"]), max(hi, m["key"]),
@@ -1201,7 +1213,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--roms", type=Path, default=Path("original files/mt-32 roms"))
     ap.add_argument("--cache", type=Path, default=Path("build/cache/mt32samples"))
     ap.add_argument("--samples", help="build variant: per-song, shared, or a [modes.<name>] with a `base` "
-                                      "(e.g. per-song-e, shared-e); default config/ntp.toml `samples`")
+                                      "(e.g. shared-avg); default config/ntp.toml `samples`")
     args = ap.parse_args(argv)
     conf = tomllib.loads(args.config.read_text())
     variant = args.samples or conf["defaults"].get("samples", "per-song")
@@ -1210,7 +1222,7 @@ def main(argv: list[str] | None = None) -> int:
     if mode not in ("per-song", "shared"):
         raise SystemExit(f"samples must be per-song, shared or a [modes.<name>] with base = per-song/shared, "
                          f"not {variant!r}")
-    # defaults < [modes.<base>] < [modes.<variant>] (e.g. shared-e inherits shared's attack sizes)
+    # defaults < [modes.<base>] < [modes.<variant>] (e.g. shared-avg inherits shared's attack sizes)
     cfg = {**conf["defaults"], **modes.get(mode, {}), **(modes.get(variant, {}) if variant != mode else {})}
     if variant != mode and "ntp_attack_bytes" in modes.get(variant, {}):
         cfg["ntp_attack_bytes"] = {**modes.get(mode, {}).get("ntp_attack_bytes", {}), **modes[variant]["ntp_attack_bytes"]}

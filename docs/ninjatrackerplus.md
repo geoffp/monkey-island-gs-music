@@ -183,7 +183,7 @@ User report: velocity jumps up and down unnaturally in MI153, which is a single 
 - **Fix:** an NTP-only Pipe Organ sample, log-domain smoothing, and row-mean envelope sampling (above). The organ now follows Pipe Org 2's real slow swell (volume 29 → 40 → 29 over about 1 s).
 
 ## On the IIGS (verified in GSSquared, 2026-11-06)
-- **`just emu-ntp`** boots `build/disks/MI.NTP.PO` (`just ntpdisk`). This is a ProDOS 8 BazFast disk made from SenseiPlay's own `PRODOS` + `sensei.system` + `ntpplayer` + `dgr.radio.dgr`, with our songs in `/songs/<VARIANT>` (`PER.SONG`, `PER.SONG.E`, `SHARED`, `SHARED.E`), all 16 in one folder. It boots straight into SenseiPlay. `just emu-music` also has them, under `/SenseiPlay/MI/<VARIANT>`.
+- **`just emu-ntp`** boots `build/disks/MI.NTP.PO` (`just ntpdisk`). This is a ProDOS 8 BazFast disk made from SenseiPlay's own `PRODOS` + `sensei.system` + `ntpplayer` + `dgr.radio.dgr`, with our songs in `/songs/<MODE>` (`PER.SONG`, `SHARED`, plus any trial variants), all 16 in one folder. It boots straight into SenseiPlay. `just emu-music` also has them, under `/SenseiPlay/MI/<MODE>`.
 - **Checked in the emulator** by driving it through gs2-mcp (`tap_key`, `video_text`, `state_get`, `read_mem ENSONIQ`):
   - MI150, MI160 and MI165 play, with 10–17 oscillators running and frequencies and volumes changing;
   - DOC RAM holds every sample byte for byte at the page the `.NTP` header gives;
@@ -322,9 +322,13 @@ A size passes when either:
 
   Note statistics are unchanged, except 9 more steals in shared MI160.
 
-### E′+ trial variants (2026-11-07)
-`per-song-e` and `shared-e` (`[modes.<name>]` in `config/ntp.toml`: `base` + `loop_construction = "eprime"`) are built next to `per-song` and `shared`, for listening side by side. They are in SenseiPlay's `PER.SONG.E` and `SHARED.E` folders and in `build/ntp/<variant>/wav/`.
-- **What changes:** only the short (512 B) loops, which are built as E′+ (`ntpmod.eprime_attack_and_loop`, which uses looplab's implementation):
+### E′+ loops: trialled, then the standard (2026-11-07)
+E′+ was first built as trial variants, `per-song-e` and `shared-e` (`[modes.<name>]` in `config/ntp.toml`: `base` + `loop_construction = "eprime"`), next to `per-song` and `shared`. After listening (user, 2026-11-07), it became the default:
+- `loop_construction = "eprime"` is set in `[defaults]`.
+- The variants were dropped, and the new `per-song` / `shared` are byte-identical to the old `-e` builds (64 MOD/NTP checksums).
+- The original averaged-cycle loops stay selectable with `loop_construction = "averaged"`. A variant using them, `base = "shared"` + `"averaged"`, reproduces the old `shared` byte for byte.
+- The code is in `src/migs/loopbuild.py`, moved from the research harness `looplab`.
+- **What changes:** only the short (512 B) loops, which are built as E′+ (`ntpmod.eprime_attack_and_loop`, using `loopbuild`):
   - whole samples per cycle (`_best_tuning(whole_cycles=True)`);
   - a power-averaged harmonic cycle over the sustain detected by `looplab.settle`;
   - an exact band-limited zero crossing at the loop start;
@@ -332,7 +336,7 @@ A size passes when either:
 
   Long raw loops are unchanged, and still pass through the tremolo/buzz gate.
 - **Measured on the built `shared-e` bank:** the 8-bit loop-rate buzz is gone in all 15 looped sounds. In `shared`, 10 have it, at −37 to −48 dB. Tuning error grows to at most 3.5 cents (Pipe Organ Lo).
-- **The original builds are unchanged:** `per-song` and `shared` are byte-identical to before (64 MOD/NTP checksums). Both shared banks pass `ntpcheck --shared`, at 236/256 pages.
+- **When the variants were added,** the original builds were unchanged: `per-song` and `shared` were byte-identical to before (64 MOD/NTP checksums). Both shared banks passed `ntpcheck --shared`, at 236/256 pages.
 
 ## Ghosts: delayed notes revive the previous note's loop (2026-11-07)
 User report: SenseiPlay has abrupt note endings that sound like evictions, absent when VLC plays the same MODs.
@@ -356,7 +360,7 @@ There were about 3,500 such ghosts per build. Examples: MI152 ≈ 600, MI160 ≈
 - `build_samples` adds a silent 248 B one-shot, `rest`: 1 page and 1 sample slot. Shared now has 31 samples, the MOD maximum, and 237/256 pages.
 - Where a release reaches volume 0, `convert_song` writes `C00` *plus* a rest note into that cell. Triggering the rest stops the loop's oscillators, and the rest halts itself on its stopper bytes. MOD 0 = DOC 128 = silence; DOC 0 would stop it at once.
 - In GSSquared, at the same delayed rows the volume still rises at tick 0, but every oscillator is halted, so nothing sounds.
-- The built MODs now have 0 ghosts in all four variants, out of about 5,400 delayed notes each. The build log's `halt` column counts the halted releases.
+- The built MODs now have 0 ghosts in all four variants built then (per-song, shared and their E′+ trials), out of about 5,400 delayed notes each. The build log's `halt` column counts the halted releases.
 
 **Desktop output:** unchanged apart from inaudible mixer residue (−68 to −71 dB, at most about 20 LSB), as long as the rest doesn't alter track choice: `trk_inst` keeps the note's sample. Marking released tracks as "rest" had moved notes between the panned channels.
 

@@ -31,10 +31,10 @@ ntpsrc_sha    := "461260e35dc0b10176c05865d01c4e31694f704c0c3a9e5760fc093623dc52
 ntpdemo_sha   := "350843388bde213b10101212fcd6e3f5affa3b4f25b74ea970b0b6ab85d14d97"
 # NTP sample-set modes built side by side (build/ntp/<mode>/): per-song (each song carries only
 # its own sounds, longer loops) and shared (one set for every song, like the MIDI Synth bank),
-# plus trial variants of each ([modes.<name>] in config/ntp.toml; -e = E'+ loop construction).
-ntp_modes     := "per-song shared per-song-e shared-e"
+# plus any trial variants ([modes.<name>] with a `base` in config/ntp.toml).
+ntp_modes     := "per-song shared"
 # Copy build/ntp/<mode>/*.ntp (typed $D5/$0008) into <dir>/<MODE>/, one folder per variant.
-# ProDOS names allow no "-": per-song -> PER.SONG, shared-e -> SHARED.E.
+# ProDOS names allow no "-": per-song -> PER.SONG, shared-avg -> SHARED.AVG.
 ntp_folders   := 'ntpf() { local m d f; for m in ' + ntp_modes + '; do d="$1/$(echo $m | tr a-z- A-Z.)"; for f in build/ntp/$m/*.ntp; do [ -f "$f" ] || continue; mkdir -p "$d"; cp "$f" "$d/$(basename "$f" .ntp | tr a-z A-Z).NTP#d50008"; done; done; }; ntpf'
 # Add host tree $3 (relative to cwd) to ProDOS image $2 with cp2 $1, in sorted order: folders
 # first (cp2 mkdir), then each folder's files. SenseiPlay lists directory order, and `cp2 add` of
