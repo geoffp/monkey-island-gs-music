@@ -28,6 +28,8 @@ sustain_s = 0.4         # where the loop's cycles are taken (s after onset): the
 min_rate = 9000         # sample-rate window for melodic samples (Hz)
 max_rate = 22000
 release_max = 0.3       # seconds of release ramp after note-off
+drum_borrow = "last"    # drums use an idle melodic track when no drum track is free and the budget
+                        # is full ("first": before opening a new drum track; "never")
 halt_released_loops = true  # end each release with a silent one-shot that stops the loop: NTP
                         # applies a delayed (EDx) cell's instrument volume at tick 0, which made
                         # the old loop audible until the note (docs/ninjatrackerplus.md "Ghosts")

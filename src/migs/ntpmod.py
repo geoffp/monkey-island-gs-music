@@ -948,13 +948,17 @@ def convert_song(path: Path, samples, programs, drums, cfg: dict, song_cfg: dict
         # them on 1-oscillator drum tracks starved the percussion (MI160: 16 -> 31-77 dropped
         # notes). Their gain is a track that frees when the sample ends: MI162 8 -> 0 dropped.
         kind = "drum" if s.kind == "drum" else "melodic"
-        # choose a track: free & same sample, else free of the same kind, else a new track,
-        # else steal a same-kind track that is only releasing (cut its release)
+        # choose a track (docs/ninjatrackerplus.md "Track allocation")
         tracks = range(len(grid.cells))
-        cands = [tr for tr in tracks if trk_kind[tr] == kind and trk_busy[tr] < r and grid.free(tr, r)]
+        free = lambda k: [tr for tr in tracks if trk_kind[tr] == k and trk_busy[tr] < r and grid.free(tr, r)]
+        cands = free(kind)
+        borrow = song_cfg.get("drum_borrow", cfg.get("drum_borrow", "last"))
+        fits_new = osc_used + (1 if kind == "drum" else 2) <= budget
+        if not cands and kind == "drum" and (borrow == "first" or (borrow == "last" and not fits_new)):
+            cands = free("melodic")                  # a 2-oscillator track can play a one-shot
         if cands:
             tr = min(cands, key=lambda t: (trk_inst[t] != si + 1, t))
-        elif osc_used + (1 if kind == "drum" else 2) <= budget:
+        elif fits_new:
             tr = new_track(kind)
         else:
             releasing = [t for t in tracks if trk_kind[t] == kind and 0 <= trk_off[t] <= r]
@@ -966,7 +970,6 @@ def convert_song(path: Path, samples, programs, drums, cfg: dict, song_cfg: dict
             for row in [x for x in grid.cells[tr] if x >= r]:
                 del grid.cells[tr][row]
             rep.stolen += 1
-        trk_kind[tr] = kind
         same = trk_inst[tr] == si + 1
         vf = 64 * amp(s, n) / ref                    # unrounded, for the envelope rows
         v = vol_for(s, n)

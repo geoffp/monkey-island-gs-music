@@ -41,5 +41,6 @@ Overnight work list, 2026-11-07, in order. Commit after each item.
 
 ## Follow-ups found along the way
 - [ ] **Per-song raw-loop seams with deep modulation** (try looplab's seam search C + whole beat periods). Spectral flux shows a jump at the loop seam for Elec Organ (rotary wobble, ~1.8 Hz, 36% depth) and Shakuhachi, about 1 s in: the crossfade joins two different wobble phases. Candidates: choose the loop length/position so the seam falls at the same modulation phase (autocorrelation of the envelope), or a longer crossfade for those sounds.
-- [ ] **MI167 drops ~82 notes** (oscillator budget), all percussion (Conga 32, Kick 20, Mute Conga 15, ...: see the build log's per-sound drop line); MI160 drops 16 (Claves). Not investigated yet.
+- [x] **MI167 drops 82 notes** (all percussion): track-type fragmentation; drums now borrow idle melodic tracks (`drum_borrow`). MI167 0, totals 105 -> 13 (per-song) / 11 (shared).
+- [ ] Polyphony: loop-only (1-oscillator) Elec Organ for MI160/MI152 overload; per-sound release lengths; steal the quietest release.
 - [ ] **Quantization / row packing:** see `plans/ntp-quantization.md` (deferred by the user).

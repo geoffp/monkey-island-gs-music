@@ -125,7 +125,7 @@ The MOD is the primary artefact: it renders on the desktop (ffmpeg's libopenmpt 
   - `keys = [lo, hi]` makes a **key split** (`sample_for`, `melodic_entry`).
   - `ntp_attack_bytes` overrides the loop-header length.
   - Currently Pipe Org 2 (MI153): "Pipe Organ" for keys 52+, sampled at key 60, and "Pipe Organ Lo" for keys ≤ 51, sampled at key 41. Both use 1016 B attacks (organs speak in about 50 ms). Total: 254/256 pages, 30 samples.
-- **Tracks:** created on demand within NTP's **31-oscillator** budget (drum tracks 1, looped melodic tracks 2). When the budget is full, a track that's only releasing is stolen. There's no separate control track: speed and tempo sit in row 0 (the lead-in), and the loop `B00` goes in a free cell of the last row.
+- **Tracks:** created on demand within NTP's **31-oscillator** budget; see "Track allocation" below for the full rules. There's no separate control track: speed and tempo sit in row 0 (the lead-in), and the loop `B00` goes in a free cell of the last row.
 - **Channel tag:** `nCHN` below 10 channels, `nnCH` from 10. libopenmpt didn't recognise `09CH` (it rendered silence), so the format matters.
 
 ### First build (2026-11-06)
@@ -137,7 +137,7 @@ The MOD is the primary artefact: it renders on the desktop (ffmpeg's libopenmpt 
 The user listened to the desktop previews (`music/ntp/wav/`): **the pipeline works**, but there are problems still to fix. The `.NTP` conversion and SenseiPlay on the IIGS are wired up (`just ntp`, `just emu-music`) but haven't been run yet; they need `php-cli`.
 
 Known problems and open work, from the build log and analysis:
-- **MI167 drops 89 notes** (MI152 and MI160 drop 16 each). Not investigated yet. Candidates: more simultaneous held notes than the 31-oscillator budget allows, or long releases that aren't stolen early enough.
+- **MI167 drops 89 notes** (MI152 and MI160 drop 16 each). *Resolved 2026-11-07:* see "Track allocation" (drum tracks borrowing idle melodic tracks).
 - **Velocity on delayed notes:** about 60% of notes need `EDx`. Most of those start at the instrument's default volume for one row (70–150 ms) until the next row's `Cxx` corrects it. This may sound like uneven attacks. Fix options: put velocity in the preceding cell more often (needs an idle track), or pick the default volume per song from the median velocity.
 - **Drums are low-fi**: one-shots at about 5.9–8.3 kHz, to fit 64 KB.
 - **Level:** previews peak around −10 dB.
@@ -361,3 +361,45 @@ There were about 3,500 such ghosts per build. Examples: MI152 ≈ 600, MI160 ≈
 **One cost:** per-song MI167 was exactly at its page limit, so the rest's page halved its Strings loop (16384 → 8192 B, about one beat long; it passes the tremolo gate).
 
 **Still open (theory 2):** steals, i.e. a releasing note cut for a new one, are abrupt on the DOC. NTP halts oscillators outright, with no declick ramp, where desktop players ramp over a few milliseconds. MI160 has about 620–780 of them.
+
+## Track allocation (`convert_song`; current rules, 2026-11-07)
+NTP has no voice allocation: each MOD track owns its oscillators for the whole song (`determine_osc_per_track`). So `convert_song` assigns every note to a track itself, once, in onset order.
+
+**Track types and budget.** A track's type is fixed when it is created:
+- **melodic** (2 oscillators): plays looped samples (attack header + loop, in swap mode);
+- **drum** (1 oscillator): plays one-shots only.
+
+Tracks are created on demand while the oscillators used stay within `oscillators` (31: the DOC's 32 minus NTP's timer). Melodic one-shots (Xylophone) are given melodic tracks too, like looped sounds. Putting them on drum tracks starved the percussion (MI160: 16 → 31–77 dropped notes).
+
+**Busy.** A track is *busy* through the last row it needs:
+- **looped notes:** the note row, the envelope `Cxx` rows up to note-off, and the release ramp (`release_max`, 0.3 s) down to volume 0;
+- **melodic one-shots:** until their sample ends, or their note-off plus release if that comes first;
+- **drums:** only their note row, or the next row if it carries a delayed note's velocity fix. A new hit may land on a drum track whose last sample is still ringing: it cuts it, as on a drum machine.
+
+A track is *free* at row r when it isn't busy and its cell there is empty.
+
+**Choosing a track for a note, in order:**
+1. **A free track of the note's type.** Prefer one whose last sample is the same, then the lowest index.
+2. **A new track of that type,** if the budget allows.
+3. **Drums only: a free melodic track** (`drum_borrow = "last"`). A 2-oscillator track can play a one-shot, and the track keeps its type. Before this, MI167's early melodic passages created 15 melodic tracks and left a single drum track, so it dropped 82 percussion notes at a peak demand of only 28 of 31 oscillators.
+   - Borrowing *before* opening a new drum track (`"first"`) ties up melodic tracks needed later: MI152 went 1 → 14 drops.
+
+   | | dropped notes, never → last → first | steals |
+   |---|---|---|
+   | per-song total | 105 → **13** → 27 | 877 → 880 → 855 |
+   | shared total | 105 → **11** → 22 | 726 → 729 → 706 |
+
+   12 of 16 songs are byte-identical to before. MI167 82 → 0, MI151 4 → 0, MI150 1 → 0, MI160 16 → 9–11.
+4. **Steal:** a track of the same type that is only releasing (note-off passed). Take the one whose note-off came first, delete its remaining release rows, and play the new note there (`steal` in the build log). Steals are abrupt on the DOC, which has no declick (open item).
+5. **Drop** the note. The build log lists drops per sound (`MInnn dropped (no oscillator): ...`).
+
+**What a note writes on its track:**
+- **Note cell:** note, instrument and `Cxx` velocity. If the note needs a micro-delay, `EDx` takes the effect column instead; velocity handling for those is described in the pipeline section.
+- **Looped notes:** envelope `Cxx` rows, then a release ramp. Where it reaches 0, `C00` plus the silent `rest` one-shot, which stops the loop's oscillators. Otherwise NTP would bring the loop back on the next delayed note (see "Ghosts").
+
+**After allocation:**
+- **Track order:** all melodic tracks are emitted before the drum tracks. Ninjaforce's converter assigns oscillators first-fit, pairs on even oscillators, and interleaving strands odd oscillators (see "Ninjaforce converter: oscillator assignment bug"). `ntp_oscillators` replays its assignment, and the build fails if it wouldn't fit.
+- **Minimum:** at least 2 tracks.
+- **Control commands:** speed and tempo go in row 0, and `B00` in the last row.
+
+**What the numbers mean:** `trk` and `osc` in the build log are the tracks and oscillators used. Overload remains where demand really exceeds 31: MI160 peaks at 44 oscillators, over budget for 9.6 % of the song, measured with notes ringing to note-off plus release. That's where its ~630–780 steals and 9–11 dropped Claves come from. Loop-only (1-oscillator) organ samples would cut that to 2.3 %; that's a proposal, not built.

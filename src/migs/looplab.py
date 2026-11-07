@@ -656,7 +656,8 @@ def play(attack: np.ndarray, loop: np.ndarray, rate: float, seconds: float, semi
     pos = np.arange(n) * (rate * 2 ** (semis / 12) / out_rate)
     A, L = len(attack), len(loop)
     i = pos.astype(np.int64)
-    y = np.where(i < A, attack[np.minimum(i, A - 1)], loop[(np.maximum(i - A, 0)) % L])
+    y = loop[(np.maximum(i - A, 0)) % L] if A == 0 else \
+        np.where(i < A, attack[np.minimum(i, A - 1)], loop[(np.maximum(i - A, 0)) % L])
     if env is not None:
         t = np.arange(n) / out_rate
         t_att = A / (rate * 2 ** (semis / 12))

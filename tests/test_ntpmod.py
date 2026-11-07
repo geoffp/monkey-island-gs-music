@@ -439,3 +439,27 @@ def test_released_loops_are_halted_before_any_delayed_note(tmp_path):
                     assert state == "rest"                        # never a live silent loop
                 state = "loop"
     assert delayed_after_release > 0
+
+
+def test_drums_borrow_idle_melodic_tracks_when_the_budget_is_full(tmp_path):
+    """Track types are fixed: early melodic tracks used to leave too few drum tracks, and drums
+    were dropped while melodic tracks sat idle (MI167: 82 drops at 28/31 oscillators)."""
+    import mido
+    ev = [mido.Message("program_change", channel=1, program=9)]
+    for k in range(60, 75):                                         # 15 held notes: 30 oscillators
+        ev.append(mido.Message("note_on", channel=1, note=k, velocity=90, time=0))
+    for k in range(60, 75):
+        ev.append(mido.Message("note_off", channel=1, note=k, time=240 if k == 60 else 0))
+    for i in range(8):                                              # then two overlapping drums at once
+        ev += [mido.Message("note_on", channel=9, note=36, velocity=100, time=240 if i == 0 else 60),
+               mido.Message("note_on", channel=9, note=38, velocity=100, time=0),
+               mido.Message("note_off", channel=9, note=36, time=10), mido.Message("note_off", channel=9, note=38, time=0)]
+    p = _song(tmp_path, ev)
+    kick = nm.ModSample("kick", np.zeros(2038), kind="drum", seconds=0.2)
+    snare = nm.ModSample("snare", np.zeros(2038), kind="drum", seconds=0.2)
+    base = {"rows_per_unit": 2, "speed": 3, "quantize": 0.0, "oscillators": 31}
+    drums = {36: (1, 20, 1.0), 38: (2, 22, 1.0)}
+    _, _, never = nm.convert_song(p, [_fake(), kick, snare], {9: 0}, drums, base, {**base, "drum_borrow": "never"})
+    _, _, last = nm.convert_song(p, [_fake(), kick, snare], {9: 0}, drums, base, {**base, "drum_borrow": "last"})
+    assert never.dropped > 0
+    assert last.dropped == 0 and last.oscillators <= 31
