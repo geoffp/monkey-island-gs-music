@@ -119,7 +119,7 @@ The MOD is the primary artefact: it renders on the desktop (ffmpeg's libopenmpt 
   - else, on a drum track that has gone silent, a `Cxx` in the preceding cell plus an instrument-less note (NTP keeps the track volume; `setup_effect` in `ninjatrackerplus.s`);
   - else the instrument's default volume (the sample's median volume in that song), corrected by the next row's envelope `Cxx`.
 - **Envelope:** per-row `Cxx` follows the MT-32 loudness contour after the attack, including swells above the attack level (strings and organ reach about 2×).
-  - The contour is smoothed in the **log domain over 250 ms**: tremolo and partial beating average out, and exponential decays stay unbiased.
+  - The contour is smoothed in the **log domain**: over 250 ms for decaying sounds (decays stay unbiased), and over 0.8 s (at least the raw loop's length) for steady sounds, so the rows carry only the slow contour (see "Smoother sustains" below).
   - Each row's `Cxx` is the contour's **mean over that row** (`env_at`), not a point sample. Release is a ramp of up to 0.3 s, then `C00`.
 - **NTP-only sounds:** `[[melodic]]` entries in `gs/ntp.toml` split programs out of the shared bank's merges (`ntp_spec`), using DOC RAM the MIDI Synth bank doesn't have.
   - `keys = [lo, hi]` makes a **key split** (`sample_for`, `melodic_entry`).
@@ -261,3 +261,23 @@ Goal: a game loads the instruments once and leaves them in DOC RAM, then loads o
 | recipes serial | modes build concurrently; ffmpeg previews and PHP conversions run on all cores (`xargs -P $(nproc)`) |
 
 `ntpmod` itself: per-song mode 169 s → 10 s, shared mode 49 s → 10 s.
+
+## Smoother sustains (2026-11-07)
+User report: shared-version sustains "still a little choppy". Measured from the MOD patterns, on held notes: note-volume level, ±1 flicker reversals, and step sizes. Then fixed in four steps:
+1. **Volume resolution (shared only).** The common loudness reference from the resident-bank work left quiet songs at MOD volume ~4 (MI153: median 4, 29.5% flicker, 2.5 dB per step; per-song: 32, 0.1%). **Fix:** shared mode normalises each song to its own loudest moment again, like per-song. Bank-compatible default volumes are each sample's median over the per-song-normalised volumes. The MT-32's song-to-song balance goes to `music/ntp/shared/levels.toml` (`gain_db`, `play_volume_scale`) for a game's `NTPsetplayvolume`.
+2. **Rounding flicker.** A slowly moving target near x.5 flipped the volume 4→5→4. **Fix:** `volume_hysteresis` (0.75): a row changes volume only when the target has moved ≥ 0.75 of a step from the current value.
+3. **Handover step.** The loop was level-matched to the source at the sustain point (0.4 s), not where the attack ends. Every note stepped at the attack→loop handover, against an MT-32 that doesn't: Strings +3.1 dB vs +1.2, French Horn −3.1 vs −0.4, Fantasy +1.7 vs −1.4. **Fix:** the loop is level-matched to the attack's tail, and the envelope eases from gain 1 to the contour over `handover_s` (150 ms, linear in dB). Handover changes are now within ±0.7 dB, following the MT-32's direction (Shakuhachi's real −4.4 dB fade is eased to −2.2).
+4. **Stepped tremolo.** Steady sounds' chorus/beating (Chorale: −1…−8 dB at 2.5 Hz) passed the 250 ms smoothing as ±1-step row flips: a stepped tremolo on a static loop. A raw loop already contains that modulation, so the rows doubled it. **Fix:** steady sounds smooth their contour over `env_smooth_steady_s` (0.8 s), and at least the raw loop's length.
+
+Results (flicker % of held-note volume triples; median note volume):
+
+| song | shared before | shared after | per-song after |
+|---|---|---|---|
+| MI153 | 4 vol, 29.5% | 32 vol, 3.7% (±1 at vol 32 ≈ 0.3 dB) | 30 vol, 5.7% |
+| MI159 | 4 vol, 7.3% | 10 vol, 2.2% | 10 vol, 0.2% |
+| MI160 | 10 vol, 3.5% | 24 vol, 0.2% | 24 vol, 0.5% |
+| MI161 | 7 vol, 3.4% | 20 vol, 1.4% | 20 vol, 0.4% |
+
+Single-note levels vs Munt are unchanged (all within about ±3 dB, as before). The shared bank check still passes.
+
+Not done, noted for later: a longer attack→loop crossfade (12 vs 4 cycles) made no measurable difference to the handover spectral flux.

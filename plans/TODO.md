@@ -19,10 +19,15 @@ Overnight work list, 2026-11-07, in order. Commit after each item.
 
    Outputs must stay byte-identical (check with checksums before and after).
 
-3. [ ] **Smoother sustains in the shared version.** Sustain loops there are "still a little choppy". Find the cause by measurement:
+3. [x] **Smoother sustains in the shared version.** Sustain loops there are "still a little choppy". Find the cause by measurement:
    - per-row `Cxx` volume steps (zipper);
    - short 512 B averaged loops;
    - envelope smoothing;
    - attack→loop handover.
 
    Then fix it. Candidates: `Axy` volume-slide interpolation between rows, longer loops within the 4 KB-reserve budget, better crossfades.
+
+## Follow-ups found along the way
+- [ ] **Per-song raw-loop seams with deep modulation.** Spectral flux shows a jump at the loop seam for Elec Organ (rotary wobble, ~1.8 Hz, 36% depth) and Shakuhachi, about 1 s in: the crossfade joins two different wobble phases. Candidates: choose the loop length/position so the seam falls at the same modulation phase (autocorrelation of the envelope), or a longer crossfade for those sounds.
+- [ ] **MI167 drops ~82 notes** (oscillator budget); MI152 and MI160 drop 1–16. Not investigated yet.
+- [ ] **Quantization / row packing:** see `plans/ntp-quantization.md` (deferred by the user).

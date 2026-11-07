@@ -225,6 +225,12 @@ def attack_and_loop(x: np.ndarray, a: int, period: float, rate: float, k: int, a
         attack = np.pad(attack, (0, attack_bytes - len(attack)))
     n = min(attack_bytes // 4, max(4, int(round(xfade_cycles * loop_bytes / k))))
     tail = attack[-n:]
+    # Level-match the loop to the attack's tail: the loop is taken later in the sustain, where
+    # the level differs; unmatched, every note stepped by up to ~4 dB at the handover (choppy).
+    # The envelope then starts from gain 1 here (build_samples eases it to the contour).
+    e_tail, e_lp = float(np.sqrt(np.mean(tail ** 2))), float(np.sqrt(np.mean(loop ** 2)))
+    if e_tail > 0 and e_lp > 0:
+        loop = loop * (e_tail / e_lp)
     idx = np.nonzero((np.roll(loop, 1) < 0) & (loop >= 0))[0]
     if not len(idx):
         idx = np.array([int(np.argmin(np.abs(loop)))])
@@ -382,14 +388,26 @@ def build_samples(spec: dict, cfg: dict, key_ranges: dict[int, tuple[int, int]],
         # attack = source [a, a + attack_bytes/rate); loop = k periods from the sustain
         att_bytes = m.get("ntp_attack_bytes", cfg["attack_bytes"])
         attack, loop, att_end, loop_at = attack_and_loop(x, a, period, rate, k, att_bytes, loop_bytes,
-                                                         sustain_s, raw=loop_bytes > cfg["loop_bytes"])
+                                                         sustain_s, cfg.get("attack_xfade_cycles", 4.0),
+                                                         raw=loop_bytes > cfg["loop_bytes"])
         e_loop = float(np.sqrt(np.mean(loop ** 2))) or 1e-9
         # envelope after the attack, relative to the loop's own level
         t = np.arange(int(att_end), off, int(0.01 * SR))
         # Smooth in the log domain over 250 ms: MT-32 organs/strings have tremolo and partial
         # beating (Pipe Org 2: gain 0.7-2.3, ~4 Hz) that the static loop can't follow and that
         # per-row Cxx would alias into random jumps; exponential decays stay unbiased in log.
-        g = np.exp(smooth(np.log(np.maximum(env, 1e-6)), int(0.25 * SR)))[t] / e_loop
+        # Steady sounds: only the slow contour. Their beating/chorus (Chorale: -1..-8 dB at
+        # 2.5 Hz) as per-row Cxx is a stepped tremolo on a static loop (choppy), and a raw loop
+        # already contains it (applying it again doubles it, out of phase). Smooth over 0.8 s,
+        # and at least the raw loop's own length. Decaying sounds keep 250 ms for their decays.
+        win = 0.25
+        if steady:
+            win = max(cfg.get("env_smooth_steady_s", 0.8), loop_bytes / rate if loop_bytes > cfg["loop_bytes"] else 0.0)
+        g = np.exp(smooth(np.log(np.maximum(env, 1e-6)), int(min(win, 1.5) * SR)))[t] / e_loop
+        # the loop continues the attack's tail at gain 1; ease to the contour over 150 ms
+        # (geometric: linear in dB) instead of jumping to it at the first loop row
+        w = np.clip((t - att_end) / (cfg.get("handover_s", 0.15) * SR), 0.0, 1.0)
+        g = g ** w
         g_max = float(g.max()) if len(g) else 1.0
         rel = env[off: off + int(cfg["release_max"] * SR): int(0.01 * SR)]
         rel_g = rel / max(env[off], 1e-9)
@@ -735,6 +753,7 @@ def convert_song(path: Path, samples, programs, drums, cfg: dict, song_cfg: dict
         else:
             s.default_volume = int(np.median(by_sample[si])) if si in by_sample else 32
 
+    hyst = song_cfg.get("volume_hysteresis", cfg.get("volume_hysteresis", 0.75))
     for n in notes:
         rep.notes += 1
         if n.channel == RHYTHM:
@@ -816,7 +835,13 @@ def convert_song(path: Path, samples, programs, drums, cfg: dict, song_cfg: dict
             for rr in range(r + 1, r_off):
                 dt = (rr - r) * row_s
                 g = env_at(s, dt, row_s, t_loop)
-                vv = max(0, min(64, round(vf * g)))
+                target = vf * g
+                # hysteresis: a slowly moving target near x.5 made the volume flicker between
+                # neighbours (4-5-4: ~2 dB steps at low volumes), heard as choppy sustains
+                if prev is not None and abs(target - prev) < hyst:
+                    last = rr
+                    continue
+                vv = max(0, min(64, round(target)))
                 if vv != prev and grid.effect_free(tr, rr):
                     c = grid.get(tr, rr)
                     c[2], c[3] = 0xC, vv
@@ -1001,17 +1026,23 @@ def main(argv: list[str] | None = None) -> int:
         # so a game can load them once and then only each song's header + patterns. So: one
         # loudness reference for all songs (also consistent levels between songs), and each
         # sample's default volume = its median note-on volume over all songs.
-        refs, vols = [], {}
+        # Each song is still normalised on its own (loudest moment = volume 64): a common
+        # reference left quiet songs at MOD volume ~4, where one step is ~2.5 dB (choppy). The
+        # MT-32's song-to-song balance goes to levels.toml for the game (NTPsetplayvolume).
+        refs, vols = {}, {}
         for p, notes, chan_prog in songs:
-            _, _, r = convert_song(p, *shared, cfg, {**cfg, **conf.get("songs", {}).get(p.stem.split("-")[0], {})}, cc7)
-            refs.append(r.level_ref)
-        level_ref = max(refs)
-        for p, notes, chan_prog in songs:
-            _, _, r = convert_song(p, *shared, cfg, {**cfg, **conf.get("songs", {}).get(p.stem.split("-")[0], {}),
-                                                     "level_ref": level_ref}, cc7)
+            sid = p.stem.split("-")[0]
+            _, _, r = convert_song(p, *shared, cfg, {**cfg, **conf.get("songs", {}).get(sid, {})}, cc7)
+            refs[sid] = r.level_ref
             for si, v in r.sample_volumes.items():
                 vols.setdefault(si, []).extend(v)
-        bank = {"level_ref": level_ref, "default_volumes": {si: int(np.median(v)) for si, v in vols.items()}}
+        bank = {"default_volumes": {si: int(np.median(v)) for si, v in vols.items()}}
+        top = max(refs.values())
+        (args.out_dir / "levels.toml").write_text(
+            "# Song loudness relative to the loudest (MT-32 balance). Each shared .NTP is normalised\n"
+            "# to its own loudest moment; a game restores the balance with NTPsetplayvolume.\n"
+            + "".join(f'MI{sid} = {{ gain_db = {20 * math.log10(ref / top):.2f}, play_volume_scale = {ref / top:.3f} }}\n'
+                      for sid, ref in refs.items()))
     reports = []
     for p, notes, chan_prog in songs:
         sid = p.stem.split("-")[0]
