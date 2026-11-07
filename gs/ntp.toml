@@ -42,6 +42,19 @@ drum_max_rate = 26000   # bandwidth, trading length for it (hats, shakers need ~
 [modes.shared]
 ntp_attack_bytes = { "Elec Organ" = 1016, "Sax" = 1016, "Acou Bass" = 1016, "Vibes" = 1016 }
 
+# Trial variants (built side by side for listening): a variant = a `base` sample-set mode plus
+# overrides. loop_construction = "eprime": short (512 B) loops built as E'+ (whole samples per
+# cycle, power-averaged harmonic cycle, exact zero crossing, phase-aligned attack; see
+# docs/loop-detection.md); "averaged" (default): today's averaged-cycle loops. Long raw loops
+# are the same in both.
+[modes.per-song-e]
+base = "per-song"
+loop_construction = "eprime"
+
+[modes.shared-e]
+base = "shared"
+loop_construction = "eprime"
+
 # Per-song overrides, e.g.:
 # [songs.160]
 # rows_per_unit = 1

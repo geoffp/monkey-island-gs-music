@@ -29,7 +29,8 @@ Overnight work list, 2026-11-07, in order. Commit after each item.
 
 ## Loop research (branch `loop-research`, 2026-11-07)
 - [x] Attack detection + loop-construction research, `just looplab`, `docs/loop-detection.md`.
-- [ ] **Integrate E′+** (whole cycles, power-averaged cycle, exact zero crossing, phase-aligned attack) into `ntpmod.build_samples` for 512 B loops, after the user listens to `gs/build/looplab/wav/`.
+- [x] E′+ as trial variants `per-song-e` / `shared-e` (`loop_construction = "eprime"`), side by side on the disk.
+- [ ] After listening: make E′+ the default (and move its code from looplab into ntpmod), or drop it.
 - [x] Deterministic one-shot rule (8-bit floor within the attack + loop budget): Xylophone; Taiko doesn't qualify.
 - [ ] Still failing E′+: Acou Bass / Marimba handover (decaying spectra), Pipe Organ Lo (slow multi-partial beat).
 

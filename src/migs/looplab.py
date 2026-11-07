@@ -170,24 +170,10 @@ def settle(tr: Tracks, band: float = 1.5, decay: float = -2.0, dead_db: float = 
 
 def tune(freq: float, tables: dict, min_rate: float, max_rate: float, loop_bytes: int, key0: int,
          key_lo: int, key_hi: int, whole_cycles: bool = False) -> tuple[float, int, float, int, int]:
-    """(err_cents, k, rate, base_note, finetune) as ntpmod._best_tuning. `whole_cycles`: only k
-    that divide loop_bytes, so every cycle is the same whole number of samples. Then the k
-    cycles stay identical after 8-bit rounding (no loop-rate buzz from quantisation)."""
-    from .ntpmod import NOTES, PAL
-    ks = np.arange(max(1, math.ceil(loop_bytes * freq / max_rate)), math.floor(loop_bytes * freq / min_rate) + 1)
-    if whole_cycles:
-        ks = ks[loop_bytes % ks == 0]
-    n = np.arange(NOTES)
-    valid = (n + key_lo - key0 >= 0) & (n + key_hi - key0 < NOTES)
-    if not len(ks) or not valid.any():
-        raise ValueError(f"no tuning for {freq:.1f} Hz")
-    fts = list(tables)
-    per = np.array([tables[ft] for ft in fts], dtype=np.float64)
-    rates = loop_bytes * freq / ks
-    err = 1200 * np.log2((PAL / per)[None, :, :] / rates[:, None, None])
-    a = np.where(valid[None, None, :], np.abs(err), np.inf)
-    ki, fi, ni = np.unravel_index(int(np.argmin(a)), a.shape)
-    return float(err[ki, fi, ni]), int(ks[ki]), float(rates[ki]), int(ni), fts[fi]
+    """ntpmod._best_tuning: (err_cents, k, rate, base_note, finetune). `whole_cycles`: only k
+    that divide loop_bytes, so the k cycles stay identical after 8-bit rounding."""
+    from .ntpmod import _best_tuning
+    return _best_tuning(freq, tables, min_rate, max_rate, loop_bytes, key0, key_lo, key_hi, whole_cycles)
 
 
 # ---------------------------------------------------------------------------

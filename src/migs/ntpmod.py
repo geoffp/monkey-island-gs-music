@@ -102,10 +102,15 @@ class ModSample:
         return [block(with_stoppers(len(self.data)))]
 
 
-def _best_tuning(freq: float, tables, min_rate, max_rate, loop_bytes, key0, key_lo, key_hi):
+def _best_tuning(freq: float, tables, min_rate, max_rate, loop_bytes, key0, key_lo, key_hi,
+                 whole_cycles: bool = False):
     """(err_cents, k, rate, base_note, finetune): `loop_bytes` = k periods at `rate`, played
-    by note base_note with finetune so that period gives exactly that rate."""
+    by note base_note with finetune so that period gives exactly that rate. `whole_cycles`:
+    only k that divide loop_bytes (every cycle the same whole number of samples, so the k
+    cycles stay identical after 8-bit rounding: no loop-rate buzz)."""
     ks = np.arange(max(1, math.ceil(loop_bytes * freq / max_rate)), math.floor(loop_bytes * freq / min_rate) + 1)
+    if whole_cycles:
+        ks = ks[loop_bytes % ks == 0]
     n = np.arange(NOTES)
     valid = (n + key_lo - key0 >= 0) & (n + key_hi - key0 < NOTES)
     if not len(ks) or not valid.any():
@@ -279,6 +284,29 @@ def attack_and_loop(x: np.ndarray, a: int, period: float, rate: float, k: int, a
     w = 0.5 - 0.5 * np.cos(np.linspace(0, np.pi, n + 1)[1:])
     attack[-n:] = tail * (1 - w) + ext * w
     return attack, loop, att_end, at
+
+
+def eprime_attack_and_loop(m: dict, x: np.ndarray, a: int, period: float, rate: float, k: int,
+                           attack_bytes: int, loop_bytes: int, hold: float, render
+                           ) -> tuple[np.ndarray, np.ndarray, float, float]:
+    """E'+ (docs/loop-detection.md; implemented in looplab, used from here while it's on trial):
+    - one cycle with each harmonic at its RMS level over the sustain (power-averaged: beating
+      partials keep their mean power), phases from the period where the attack ends;
+    - tiled k times with whole samples per cycle (k | loop_bytes: see _best_tuning), and an
+      exact band-limited zero crossing at loop[0], so it is exactly periodic after 8-bit rounding;
+    - the attack's source start moved earlier by up to one period so it ends in phase with
+      loop[0]: the crossfade joins aligned waveforms (no level dip at the handover).
+    The sustain span comes from the attack detection on a 6 s render (identical to the 2 s one
+    up to note-off). Same return as attack_and_loop."""
+    from . import looplab as ll
+    SR = mb.SR
+    snd = ll.analyse(m, render, build_hold=hold)
+    att_end = a + attack_bytes / rate * SR
+    lo = max(snd.lo, att_end)
+    hi = max(snd.hi, lo + k * period + 8 * period)
+    loop = ll.loop_power(snd.x, lo, hi, period, k, loop_bytes, at=att_end)
+    attack, loop = ll.join_aligned(x, a, period, rate, k, attack_bytes, loop)
+    return attack, loop, att_end, lo
 
 
 def drum_rate(seg: np.ndarray, nbytes: int, lo: float, hi: float) -> float:
@@ -455,18 +483,26 @@ def build_samples(spec: dict, cfg: dict, key_ranges: dict[int, tuple[int, int]],
         sustain_s = cfg.get("sustain_s", 0.4)
         steady = is_steady(env, a, off, sustain_s)
         loop_bytes = m.get("ntp_loop_bytes", cfg["loop_bytes"]) if steady else cfg["loop_bytes"]
+        # loop_construction = "eprime": short loops are built as in docs/loop-detection.md (E'+)
+        eprime = cfg.get("loop_construction", "averaged") == "eprime"
         while True:
             err, k, rate, n0, ft = _best_tuning(fm, tables, cfg["min_rate"], cfg["max_rate"],
-                                                loop_bytes, m["key"], min(lo, m["key"]), max(hi, m["key"]))
+                                                loop_bytes, m["key"], min(lo, m["key"]), max(hi, m["key"]),
+                                                whole_cycles=eprime and loop_bytes <= cfg["loop_bytes"])
             # a long loop must fit in the recording between the sustain start and note-off
             if loop_bytes <= cfg["loop_bytes"] or a + (sustain_s + loop_bytes / rate + 0.05) * SR <= off:
                 break
             loop_bytes //= 2
         # attack = source [a, a + attack_bytes/rate); loop = k periods from the sustain
         att_bytes = m.get("ntp_attack_bytes", cfg["attack_bytes"])
-        attack, loop, att_end, loop_at = attack_and_loop(x, a, period, rate, k, att_bytes, loop_bytes,
-                                                         sustain_s, cfg.get("attack_xfade_cycles", 4.0),
-                                                         raw=loop_bytes > cfg["loop_bytes"])
+        if eprime and loop_bytes <= cfg["loop_bytes"]:
+            attack, loop, att_end, loop_at = eprime_attack_and_loop(
+                m, x, a, period, rate, k, att_bytes, loop_bytes, hold,
+                lambda p, kk, h: _render(smf2wav, roms, cache, program=p, key=kk, hold=h))
+        else:
+            attack, loop, att_end, loop_at = attack_and_loop(x, a, period, rate, k, att_bytes, loop_bytes,
+                                                             sustain_s, cfg.get("attack_xfade_cycles", 4.0),
+                                                             raw=loop_bytes > cfg["loop_bytes"])
         e_loop = float(np.sqrt(np.mean(loop ** 2))) or 1e-9
         # envelope after the attack, relative to the loop's own level
         t = np.arange(int(att_end), off, int(0.01 * SR))
@@ -1144,13 +1180,20 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--smf2wav", type=Path, default=Path("vendor/munt/bin/mt32emu-smf2wav"))
     ap.add_argument("--roms", type=Path, default=Path("original files/mt-32 roms"))
     ap.add_argument("--cache", type=Path, default=Path("gs/build/mt32samples"))
-    ap.add_argument("--samples", choices=("per-song", "shared"), help="override gs/ntp.toml `samples`")
+    ap.add_argument("--samples", help="build variant: per-song, shared, or a [modes.<name>] with a `base` "
+                                      "(e.g. per-song-e, shared-e); default gs/ntp.toml `samples`")
     args = ap.parse_args(argv)
     conf = tomllib.loads(args.config.read_text())
-    mode = args.samples or conf["defaults"].get("samples", "per-song")
+    variant = args.samples or conf["defaults"].get("samples", "per-song")
+    modes = conf.get("modes", {})
+    mode = variant if variant in ("per-song", "shared") else modes.get(variant, {}).get("base")
     if mode not in ("per-song", "shared"):
-        raise SystemExit(f"samples must be per-song or shared, not {mode!r}")
-    cfg = {**conf["defaults"], **conf.get("modes", {}).get(mode, {})}    # e.g. [modes.shared]
+        raise SystemExit(f"samples must be per-song, shared or a [modes.<name>] with base = per-song/shared, "
+                         f"not {variant!r}")
+    # defaults < [modes.<base>] < [modes.<variant>] (e.g. shared-e inherits shared's attack sizes)
+    cfg = {**conf["defaults"], **modes.get(mode, {}), **(modes.get(variant, {}) if variant != mode else {})}
+    if variant != mode and "ntp_attack_bytes" in modes.get(variant, {}):
+        cfg["ntp_attack_bytes"] = {**modes.get(mode, {}).get("ntp_attack_bytes", {}), **modes[variant]["ntp_attack_bytes"]}
     spec = ntp_spec(tomllib.loads(args.spec.read_text()), conf, mode)
     over = cfg.get("ntp_attack_bytes", {})               # per-mode attack lengths, by sound name
     spec = {**spec, "melodic": [{**m, "ntp_attack_bytes": over[m["name"]]} if m["name"] in over else m

@@ -30,12 +30,13 @@ manual_sha    := "54a5ec84e5fd152043a9a5b666bec0dab366656effeae5bd4a759894aa488a
 ntpsrc_sha    := "461260e35dc0b10176c05865d01c4e31694f704c0c3a9e5760fc093623dc52fb"
 ntpdemo_sha   := "350843388bde213b10101212fcd6e3f5affa3b4f25b74ea970b0b6ab85d14d97"
 # NTP sample-set modes built side by side (music/ntp/<mode>/): per-song (each song carries only
-# its own sounds, longer loops) and shared (one set for every song, like the MIDI Synth bank).
-ntp_modes     := "per-song shared"
+# its own sounds, longer loops) and shared (one set for every song, like the MIDI Synth bank),
+# plus trial variants of each ([modes.<name>] in gs/ntp.toml; -e = E'+ loop construction).
+ntp_modes     := "per-song shared per-song-e shared-e"
 # Copy music/ntp/<mode>/*.ntp (typed $D5/$0008) into <dir>/<MODE>/PART1, PART2, ... (<=12 each):
 # SenseiPlay v2.0 skips the first entry of each later directory block (a ProDOS block holds
 # the header + 12 entries, then 13), so a 16-song folder hid MI165. Verified in GSSquared.
-# ProDOS names allow no "-": per-song -> PER.SONG.
+# ProDOS names allow no "-": per-song -> PER.SONG, shared-e -> SHARED.E.
 ntp_folders   := 'ntpf() { local m i d; for m in ' + ntp_modes + '; do i=0; for f in music/ntp/$m/*.ntp; do [ -f "$f" ] || continue; d="$1/$(echo $m | tr a-z- A-Z.)/PART$((i / 12 + 1))"; mkdir -p "$d"; cp "$f" "$d/$(basename "$f" .ntp | tr a-z A-Z).NTP#d50008"; i=$((i + 1)); done; done; }; ntpf'
 sensei_ver    := "v2.0"     # digarok/senseiplay (no published checksums)
 
@@ -314,9 +315,8 @@ ntp modes=ntp_modes: (ntpmod modes)
         'php "$1" "$2" STREAM_FORBIDDEN > "${2%.mod}.log" || { echo "$2:"; cat "${2%.mod}.log"; exit 255; }' \
         _ "{{vendor}}/ntp/src/ntpconverter.php" {}
       echo "$m: $(ls music/ntp/$m/*.ntp | wc -l) .NTP files in music/ntp/$m/"
-      if [ "$m" = shared ]; then   # resident bank: identical instruments + samples in every song
-        uv run ntpcheck --shared music/ntp/shared/*.ntp | tail -1
-      fi
+      case "$m" in shared*)       # resident bank: identical instruments + samples in every song
+        uv run ntpcheck --shared music/ntp/$m/*.ntp | tail -1;; esac
     done
 
 # Tuning experiment bank/sequence (gs/seq/tune/TUNE.*), see src/migs/tunetest.py

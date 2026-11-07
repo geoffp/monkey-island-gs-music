@@ -319,3 +319,15 @@ A size passes when either:
   - MI163: Sax 4096 B → 512 B averaged, and Trombone grows to 16384 B.
 
   Note statistics are unchanged, except 9 more steals in shared MI160.
+
+### E′+ trial variants (2026-11-07)
+`per-song-e` and `shared-e` (`[modes.<name>]` in `gs/ntp.toml`: `base` + `loop_construction = "eprime"`) are built next to `per-song` and `shared`, for listening side by side. They are in SenseiPlay's `PER.SONG.E` and `SHARED.E` folders and in `music/ntp/<variant>/wav/`.
+- **What changes:** only the short (512 B) loops, which are built as E′+ (`ntpmod.eprime_attack_and_loop`, which uses looplab's implementation):
+  - whole samples per cycle (`_best_tuning(whole_cycles=True)`);
+  - a power-averaged harmonic cycle over the sustain detected by `looplab.settle`;
+  - an exact band-limited zero crossing at the loop start;
+  - an attack aligned in phase with the loop.
+
+  Long raw loops are unchanged, and still pass through the tremolo/buzz gate.
+- **Measured on the built `shared-e` bank:** the 8-bit loop-rate buzz is gone in all 15 looped sounds. In `shared`, 10 have it, at −37 to −48 dB. Tuning error grows to at most 3.5 cents (Pipe Organ Lo).
+- **The original builds are unchanged:** `per-song` and `shared` are byte-identical to before (64 MOD/NTP checksums). Both shared banks pass `ntpcheck --shared`, at 236/256 pages.
