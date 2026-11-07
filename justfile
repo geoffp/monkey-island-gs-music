@@ -305,6 +305,9 @@ ntp modes=ntp_modes: (ntpmod modes)
         php "{{vendor}}/ntp/src/ntpconverter.php" "$f" STREAM_FORBIDDEN > "${f%.mod}.log" || { echo "$f:"; cat "${f%.mod}.log"; exit 1; }
       done
       echo "$m: $(ls music/ntp/$m/*.ntp | wc -l) .NTP files in music/ntp/$m/"
+      if [ "$m" = shared ]; then   # resident bank: identical instruments + samples in every song
+        uv run ntpcheck --shared music/ntp/shared/*.ntp | tail -1
+      fi
     done
 
 # Tuning experiment bank/sequence (gs/seq/tune/TUNE.*), see src/migs/tunetest.py

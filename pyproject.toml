@@ -22,6 +22,7 @@ gs2-docscope = "migs.gs2client:main"
 mt32bank = "migs.mt32bank:main"
 voices = "migs.voices:main"
 ntpmod = "migs.ntpmod:main"
+ntpcheck = "migs.ntpfile:main"
 
 [dependency-groups]
 dev = ["pytest>=8"]

@@ -26,10 +26,12 @@ release_max = 0.3       # seconds of release ramp after note-off
 drum_min_rate = 6000    # one-shot rate window (Hz); within it the rate follows each drum's
 drum_max_rate = 26000   # bandwidth, trading length for it (hats, shakers need ~26 kHz)
 
-# Per-mode overrides of [defaults]. The shared set (every sound for every song) needs ~254 of
-# 256 pages with 512 B loops: no room for a sound-effect reserve.
+# Per-mode overrides of [defaults]. The shared set (every sound for every song) needs 254 of
+# 256 pages with 512 B loops; to keep the 16-page sound-effect reserve, the four sounds whose
+# attacks shorten at the least measured cost (log-spectral distance vs Munt, first 0.6 s:
+# Elec Organ -0.28 dB, Sax -0.10, Acou Bass +0.04, Vibes +0.06) get 1016 B attacks (-16 pages).
 [modes.shared]
-reserve_pages = 0
+ntp_attack_bytes = { "Elec Organ" = 1016, "Sax" = 1016, "Acou Bass" = 1016, "Vibes" = 1016 }
 
 # Per-song overrides, e.g.:
 # [songs.160]

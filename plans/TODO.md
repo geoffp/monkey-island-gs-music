@@ -2,9 +2,9 @@
 
 Overnight work list, 2026-11-07, in order. Commit after each item.
 
-0. [ ] **Finish and commit the current work:** per-song and shared sample-set modes built side by side, long raw loops, `zero_start`, the converter oscillator-order fix, sorted disk folders, docs.
+0. [x] **Finish and commit the current work:** per-song and shared sample-set modes built side by side, long raw loops, `zero_start`, the converter oscillator-order fix, sorted disk folders, docs.
 
-1. [ ] **Shared set as a resident instrument bank.** Goal: a game loads the instruments into DOC RAM once, then loads only each song's sequence data from disk. We don't write that loader; we make the shared-mode output compatible with it.
+1. [x] **Shared set as a resident instrument bank.** Goal: a game loads the instruments into DOC RAM once, then loads only each song's sequence data from disk. We don't write that loader; we make the shared-mode output compatible with it.
    - Inventory every song's patches: each MT-32 program on each channel, and each rhythm key. Confirm each maps to a sample in the shared set, and list anything dropped or unmapped.
    - Make every shared `.NTP` carry byte-identical instrument definitions, sample data and DOC page placement. Default volumes must be the same in every song, not a per-song median. That way the instrument block plus samples can be loaded once and only header and patterns per song.
    - Verify it in the build: compare the instrument and sample sections of all shared `.NTP` files, and fail if they differ.

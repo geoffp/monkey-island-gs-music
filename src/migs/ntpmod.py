@@ -513,6 +513,7 @@ class Report:
     level_ref: float = 1.0      # note loudness that maps to MOD volume 64
     tempo_changes: int = 0
     track_kinds: list = field(default_factory=list)   # "melodic" (2 oscillators) / "drum" (1), in MOD order
+    sample_volumes: dict = field(default_factory=dict)  # sample index -> note-on volumes in this song
     nudged: int = 0
     tracks_used: int = 0
     oscillators: int = 0
@@ -688,8 +689,13 @@ def convert_song(path: Path, samples, programs, drums, cfg: dict, song_cfg: dict
     for n in notes:
         if (si := sample_of(n)) is not None:
             by_sample.setdefault(si, []).append(vol_for(samples[si], n))
+    rep.sample_volumes = by_sample
+    fixed = song_cfg.get("default_volumes")          # shared mode: the same for every song
     for si, s in enumerate(samples):
-        s.default_volume = int(np.median(by_sample[si])) if si in by_sample else 32
+        if fixed is not None:
+            s.default_volume = fixed.get(si, 32)
+        else:
+            s.default_volume = int(np.median(by_sample[si])) if si in by_sample else 32
 
     for n in notes:
         rep.notes += 1
@@ -934,6 +940,9 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit(f"samples must be per-song or shared, not {mode!r}")
     cfg = {**conf["defaults"], **conf.get("modes", {}).get(mode, {})}    # e.g. [modes.shared]
     spec = ntp_spec(tomllib.loads(args.spec.read_text()), conf, mode)
+    over = cfg.get("ntp_attack_bytes", {})               # per-mode attack lengths, by sound name
+    spec = {**spec, "melodic": [{**m, "ntp_attack_bytes": over[m["name"]]} if m["name"] in over else m
+                                for m in spec["melodic"]]}
     tables = period_tables(args.make_tables)
     cc7 = cc7_curve(args.smf2wav, args.roms, args.cache)
     print("MT-32 CC7 curve: " + " ".join(f"{int(v)}:{g:.2f}" for v, g in zip(*cc7)))
@@ -949,10 +958,26 @@ def main(argv: list[str] | None = None) -> int:
     if shared:
         print(f"shared samples ({len(shared[0])}, DOC {ntp_doc_pages(shared[0], last_page)}/256 pages, "
               f"reserve {255 - last_page}): {loop_summary(shared[0], cfg)}")
+    if shared:
+        # A resident bank: every shared .NTP must carry byte-identical instruments and samples,
+        # so a game can load them once and then only each song's header + patterns. So: one
+        # loudness reference for all songs (also consistent levels between songs), and each
+        # sample's default volume = its median note-on volume over all songs.
+        refs, vols = [], {}
+        for p, notes, chan_prog in songs:
+            _, _, r = convert_song(p, *shared, cfg, {**cfg, **conf.get("songs", {}).get(p.stem.split("-")[0], {})}, cc7)
+            refs.append(r.level_ref)
+        level_ref = max(refs)
+        for p, notes, chan_prog in songs:
+            _, _, r = convert_song(p, *shared, cfg, {**cfg, **conf.get("songs", {}).get(p.stem.split("-")[0], {}),
+                                                     "level_ref": level_ref}, cc7)
+            for si, v in r.sample_volumes.items():
+                vols.setdefault(si, []).extend(v)
+        bank = {"level_ref": level_ref, "default_volumes": {si: int(np.median(v)) for si, v in vols.items()}}
     reports = []
     for p, notes, chan_prog in songs:
         sid = p.stem.split("-")[0]
-        song_cfg = {**cfg, **conf.get("songs", {}).get(sid, {})}
+        song_cfg = {**cfg, **conf.get("songs", {}).get(sid, {}), **(bank if shared else {})}
         samples, programs, drums = shared or sample_set(spec, cfg, [(notes, chan_prog)], last_page, tables, args)
         if not shared:
             print(f"MI{sid}: {len(samples)} samples, DOC {ntp_doc_pages(samples, last_page)}/256 pages "

@@ -218,3 +218,34 @@ NTP files carry their own samples, and `NTPprepare` copies them into DOC RAM for
 
 ### Disk folder order
 SenseiPlay lists entries in directory order, and `cp2 add` of a tree follows the host's readdir order: `SHARED` came before `PER.SONG`, and `PART2` before `PART1`. `ntpdisk` and `hdimage` now `cp2 mkdir` the folders in sorted order, then add each folder's files sorted.
+
+## Shared set as a resident instrument bank (2026-11-07)
+Goal: a game loads the instruments once and leaves them in DOC RAM, then loads only each song's sequence data from disk. We don't write that loader; the shared-mode output is built to make it possible.
+
+**Patch inventory** (all 16 songs, every channel, every note):
+- No song changes program mid-song, so recording the first program per channel (`read_notes`) is exact.
+- Every program on every channel maps to a shared-set sample (`melodic_entry`), and every rhythm key but one maps to a drum sample.
+- The exception is rhythm key 76, one hit in MI166. It's silent on a stock MT-32 (Munt renders nothing) and is dropped, as in the GM conversion (`docs/mt32-to-gm.md`).
+
+**Byte-identical bank in every shared `.NTP`:**
+- **Samples and DOC placement** were already identical: the same sample set, same order, packed by the converter the same way.
+- **Default volumes** used to differ per song. Shared mode now uses one loudness reference for all songs (`level_ref` = the loudest song's) and sets each sample's default volume to its median note-on volume over all songs. A side effect is consistent levels between songs.
+- `just ntp` runs `ntpcheck --shared` (`src/migs/ntpfile.py`), which fails if any shared song's instrument records or sample data differ.
+
+**4 KB sound-effect reserve, always** (`reserve_pages = 16` in both modes):
+- The full shared set needed 254 pages with 512 B loops. `[modes.shared] ntp_attack_bytes` gives 1016 B attacks to the four sounds where that costs least, by mean log-spectral distance vs Munt over the first 0.6 s at the sampled key:
+
+  | sound | cost |
+  |---|---|
+  | Elec Organ | −0.28 dB |
+  | Sax | −0.10 dB |
+  | Acou Bass | +0.04 dB |
+  | Vibes | +0.06 dB |
+
+  Others cost more: Pipe Organ +0.57, Panpipes +1.00, and Xylophone +28 (its whole sound is the attack).
+- Result: 240/256 pages, highest page used 239, so pages 240–255 are free in every song. Per-song mode keeps the same reserve (e.g. MI153 uses pages 0–203).
+
+**A game loader's view** (`ntpfile.NTP`):
+- **Bank, loaded once** (62,444 B): the `instruments` section (14-byte records + names: type, length, loop, volume, finetune, DOC page, DOC size) and the `samples` section. Copy each sample to its DOC page. The instrument records stay in RAM for the player.
+- **Per song** (7–78 KB; 534 KB for all 16): `header` + `tracks` + `order` + `patterns` (`NTP.song_part`).
+- The stock `NTPprepare` expects one contiguous file. A resident-bank game would rebuild that image in RAM (song header + resident instrument records + song order and patterns), skipping the sample copy. Alternatively it could patch the player to keep its instrument table and skip `NTPprepare`'s DOC upload. That's outside this project's scope; `ninjatrackerplus.s` is the reference.
