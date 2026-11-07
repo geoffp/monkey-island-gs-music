@@ -434,14 +434,16 @@ def to_bytes(attack: np.ndarray, loop: np.ndarray) -> tuple[np.ndarray, np.ndarr
 # ---------------------------------------------------------------------------
 # Metrics
 
+def loop_tremolo_db(loop: np.ndarray, k: int) -> float:
+    """ntpmod.loop_tremolo_db: level range across the loop's cycles (an added tremolo)."""
+    from .ntpmod import loop_tremolo_db as f
+    return f(loop, k)
+
+
 def loop_buzz_db(loop: np.ndarray, k: int) -> float:
-    """Energy off the f0 harmonics in the loop's line spectrum (lines at multiples of f0/k),
-    relative to the energy on them. An exactly periodic loop: -inf (reported -200)."""
-    X = np.abs(np.fft.rfft(loop)) ** 2
-    X[0] = 0
-    i = np.arange(len(X))
-    on, off = float(X[i % k == 0].sum()), float(X[i % k != 0].sum())
-    return 10 * math.log10(off / on) if off > 0 and on > 0 else -200.0
+    """ntpmod.loop_buzz_db (the build uses it to gate raw loops)."""
+    from .ntpmod import loop_buzz_db as f
+    return f(loop, k)
 
 
 def seam_step(loop: np.ndarray) -> float:
@@ -607,6 +609,7 @@ def trial(snd: Sound, cand: str, loop_bytes: int, attack_bytes: int, tables: dic
     return dict(att_err=att_err, sound=snd.name, cand=cand, bytes=loop_bytes, k=k, rate=rate, cents=err,
                 spc=loop_bytes / k, rms_lsb=float(np.sqrt(np.mean(ql ** 2))),
                 buzz=loop_buzz_db(ql, k), buzz_float=loop_buzz_db(loop, k), step=seam_step(ql),
+                trem=loop_tremolo_db(ql, k),
                 sflux=seam_flux(ql, k), hand_db=lvl, hand_flux=hflux,
                 like=likeness_db(ql, k, snd.ref_amp, snd.st.weights),
                 attack=qa, loop=ql)
@@ -818,16 +821,18 @@ def main(argv: list[str] | None = None) -> int:
                      f"{st.attack_s * 1000:.0f} | {st.mod_s or 0:.2f} | {st.depth_db:.1f} | "
                      f"{'' if st.dead_s is None else f'{st.dead_s:.2f}'} | {s.loop_start} ({s.loop_start / s.rate * 1000:.0f}) |")
     lines += ["", "## Loop candidates", "",
-              "buzz: off-harmonic energy of the 8-bit loop (dB, -200 = exactly periodic); step: kink at the wrap "
+              "buzz: off-harmonic energy of the 8-bit loop (dB, -200 = exactly periodic); tremolo: level range "
+              "across the loop's cycles, repeated at the loop rate; step: kink at the wrap "
               "(<= 1 normal); seam/hand jump: harmonic flux at the wrap / attack join minus the loop's own (dB); "
               "hand dB: level step at the join; like: timbre vs the source sustain (dB RMS).", "",
-              "| sound | cand | loop B | k | samples/cycle | cents | LSB rms | buzz | step | seam jump | hand dB | hand jump | like | pass |",
-              "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
+              "| sound | cand | loop B | k | samples/cycle | cents | LSB rms | buzz | tremolo dB @ Hz | step | seam jump | hand dB | hand jump | like | pass |",
+              "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for r in res:
-        ok = r["buzz"] < -50 and r["step"] <= 2 and r["sflux"] < 0.5 and abs(r["hand_db"]) < 1 and r["hand_flux"] < 1.5
+        slow = r["rate"] / r["bytes"] <= cfg.get("raw_loop_slow_hz", 2.0)
+        ok = (slow or (r["buzz"] < -50 and r["trem"] <= 1.0)) and r["step"] <= 2 and r["sflux"] < 0.5 and abs(r["hand_db"]) < 1 and r["hand_flux"] < 1.5
         extra = " (= build)" if r.get("same") else (" (!= build)" if r.get("same") is False else "")
         lines.append(f"| {r['sound']} | {r['cand']}{extra} | {r['bytes']} | {r['k']} | {r['spc']:.2f} | {r['cents']:+.1f} | "
-                     f"{r['rms_lsb']:.0f} | {r['buzz']:.0f} | {r['step']:.1f} | {r['sflux']:.2f} | {r['hand_db']:+.1f} | "
+                     f"{r['rms_lsb']:.0f} | {r['buzz']:.0f} | {r['trem']:.1f} @ {r['rate'] / r['bytes']:.1f} | {r['step']:.1f} | {r['sflux']:.2f} | {r['hand_db']:+.1f} | "
                      f"{r['hand_flux']:.2f} | {r['like']:.1f} | {'yes' if ok else 'no'} |")
     if sizing:
         budget = sum(pages(s.loop_start, s.loop_len) for _, s, _, _ in sizing)

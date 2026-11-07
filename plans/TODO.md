@@ -33,6 +33,8 @@ Overnight work list, 2026-11-07, in order. Commit after each item.
 - [x] Deterministic one-shot rule (8-bit floor within the attack + loop budget): Xylophone; Taiko doesn't qualify.
 - [ ] Still failing E′+: Acou Bass / Marimba handover (decaying spectra), Pipe Organ Lo (slow multi-partial beat).
 
+- [x] Tremolo from short raw loops (shared Elec Organ 1024 B: 6.3 dB at 15 Hz): measured gate `raw_loop_ok` + build check.
+
 ## Follow-ups found along the way
 - [ ] **Per-song raw-loop seams with deep modulation** (try looplab's seam search C + whole beat periods). Spectral flux shows a jump at the loop seam for Elec Organ (rotary wobble, ~1.8 Hz, 36% depth) and Shakuhachi, about 1 s in: the crossfade joins two different wobble phases. Candidates: choose the loop length/position so the seam falls at the same modulation phase (autocorrelation of the envelope), or a longer crossfade for those sounds.
 - [ ] **MI167 drops ~82 notes** (oscillator budget), all percussion (Conga 32, Kick 20, Mute Conga 15, ...: see the build log's per-sound drop line); MI160 drops 16 (Claves). Not investigated yet.

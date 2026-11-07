@@ -236,6 +236,7 @@ def test_loop_planner_spends_free_doc_ram_on_steady_sounds_only():
     def mk(name, steady, max_loop=16384):
         s = nm.ModSample(name, np.zeros(2552), loop_start=2040, loop_len=512, kind="melodic")
         s.steady, s.max_loop = steady, max_loop
+        s.raw_ok = (1024, 2048, 4096, 8192, 16384) if steady else ()
         return s
     samples = [mk("organ", True), mk("strings", True, 4096), mk("marimba", False),
                nm.ModSample("kick", np.zeros(2038), kind="drum")]
@@ -356,3 +357,47 @@ def test_one_shot_when_the_whole_sound_fits_the_attack_and_loop_budget():
     assert abs(nm.PAL / tables[ft][note] - rate) < 1e-6                  # an exact table rate
     # a 1.6 s decay would need far more than the budget at any acceptable rate
     assert nm.one_shot_tuning(1.6, 16744.0, 10, tables, 48, 40, 60, 9000) is None
+
+
+# --- raw-loop tremolo / buzz gate ------------------------------------------------
+
+def _wobbly_loop(k=17, spc=60, depth_db=6.0, wobble_cycles=0.5):
+    """k cycles whose level drifts through `wobble_cycles` of a slow wobble (a raw slice of a
+    rotary organ shorter than its wobble period)."""
+    t = np.arange(k * spc) / spc
+    g = 10 ** (depth_db / 20 * 0.5 * np.sin(2 * np.pi * wobble_cycles * t / k))
+    return np.sin(2 * np.pi * t) * g
+
+
+def test_tremolo_metric_sees_a_level_drift_across_the_loop():
+    assert nm.loop_tremolo_db(np.tile(np.sin(2 * np.pi * np.arange(60) / 60), 17), 17) < 0.01
+    assert nm.loop_tremolo_db(_wobbly_loop(), 17) > 2.0
+
+
+def test_raw_loop_gate():
+    cfg = {"raw_loop_slow_hz": 2.0, "raw_loop_max_tremolo_db": 1.0, "raw_loop_max_buzz_db": -50.0}
+    lp = _wobbly_loop()                                    # 1020 points
+    assert not nm.raw_loop_ok(lp, 17, 15700.0, cfg)        # repeats at ~15 Hz: an added tremolo
+    assert nm.raw_loop_ok(lp, 17, 1500.0, cfg)             # repeats at ~1.5 Hz: the sound's own wobble
+    clean = np.tile(np.sin(2 * np.pi * np.arange(60) / 60), 17)
+    assert nm.raw_loop_ok(clean, 17, 15700.0, cfg)         # fast but exactly periodic
+
+
+def test_loop_problems_flags_a_tremolo_loop_in_a_sample_set():
+    cfg = {"raw_loop_slow_hz": 2.0, "raw_loop_max_tremolo_db": 1.0, "raw_loop_max_buzz_db": -50.0}
+    lp = _wobbly_loop()
+    s = nm.ModSample("Elec Organ", np.concatenate([np.zeros(1016), lp / np.max(np.abs(lp))]),
+                     loop_start=1016, loop_len=len(lp))
+    s.cycles, s.rate = 17, 15700.0
+    assert nm.loop_problems([s], cfg) and "tremolo" in nm.loop_problems([s], cfg)[0]
+    s.rate = 1500.0
+    assert nm.loop_problems([s], cfg) == []
+
+
+def test_loop_planner_skips_raw_sizes_that_fail_the_gate():
+    s = nm.ModSample("organ", np.zeros(2552), loop_start=2040, loop_len=512, kind="melodic")
+    s.steady, s.max_loop, s.raw_ok = True, 16384, (8192,)       # 1024-4096 would add a tremolo
+    sizes = nm.plan_loops([s], {0: 10.0}, 239, 16384)
+    assert sizes[0] == 8192
+    small = nm.plan_loops([s], {0: 10.0}, 20, 16384)           # no room for 8192: stays averaged
+    assert small[0] == 512

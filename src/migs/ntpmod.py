@@ -85,6 +85,8 @@ class ModSample:
     steady: bool = False        # sustain holds its level (a raw multi-cycle loop won't pump)
     rate: float = 0.0           # sample rate at key0 (Hz)
     max_loop: int = 512         # longest loop the recording allows (bytes, power of two)
+    raw_ok: tuple = ()          # raw (long) loop sizes that pass raw_loop_ok (bytes)
+    cycles: int = 0             # source periods in the loop (k)
 
     def mod_bytes(self) -> bytes:
         return bytes(np.clip(np.round(self.data * 127), -128, 127).astype(np.int8).tobytes())
@@ -176,6 +178,41 @@ def raw_loop(x: np.ndarray, start: float, period: float, k: int, out: int, xfade
     w = np.linspace(0, 1, nx + 2)[1:-1]
     body[-nx:] = body[-nx:] * (1 - w) + pre * w
     return resample(body, out)
+
+
+def loop_tremolo_db(loop: np.ndarray, k: int) -> float:
+    """Level range (dB) across the k cycles of a loop: the amplitude modulation the loop adds
+    every pass. A raw loop shorter than the sound's own wobble (Elec Organ's rotary, ~0.5 s)
+    holds a slice of it, and replaying that slice 15 times a second is a tremolo the MT-32
+    doesn't have (shared Elec Organ, 1024 B: 6.3 dB at 15.3 Hz)."""
+    n = len(loop)
+    edges = np.round(np.arange(k + 1) * n / k).astype(int)
+    r = [float(np.sqrt(np.mean(loop[edges[i]:edges[i + 1]] ** 2))) for i in range(k) if edges[i + 1] > edges[i]]
+    r = np.maximum(np.array(r), 1e-9)
+    return float(20 * np.log10(r.max() / r.min())) if len(r) > 1 else 0.0
+
+
+def loop_buzz_db(loop: np.ndarray, k: int) -> float:
+    """Energy off the f0 harmonics in a k-cycle loop's line spectrum (lines at multiples of
+    f0/k), relative to the energy on them: cycle-to-cycle change, heard as roughness or buzz at
+    the loop rate. An exactly periodic loop: -inf (reported -200)."""
+    X = np.abs(np.fft.rfft(loop)) ** 2
+    X[0] = 0
+    i = np.arange(len(X))
+    on, off = float(X[i % k == 0].sum()), float(X[i % k != 0].sum())
+    return 10 * math.log10(off / on) if off > 0 and on > 0 else -200.0
+
+
+def raw_loop_ok(loop: np.ndarray, k: int, rate: float, cfg: dict) -> bool:
+    """May a raw loop of this size replace the averaged loop? Only if it repeats so slowly
+    (`raw_loop_slow_hz`) that its movement reads as the sound's own wobble, or if it is as
+    clean as the averaged loop: no tremolo (`raw_loop_max_tremolo_db`) and no loop-rate buzz
+    (`raw_loop_max_buzz_db`). Measured: shared Elec Organ 1024 B had a 6.3 dB tremolo at
+    15 Hz, Trombone 1024 B -39 dB of buzz, where the averaged loops have neither."""
+    if rate / len(loop) <= cfg.get("raw_loop_slow_hz", 2.0):
+        return True
+    return (loop_tremolo_db(loop, k) <= cfg.get("raw_loop_max_tremolo_db", 1.0)
+            and loop_buzz_db(loop, k) <= cfg.get("raw_loop_max_buzz_db", -50.0))
 
 
 def zero_start(loop: np.ndarray, c: int) -> np.ndarray:
@@ -367,7 +404,8 @@ def plan_loops(samples: list[ModSample], usage: dict[int, float], last_page: int
                max_loop: int) -> dict[int, int]:
     """Loop size per melodic sample index, spending the song's free DOC RAM (pages up to
     `last_page`) on its steady sounds: repeatedly double the loop with the most sustained
-    playing time per byte, as long as everything still packs the way NTP packs it."""
+    playing time per byte, as long as everything still packs the way NTP packs it. A loop only
+    grows to sizes in its `raw_ok` (raw loops that add no tremolo), skipping the others."""
     sizes = {i: s.loop_len for i, s in enumerate(samples) if s.kind == "melodic" and s.loop_len}
     grow = {i for i, s in enumerate(samples) if s.kind == "melodic" and s.steady and usage.get(i, 0) > 0}
 
@@ -386,10 +424,11 @@ def plan_loops(samples: list[ModSample], usage: dict[int, float], last_page: int
 
     while grow:
         i = max(grow, key=lambda j: usage[j] / sizes[j])
-        if sizes[i] * 2 > min(max_loop, samples[i].max_loop):
+        nxt = [z for z in samples[i].raw_ok if z > sizes[i] and z <= min(max_loop, samples[i].max_loop)]
+        if not nxt:
             grow.discard(i)
             continue
-        trial = {**sizes, i: sizes[i] * 2}
+        trial = {**sizes, i: min(nxt)}
         if fits(trial):
             sizes = trial
         else:
@@ -455,9 +494,23 @@ def build_samples(spec: dict, cfg: dict, key_ranges: dict[int, tuple[int, int]],
                       finetune=ft, base_note=n0, key0=m["key"], kind="melodic",
                       env_t=(t - a) / SR, env_g=g, rel_g=np.clip(rel_g, 0, 1),
                       tune_cents=err, level=peak)
-        s.steady, s.rate = steady, rate
+        s.steady, s.rate, s.cycles = steady, rate, k
         s.max_loop = 1 << int(math.log2(max(1.0, ((off - a) / SR - sustain_s - 0.05) * rate)))
         s.max_loop = s.max_loop if steady else cfg["loop_bytes"]
+        # Raw loop sizes this sound may grow to: each is built and measured (raw_loop_ok).
+        if steady:
+            ok = []
+            z = cfg["loop_bytes"] * 2
+            while z <= min(cfg.get("max_loop_bytes", 16384), s.max_loop):
+                _, kz, rz, _, _ = _best_tuning(fm, tables, cfg["min_rate"], cfg["max_rate"], z, m["key"],
+                                               min(lo, m["key"]), max(hi, m["key"]))
+                if a + (sustain_s + z / rz + 0.05) * SR <= off:
+                    _, lz, _, _ = attack_and_loop(x, a, period, rz, kz, att_bytes, z, sustain_s,
+                                                  cfg.get("attack_xfade_cycles", 4.0), raw=True)
+                    if raw_loop_ok(lz, kz, rz, cfg):
+                        ok.append(z)
+                z *= 2
+            s.raw_ok = tuple(ok)
         # One-shot instead? A decaying sound that falls below the 8-bit floor while its attack
         # still plays only loops quantisation noise (Xylophone: 2.6 LSB RMS). If the whole
         # sound fits in no more DOC RAM than attack + loop, store it whole: it frees the loop's
@@ -499,7 +552,8 @@ def build_samples(spec: dict, cfg: dict, key_ranges: dict[int, tuple[int, int]],
         else:
             log(f"  {m['name']:<12} loop {loop_bytes:5d} B{' raw' if loop_bytes > cfg['loop_bytes'] else '    '} "
                 f"k={k:3d} rate {rate:7.0f} Hz note {n0:2d} ft {ft:+d} "
-                f"err {err:+5.1f} cents, swell x{g_max:.2f}, keys {lo}-{hi}")
+                f"err {err:+5.1f} cents, swell x{g_max:.2f}, keys {lo}-{hi}, "
+                f"tremolo {loop_tremolo_db(loop, k):.1f} dB @ {rate / loop_bytes:.1f} Hz")
 
     for d in spec["drum"]:
         x = _render(smf2wav, roms, cache, program=None, key=d["key"], hold=0.5)
@@ -1027,6 +1081,19 @@ def loop_summary(samples: list[ModSample], cfg: dict) -> str:
                     for s in samples if s.kind == "melodic")
 
 
+def loop_problems(samples: list[ModSample], cfg: dict) -> list[str]:
+    """Loops that would add a tremolo or a loop-rate buzz (raw_loop_ok on the stored loop:
+    averaged loops are exactly periodic and pass; raw ones must repeat slowly or be as clean)."""
+    out = []
+    for s in samples:
+        if s.kind == "melodic" and s.loop_len and s.cycles:
+            lp = s.data[s.loop_start:s.loop_start + s.loop_len]
+            if not raw_loop_ok(lp, s.cycles, s.rate, cfg):
+                out.append(f"{s.name} {s.loop_len} B: tremolo {loop_tremolo_db(lp, s.cycles):.1f} dB, "
+                           f"buzz {loop_buzz_db(lp, s.cycles):.0f} dB at {s.rate / s.loop_len:.1f} Hz")
+    return out
+
+
 def sample_set(spec: dict, cfg: dict, songs: list[tuple[list, dict]], last_page: int, tables, args):
     """(samples, programs, drums) for the sounds these songs play, with loop sizes planned into
     the DOC RAM they leave free (pages up to `last_page`). One song: a per-song set; all songs:
@@ -1100,6 +1167,8 @@ def main(argv: list[str] | None = None) -> int:
     args.out_dir.mkdir(parents=True, exist_ok=True)
     songs = [(p, *read_notes(p)[:2]) for p in args.inputs]
     shared = sample_set(spec, cfg, [(n, cp) for _, n, cp in songs], last_page, tables, args) if mode == "shared" else None
+    if shared and (bad := loop_problems(shared[0], cfg)):
+        raise SystemExit("shared loops fail the tremolo/buzz check: " + "; ".join(bad))
     if shared:
         print(f"shared samples ({len(shared[0])}, DOC {ntp_doc_pages(shared[0], last_page)}/256 pages, "
               f"reserve {255 - last_page}): {loop_summary(shared[0], cfg)}")
@@ -1130,6 +1199,8 @@ def main(argv: list[str] | None = None) -> int:
         sid = p.stem.split("-")[0]
         song_cfg = {**cfg, **conf.get("songs", {}).get(sid, {}), **(bank if shared else {})}
         samples, programs, drums = shared or sample_set(spec, cfg, [(notes, chan_prog)], last_page, tables, args)
+        if not shared and (bad := loop_problems(samples, cfg)):
+            raise SystemExit(f"MI{sid}: loops fail the tremolo/buzz check: " + "; ".join(bad))
         if not shared:
             print(f"MI{sid}: {len(samples)} samples, DOC {ntp_doc_pages(samples, last_page)}/256 pages "
                   f"(reserve {255 - last_page}); loops {loop_summary(samples, cfg)}")

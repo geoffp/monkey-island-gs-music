@@ -17,6 +17,11 @@ attack_bytes = 2040     # loop header; NTP adds 8 stopper bytes -> one 2 KB DOC 
 loop_bytes = 512        # short loop: one averaged cycle, tiled (decaying sounds; the minimum)
 max_loop_bytes = 16384  # long loops (raw sustain, crossfaded seam) for steady sounds, grown per
                         # song into the DOC RAM that song's own samples leave free
+raw_loop_slow_hz = 2.0  # a raw loop size is used only if it repeats at most this often (its
+                        # movement then reads as the sound's own wobble: Elec Organ 8192 B at
+raw_loop_max_tremolo_db = 1.0  # 1.1 Hz), or is as clean as the averaged loop: cycle levels within
+raw_loop_max_buzz_db = -50.0   # this range and loop-rate content below this. Else it adds a tremolo
+                        # or buzz (shared Elec Organ 1024 B: 6.3 dB at 15 Hz; Trombone 1024 B: -39 dB)
 reserve_pages = 16      # DOC pages kept free for game sound effects (4 KB)
 sustain_s = 0.4         # where the loop's cycles are taken (s after onset): the steady sustain,
                         # not the attack's end (organs build their fundamental after ~0.12 s)

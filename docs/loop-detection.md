@@ -143,6 +143,9 @@ The one-shot then plays at an **exact** period-table rate: with no loop to fit, 
 - **Track allocation:** melodic one-shots use melodic tracks like before, but free them when the sample ends instead of holding them through note-off and release. MI162 now drops 0 notes, against 8. MI160's steals fall from 864 to 777 (per-song) and from 694 to 622 (shared), with its 16 drops unchanged.
 - **Rejected:** putting them on 1-oscillator drum tracks. It starved the percussion (MI160: 16 → 31–77 dropped notes), measured with the new per-sound drop line in the build log.
 
+## Short raw loops add a tremolo (2026-11-07)
+A raw loop shorter than the sound's own wobble replays a slice of it at the loop rate. In shared Elec Organ (1024 B) that was a 6.3 dB tremolo at 15 Hz. The build now measures every raw loop size (`ntpmod.raw_loop_ok`: it must repeat at ≤ 2 Hz, or have ≤ 1 dB of level range and ≤ −50 dB of loop-rate content) and fails if any loop doesn't pass. `report.md` has a tremolo column. Details are in `docs/ninjatrackerplus.md`, "Tremolo from short raw loops".
+
 ## Recommendation
 **For the 512 B loops** (all shared sounds, and short per-song loops), build E′+:
 1. whole samples per cycle;

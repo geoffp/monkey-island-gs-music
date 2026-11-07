@@ -298,3 +298,24 @@ Measured with `just looplab`; details, sources and the full method comparison ar
 
 ### One-shots (2026-11-07)
 Decaying melodic sounds that reach the 8-bit floor within the DOC RAM their attack + loop would take are stored whole, with exact tuning. Today that is only Xylophone. Rule and measurements: `docs/loop-detection.md`, "One-shots". The freed pages stay free (the shared bank is now 238/256). The build log now lists dropped notes per sound (`MInnn dropped (no oscillator): ...`).
+
+### Tremolo from short raw loops (2026-11-07)
+User report: a noticeable, unpleasant tremolo on a prominent instrument in shared MI158 and MI160 (the organ), absent from per-song and from the MT-32.
+
+**Cause, measured.** Shared Elec Organ was the one raw loop left in the shared bank: 1024 B, 65 ms, 17 cycles. That is a slice of the organ's rotary wobble (≈ 0.53 s, 12.6 dB), so its cycle levels span **6.3 dB**, replayed **15.3 times a second**. In per-song the loop is 8192 B (1.1 Hz) and holds about two wobble periods, so it moves the way the MT-32 does. The `Cxx` contour isn't the cause: every averaged loop has ≤ 0.2 dB of level range. The same defect was in per-song MI160: Fantasy 2048 B, 6.1 dB at 5.6 Hz; Shakuhachi 2048 B, 2.5 dB at 5.4 Hz.
+
+**Fix: a measured gate** (`raw_loop_ok`; config `raw_loop_slow_hz`, `raw_loop_max_tremolo_db`, `raw_loop_max_buzz_db`). Every raw loop size a steady sound might grow to is built and measured, and only passing sizes go into `raw_ok`. The loop planner grows only through those, skipping sizes that fail.
+
+A size passes when either:
+- **it repeats slowly** (≤ 2 Hz), so its movement reads as the sound's own wobble; or
+- **it is as clean as the averaged loop it replaces:** the level range across its cycles is ≤ 1 dB (`loop_tremolo_db`) *and* its loop-rate content is ≤ −50 dB (`loop_buzz_db`). For comparison, Trombone at 1024 B had no tremolo but −39 dB of buzz.
+
+**Build check:** the build fails if any loop in either mode fails the gate (`loop_problems`).
+
+**Result:**
+- **Shared:** every sound now has a 512 B averaged loop, with no raw loops. Elec Organ has 0.1 dB of level range (was 6.3 dB). The bank is 236/256 pages, and the freed pages stay free.
+- **Per-song:**
+  - MI160: Fantasy 2048 B → 512 B averaged; Shakuhachi 2048 B → 8192 B (1.4 Hz).
+  - MI163: Sax 4096 B → 512 B averaged, and Trombone grows to 16384 B.
+
+  Note statistics are unchanged, except 9 more steals in shared MI160.
