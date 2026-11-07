@@ -6,17 +6,30 @@
 # toward its row (quantize = 1). Smaller rows = more pattern RAM and player CPU.
 
 [defaults]
+samples = "per-song"    # per-song: each .NTP carries only its own sounds, free DOC RAM -> longer
+                        # loops (NTPprepare loads samples per song anyway). shared: one set for
+                        # every song, like the MIDI Synth bank. Override: just ntpmod shared
 rows_per_unit = 2       # 32nd-note rows on a 16th-note grid
 speed = 3               # tracker ticks per row; EDx resolution = row / speed
 quantize = 0.0          # 0 = full performance timing, 1 = hard snap to rows
 oscillators = 31        # NTP budget: drum (one-shot) tracks use 1, looped melodic tracks 2
 attack_bytes = 2040     # loop header; NTP adds 8 stopper bytes -> one 2 KB DOC block
-loop_bytes = 512        # one ideal-size loop holding whole cycles
+loop_bytes = 512        # short loop: one averaged cycle, tiled (decaying sounds; the minimum)
+max_loop_bytes = 16384  # long loops (raw sustain, crossfaded seam) for steady sounds, grown per
+                        # song into the DOC RAM that song's own samples leave free
+reserve_pages = 16      # DOC pages kept free for game sound effects (4 KB)
+sustain_s = 0.4         # where the loop's cycles are taken (s after onset): the steady sustain,
+                        # not the attack's end (organs build their fundamental after ~0.12 s)
 min_rate = 9000         # sample-rate window for melodic samples (Hz)
 max_rate = 22000
 release_max = 0.3       # seconds of release ramp after note-off
 drum_min_rate = 6000    # one-shot rate window (Hz); within it the rate follows each drum's
 drum_max_rate = 26000   # bandwidth, trading length for it (hats, shakers need ~26 kHz)
+
+# Per-mode overrides of [defaults]. The shared set (every sound for every song) needs ~254 of
+# 256 pages with 512 B loops: no room for a sound-effect reserve.
+[modes.shared]
+reserve_pages = 0
 
 # Per-song overrides, e.g.:
 # [songs.160]
@@ -26,9 +39,32 @@ drum_max_rate = 26000   # bandwidth, trading length for it (hats, shakers need ~
 
 # NTP-only sounds: split out of the shared bank's merges (gs/mt32bank.toml). `slot` only
 # needs to be unique; it isn't a MIDI Synth slot.
+# Optional: `keys = [lo, hi]` limits a sound to a key range (key splits: the MT-32 voices some
+# timbres differently by register; keys outside every range use the nearest one);
+# `ntp_attack_bytes` overrides the loop-header length; `modes` limits the sound to some
+# sample-set modes (default: all).
 [[melodic]]
 slot = 101
 name = "Pipe Organ"
 program = 13
 covers = [13]             # MI153. Elec Org 2's sample has a deep rotary wobble Pipe Org 2 lacks
 key = 60
+keys = [52, 127]
+ntp_attack_bytes = 1016   # organs speak in ~50 ms; 1016 + 8 stopper bytes = one 1 KB block
+[[melodic]]
+slot = 102
+name = "Pipe Organ Lo"
+program = 13
+covers = [13]             # MT-32 Pipe Org 2 below key 52 is mostly 2nd-4th harmonic (fundamental
+key = 44                  # 2-5%); key 60's sample transposed down is 50% fundamental at 65-98 Hz
+keys = [40, 51]
+ntp_attack_bytes = 1016
+[[melodic]]
+slot = 103
+name = "Pipe Organ Lo2"
+program = 13
+covers = [13]             # keys 36-39: 3rd-harmonic heavy on the MT-32
+key = 37
+keys = [0, 39]
+ntp_attack_bytes = 1016
+modes = ["per-song"]      # no room in the shared set; keys 36-39 use Pipe Organ Lo there

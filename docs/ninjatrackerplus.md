@@ -101,6 +101,8 @@ The MOD is the primary artefact: it renders on the desktop (ffmpeg's libopenmpt 
 - **Samples:**
   - **Melodic:** the raw MT-32 attack (2040 B, so with NTP's 8 stopper bytes it fills a 2 KB block), then a 512 B loop holding k sustain cycles. The rate is set by 512 B = k periods. The note base + finetune (16 ProTracker finetune tables read from `make_tables.php`) tune it to within ±4 cents. NTP rate = PAL 3 546 894.6 / period.
     - The loop is **one averaged cycle tiled k times** (`periodic_loop`), so it is exactly periodic. Its RMS is matched to the source.
+    - The loop's cycles are taken from the **steady sustain** (`sustain_s`, default 0.4 s after the onset; earlier if the sound has decayed below 20% of its peak), not from the attack's end at about 0.12 s.
+    - Rows that play during the attack use **gain 1**, since the attack is raw audio with its own contour. The attack→loop handover time scales with pitch (lower notes play the attack slower).
     - The attack is resampled with a margin, so the FFT resampler doesn't ring at its end. Its last 2 cycles crossfade into the loop's periodic continuation (`attack_and_loop`).
   - **Drums:** one-shots. The rate follows each drum's bandwidth (`drum_rate`): 2.2 × the frequency below which 95% of its energy lies, in 6–26 kHz (`drum_min_rate`/`drum_max_rate`). If the bytes can't hold 95% of the energy at that rate, it's lowered by at most half. Results:
     - hats and agogo 26.3 kHz;
@@ -119,7 +121,10 @@ The MOD is the primary artefact: it renders on the desktop (ffmpeg's libopenmpt 
 - **Envelope:** per-row `Cxx` follows the MT-32 loudness contour after the attack, including swells above the attack level (strings and organ reach about 2×).
   - The contour is smoothed in the **log domain over 250 ms**: tremolo and partial beating average out, and exponential decays stay unbiased.
   - Each row's `Cxx` is the contour's **mean over that row** (`env_at`), not a point sample. Release is a ramp of up to 0.3 s, then `C00`.
-- **NTP-only sounds:** `[[melodic]]` entries in `gs/ntp.toml` split programs out of the shared bank's merges (`ntp_spec`), using DOC RAM the MIDI Synth bank doesn't have. Currently Pipe Org 2 (MI153), giving 252/256 pages and 29 samples.
+- **NTP-only sounds:** `[[melodic]]` entries in `gs/ntp.toml` split programs out of the shared bank's merges (`ntp_spec`), using DOC RAM the MIDI Synth bank doesn't have.
+  - `keys = [lo, hi]` makes a **key split** (`sample_for`, `melodic_entry`).
+  - `ntp_attack_bytes` overrides the loop-header length.
+  - Currently Pipe Org 2 (MI153): "Pipe Organ" for keys 52+, sampled at key 60, and "Pipe Organ Lo" for keys ≤ 51, sampled at key 41. Both use 1016 B attacks (organs speak in about 50 ms). Total: 254/256 pages, 30 samples.
 - **Tracks:** created on demand within NTP's **31-oscillator** budget (drum tracks 1, looped melodic tracks 2). When the budget is full, a track that's only releasing is stolen. There's no separate control track: speed and tempo sit in row 0 (the lead-in), and the loop `B00` goes in a free cell of the last row.
 - **Channel tag:** `nCHN` below 10 channels, `nnCH` from 10. libopenmpt didn't recognise `09CH` (it rendered silence), so the format matters.
 
@@ -188,3 +193,28 @@ User report: velocity jumps up and down unnaturally in MI153, which is a single 
 - **Converter loop rotation** (`split_rotate_loop`, since Nov 2019, "to reduce the swap bug"): each loop is rotated to start at its first sample nearest zero (unsigned 128), and the skipped bytes are appended to the loop header. It has no switch. With our 2040 B headers that made 2094 B + 8 stopper bytes, i.e. a 4 KB block per melodic sound, so DOC RAM overflowed ("Too large"). Fix: our loops start at a rising zero crossing with `loop[0] = 0` exactly, so the rotation is a no-op. The attack window shifts up to one period earlier to meet it.
 - **SenseiPlay v2.0 directory bug:** it skips the first entry of each directory block after the first. A ProDOS directory's first block holds the header + 12 entries, so the 13th file is the first entry of block 2. With all 16 songs in one folder, MI165 was missing from the list. Workaround: at most 12 songs per folder (`ntp_folders` in the justfile).
 - **Navigation:** Down/Return move through the browser (".." comes first); Return on a song plays it.
+
+### MI153: low notes "not coming across" (2026-11-07)
+User report: heard on the IIgs.
+- **Cause 1, the loop was taken from the attack.** It was taken right where the 2040 B attack ends (about 0.12 s), before Pipe Org 2's fundamental has built up. Even at the sampled key (60), the MT-32 has 61% of its sustained energy in the fundamental; the loop had 17%, with 34% in the 2nd harmonic. So the whole organ was thin.
+  - **Fix:** take the loop from the steady sustain, with a 4-cycle raised-cosine crossfade from the attack. To keep the converter's rotation a no-op, the loop still starts at a rising zero crossing; of those, it picks the one whose phase best matches the attack's tail.
+  - **After:** harmonic profiles at each sound's sampled key are within 0.12 (half the L1 distance over 8 harmonics) for 12 of the 14 shared sounds. Strings are at 0.19: averaging a chorused ensemble thins its upper harmonics.
+- **Cause 2, the MT-32 voices Pipe Org 2's low register differently.** Fundamental share by key: 36 → 5%, 40 → 2%, 43 → 29%, 48 → 25%, 55 → 52%, 60 → 61%. Below key 52, most of the energy is in the 2nd–4th harmonics. Transposing the key-60 sample down put about 50% of the energy at 65–98 Hz, where small speakers have little output.
+  - **Fix:** the key-split low sample (above). Keys 40–51 now match: about 26% fundamental, 31% 2nd harmonic.
+  - **Remaining:** keys 36–39, where the MT-32 is 3rd-harmonic heavy, would need a third sample. Only 2 DOC pages are left.
+  - In-song balance: low notes (below key 52) sit 8.6 dB under the upper notes in the MOD, 7.1 dB on the MT-32.
+- **Side bug found:** with the loop taken later, rows inside the attack were scaled by the loop-relative gain. That made decaying sounds' attacks too loud (Taiko +5 dB in its first 100 ms). Fixed with gain 1 during the attack.
+
+## Sample-set modes and long loops (2026-11-07)
+NTP files carry their own samples, and `NTPprepare` copies them into DOC RAM for each song. So the MIDI Synth "one shared bank" constraint doesn't apply. Both modes are built side by side (`ntp_modes` in the justfile):
+- **`per-song`** (default `samples` in `gs/ntp.toml`): each song carries only the sounds it plays (`sample_set`). Its free DOC RAM, after `reserve_pages` (16 pages = 4 KB for game sound effects), goes to longer loops (`plan_loops`). The planner repeatedly doubles the loop with the most sustained playing time per byte, while everything still packs the way NTP packs it, up to `max_loop_bytes` (16 KB) and the recording's length. Example: MI153 carries 3 organ samples with 16 KB loops (204 pages).
+- **`shared`**: one set for every song (union of sounds and key ranges; loops planned over all songs' usage). `[modes.shared]` sets `reserve_pages = 0`, because the full set needs 256/256 pages with 512 B loops. NTP-only sounds can be limited with `modes = [...]` (Pipe Organ Lo2 is per-song only; in shared mode keys 36–39 fall back to the nearest split).
+- **Long loops** (`raw_loop`) are for **steady** sounds only: the level must hold within 6 dB from the sustain start to note-off (`is_steady`). They hold k recorded periods (chorus, beating and vibrato kept), with a crossfade seam: the last 25% fades into the audio just before the loop start. Decaying sounds (bass, marimba, vibes, xylophone, horn) keep the 512 B averaged-cycle loop, because a raw loop would bake the decay in and pump.
+- **The loop start is still exactly zero** (`zero_start`): a fractional FFT rotation of the periodic loop. Forcing the start sample to 0 left a step of up to 11× a normal sample step at steep crossings, a click every pass (heard as a buzz in MI153, about 25 Hz).
+
+### Ninjaforce converter: oscillator assignment bug
+`determine_osc_per_track` assigns oscillators first-fit in track order over 0–30, with 2-oscillator tracks starting on even oscillators. Interleaved 1- and 2-oscillator tracks strand odd oscillators, so tracks can get no oscillator even with ≤ 31 in total. The converter reports no error: it writes 0 (PHP "Undefined array key 17/18" at `ntpconverter_lib.php:1613`), so those tracks use oscillator 0, which clashes with track 1.
+- **Fix:** `convert_song` emits all melodic (2-oscillator) tracks first, then drums. `ntp_oscillators` replays the converter's assignment, and `main` fails the build if it wouldn't fit.
+
+### Disk folder order
+SenseiPlay lists entries in directory order, and `cp2 add` of a tree follows the host's readdir order: `SHARED` came before `PER.SONG`, and `PART2` before `PART1`. `ntpdisk` and `hdimage` now `cp2 mkdir` the folders in sorted order, then add each folder's files sorted.

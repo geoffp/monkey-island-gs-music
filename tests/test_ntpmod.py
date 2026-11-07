@@ -103,7 +103,7 @@ def test_loop_is_exactly_periodic_and_the_attack_flows_into_it():
     x = np.sin(2 * np.pi * 220 * t) + 0.5 * np.sin(2 * np.pi * 221.3 * t + 1) + 0.3 * np.sin(2 * np.pi * 660 * t)
     period, k, loop_bytes, attack_bytes = sr / 220, 8, 512, 2040
     rate = loop_bytes * 220 / k
-    attack, loop, _ = nm.attack_and_loop(x, 100, period, rate, k, attack_bytes, loop_bytes)
+    attack, loop, _, _ = nm.attack_and_loop(x, 100, period, rate, k, attack_bytes, loop_bytes)
     assert len(attack) == attack_bytes and len(loop) == loop_bytes
     P = np.abs(np.fft.rfft(loop)) ** 2
     P[0] = 0
@@ -114,6 +114,7 @@ def test_loop_is_exactly_periodic_and_the_attack_flows_into_it():
     # loop starts at a rising zero crossing with loop[0] == 0, so the NTP converter's
     # "rotate to the sample nearest zero" is a no-op and the header stays 2040 B
     assert loop[0] == 0.0 and loop[-1] < 0 and loop[1] >= 0
+    assert abs(loop[0] - (loop[-1] + loop[1]) / 2) < 0.5 * step  # no step forced at the start
 
 
 def test_drum_rate_follows_bandwidth():
@@ -197,3 +198,100 @@ def test_ntp_only_sounds_split_out_of_bank_merges():
     out = nm.ntp_spec(spec, conf)
     assert {m["name"]: m["covers"] for m in out["melodic"]} == {"Elec Organ": [9], "Pipe Organ": [13], "Solo2": [20]}
     assert spec["melodic"][0]["covers"] == [9, 13]                  # shared bank spec untouched
+
+
+def test_key_split_sounds_pick_their_register():
+    spec = {"melodic": [{"slot": 101, "name": "Hi", "program": 13, "covers": [13], "key": 60, "keys": [52, 127]},
+                        {"slot": 102, "name": "Lo", "program": 13, "covers": [13], "key": 41, "keys": [0, 51]},
+                        {"slot": 1, "name": "Bass", "program": 65, "covers": [65], "key": 36}], "drum": []}
+    assert nm.melodic_entry(spec, 13, 40)["name"] == "Lo" and nm.melodic_entry(spec, 13, 52)["name"] == "Hi"
+    assert nm.melodic_entry(spec, 65, 90)["name"] == "Bass" and nm.melodic_entry(spec, 7, 60) is None
+    programs = {13: [(52, 127, 0), (0, 51, 1)], 65: 2}
+    assert [nm.sample_for(programs, 13, k) for k in (36, 51, 52, 90)] == [1, 1, 0, 0]
+    assert nm.sample_for(programs, 65, 30) == 2 and nm.sample_for(programs, 9, 60) is None
+
+
+def test_attack_rows_play_at_unit_gain():
+    s = _fake()
+    s.env_t, s.env_g = np.array([0.12, 1.0]), np.array([3.0, 1.0])   # loop is quieter than the attack's end
+    assert nm.env_at(s, 0.05, 0.01, t_loop=0.12) == 1.0               # inside the attack: raw audio
+    assert nm.env_at(s, 0.5, 0.01, t_loop=0.12) > 1.5                 # in the loop: the envelope
+    assert nm.env_at(s, 0.2, 0.01, t_loop=0.24) == 1.0                # an octave down: attack lasts 2x
+
+
+def test_raw_loop_keeps_chorus_and_has_a_continuous_seam():
+    sr = nm.mb.SR
+    t = np.arange(3 * sr) / sr
+    x = np.sin(2 * np.pi * 220 * t) + 0.6 * np.sin(2 * np.pi * 221.5 * t)   # 1.5 Hz beating
+    period, k, out = sr / 220, 110, 8192                                       # 0.5 s of cycles
+    loop = nm.raw_loop(x, 0.5 * sr, period, k, out)
+    env = np.abs(loop)
+    blocks = env[: out // 8 * 8].reshape(8, -1).max(axis=1)
+    assert blocks.max() / blocks.min() > 1.3                       # beating kept, not averaged away
+    step = np.median(np.abs(np.diff(loop)))
+    assert abs(loop[0] - loop[-1]) < 4 * step                      # end flows into the start
+
+
+def test_loop_planner_spends_free_doc_ram_on_steady_sounds_only():
+    def mk(name, steady, max_loop=16384):
+        s = nm.ModSample(name, np.zeros(2552), loop_start=2040, loop_len=512, kind="melodic")
+        s.steady, s.max_loop = steady, max_loop
+        return s
+    samples = [mk("organ", True), mk("strings", True, 4096), mk("marimba", False),
+               nm.ModSample("kick", np.zeros(2038), kind="drum")]
+    usage = {0: 30.0, 1: 10.0, 2: 50.0}
+    sizes = nm.plan_loops(samples, usage, 239, 16384)
+    assert sizes[2] == 512                                          # decaying: stays short
+    assert sizes[1] == 4096                                         # capped by its recording
+    assert sizes[0] == 16384                                        # most sustain: biggest loop
+    tight = nm.plan_loops(samples, usage, 40, 16384)               # 41 pages: little room
+    blocks = [2048, tight[0], 2048, tight[1], 2048, 512, 2048]
+    assert sum(blocks) <= 41 * 256 and tight[0] >= tight[1]
+
+
+def test_steadiness_separates_sustained_from_decaying():
+    sr = nm.mb.SR
+    t = np.arange(int(2.6 * sr)) / sr
+    a, off = int(0.1 * sr), int(2.1 * sr)
+    organ = nm.mb.rms_envelope(np.sin(2 * np.pi * 220 * t))
+    bell = nm.mb.rms_envelope(np.sin(2 * np.pi * 220 * t) * np.exp(-t / 0.4))
+    assert nm.is_steady(organ, a, off, 0.4) and not nm.is_steady(bell, a, off, 0.4)
+
+
+def test_key_split_falls_back_to_the_nearest_range_and_modes_filter_sounds():
+    spec = {"melodic": [{"slot": 2, "name": "Elec Organ", "program": 9, "covers": [9, 13], "key": 60}], "drum": []}
+    conf = {"melodic": [{"slot": 101, "name": "Hi", "program": 13, "covers": [13], "key": 60, "keys": [52, 127]},
+                        {"slot": 102, "name": "Lo", "program": 13, "covers": [13], "key": 44, "keys": [40, 51]},
+                        {"slot": 103, "name": "Lo2", "program": 13, "covers": [13], "key": 37, "keys": [0, 39],
+                         "modes": ["per-song"]}]}
+    shared = nm.ntp_spec(spec, conf, "shared")
+    assert [m["name"] for m in shared["melodic"]] == ["Elec Organ", "Hi", "Lo"]
+    assert nm.melodic_entry(shared, 13, 36)["name"] == "Lo"            # nearest range
+    assert nm.melodic_entry(nm.ntp_spec(spec, conf, "per-song"), 13, 36)["name"] == "Lo2"
+    assert nm.sample_for({13: [(52, 127, 0), (40, 51, 1)]}, 13, 30) == 1
+
+
+def test_track_order_lets_the_ntp_converter_assign_every_oscillator():
+    # the converter's first-fit: interleaving strands odd oscillators even within 31
+    interleaved = [1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2]          # 31 oscillators
+    assert nm.ntp_oscillators(interleaved) is None
+    assert nm.ntp_oscillators(sorted(interleaved, reverse=True)) is not None
+    # convert_song emits melodic (2-osc) tracks first, so any song within budget fits
+    import mido
+    mf = mido.MidiFile(ticks_per_beat=120)
+    t = mido.MidiTrack([mido.Message("program_change", channel=1, program=9)])
+    for i in range(12):
+        t += [mido.Message("note_on", channel=9, note=36, velocity=100, time=0 if i else 0),
+              mido.Message("note_on", channel=1, note=60 + i, velocity=90, time=5),
+              mido.Message("note_off", channel=9, note=36, time=5)]
+    t += [mido.Message("note_off", channel=1, note=60 + i, time=1 if i == 0 else 0) for i in range(12)]
+    mf.tracks.append(t)
+    import tempfile, pathlib
+    p = pathlib.Path(tempfile.mkdtemp()) / "x.mid"
+    mf.save(p)
+    kick = nm.ModSample("kick", np.zeros(1014), kind="drum", seconds=0.5)
+    cfg = {"rows_per_unit": 2, "speed": 3, "quantize": 0.0, "oscillators": 31}
+    _, _, rep = nm.convert_song(p, [_fake(), kick], {9: 0}, {36: (1, 20, 1.0)}, cfg, dict(cfg))
+    kinds = rep.track_kinds
+    assert kinds == sorted(kinds, key=lambda k: k != "melodic")
+    assert nm.ntp_oscillators([2 if k == "melodic" else 1 for k in kinds]) is not None

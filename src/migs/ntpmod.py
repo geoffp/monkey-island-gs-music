@@ -81,6 +81,9 @@ class ModSample:
     seconds: float = 0.0        # one-shot length (drums)
     default_volume: int = 48
     tune_cents: float = 0.0
+    steady: bool = False        # sustain holds its level (a raw multi-cycle loop won't pump)
+    rate: float = 0.0           # sample rate at key0 (Hz)
+    max_loop: int = 512         # longest loop the recording allows (bytes, power of two)
 
     def mod_bytes(self) -> bytes:
         return bytes(np.clip(np.round(self.data * 127), -128, 127).astype(np.int8).tobytes())
@@ -97,15 +100,11 @@ class ModSample:
 
 
 def _best_tuning(freq: float, tables, min_rate, max_rate, loop_bytes, key0, key_lo, key_hi):
-    """(err_cents, k, rate, base_note, finetune): 512 B = k periods at `rate`, played by
-    note base_note with finetune so that period gives exactly that rate."""
+    """(err_cents, k, rate, base_note, finetune): `loop_bytes` = k periods at `rate`, played
+    by note base_note with finetune so that period gives exactly that rate."""
     best = None
-    for k in range(1, 200):
+    for k in range(max(1, math.ceil(loop_bytes * freq / max_rate)), math.floor(loop_bytes * freq / min_rate) + 1):
         rate = loop_bytes * freq / k
-        if rate > max_rate:
-            continue
-        if rate < min_rate:
-            break
         for ft, per in tables.items():
             for n in range(NOTES):
                 lo, hi = n + key_lo - key0, n + key_hi - key0
@@ -127,12 +126,17 @@ def smooth(x: np.ndarray, n: int) -> np.ndarray:
     return np.convolve(x, k, mode="same") / np.convolve(np.ones(len(x)), k, mode="same")
 
 
-def env_at(s: "ModSample", dt: float, width: float) -> float:
+def env_at(s: "ModSample", dt: float, width: float, t_loop: float | None = None) -> float:
     """Mean envelope gain over [dt - width/2, dt + width/2]: one Cxx per row stands for the
-    whole row, so averaging (not point sampling) keeps tremolo from aliasing into jumps."""
-    lo, hi = dt - width / 2, dt + width / 2
-    ts = np.linspace(lo, hi, 9)
-    return float(np.mean(np.interp(ts, s.env_t, s.env_g, left=s.env_g[0], right=s.env_g[-1])))
+    whole row, so averaging (not point sampling) keeps tremolo from aliasing into jumps.
+    Before `t_loop` (when this note's attack hands over to the loop) the gain is 1: the
+    attack is raw source audio and already carries its own contour; env_g is relative to
+    the loop, which is taken later in the sustain."""
+    ts = np.linspace(dt - width / 2, dt + width / 2, 9)
+    g = np.interp(ts, s.env_t, s.env_g, left=s.env_g[0], right=s.env_g[-1])
+    if t_loop is not None:
+        g = np.where(ts < t_loop, 1.0, g)
+    return float(np.mean(g))
 
 
 def periodic_loop(x: np.ndarray, start: float, period: float, k: int, out: int, cycles: int = 4) -> np.ndarray:
@@ -152,50 +156,80 @@ def periodic_loop(x: np.ndarray, start: float, period: float, k: int, out: int, 
     return loop * (e_src / e_loop) if e_loop > 0 else loop
 
 
-def rising_zero(y: np.ndarray, nearest_to: int | None = None) -> int:
-    """Index i of a rising zero crossing (y[i-1] < 0 <= y[i], cyclically) with the smallest |y[i]|,
-    or the one nearest (cyclically) to `nearest_to`."""
-    idx = np.nonzero((np.roll(y, 1) < 0) & (y >= 0))[0]
-    if not len(idx):
-        return int(np.argmin(np.abs(y)))
-    if nearest_to is not None:
-        n = len(y)
-        return int(min(idx, key=lambda i: min((i - nearest_to) % n, (nearest_to - i) % n)))
-    return int(idx[np.argmin(np.abs(y[idx]))])
+def raw_loop(x: np.ndarray, start: float, period: float, k: int, out: int, xfade: float = 0.25) -> np.ndarray:
+    """`out` points holding k source periods from `start`, as recorded (chorus, beating and
+    vibrato kept), with a crossfade seam: the last `xfade` of the loop fades into the audio
+    just before `start`, so the end flows into the start. Used for long loops of steady
+    sounds; short loops use periodic_loop (one averaged cycle, tiled)."""
+    M = out * 4
+    step = k * period / M
+    xi = np.arange(len(x))
+    body = np.interp(start + np.arange(M) * step, xi, x)
+    nx = int(M * xfade)
+    pre = np.interp(start - (nx - np.arange(nx)) * step, xi, x)
+    w = np.linspace(0, 1, nx + 2)[1:-1]
+    body[-nx:] = body[-nx:] * (1 - w) + pre * w
+    return resample(body, out)
+
+
+def zero_start(loop: np.ndarray, c: int) -> np.ndarray:
+    """Rotate a periodic loop so the rising zero crossing between samples c-1 and c lands
+    exactly on index 0. The fractional part of the shift is an FFT phase rotation (exact for a
+    periodic signal), so nothing is overwritten: forcing loop[0] = 0 at a steep crossing
+    left a step of up to 11x a normal sample step, i.e. a click every loop pass (a buzz)."""
+    n = len(loop)
+    y0, y1 = loop[(c - 1) % n], loop[c]
+    p = (c - 1) + (-y0 / (y1 - y0) if y1 != y0 else 1.0)    # crossing position, in samples
+    k = np.fft.rfftfreq(n, 1 / n)
+    out = np.fft.irfft(np.fft.rfft(loop) * np.exp(2j * np.pi * k * p / n), n)
+    out[0] = 0.0                                          # residual is ~1e-16
+    return out
 
 
 def attack_and_loop(x: np.ndarray, a: int, period: float, rate: float, k: int, attack_bytes: int,
-                    loop_bytes: int, xfade_cycles: float = 2.0) -> tuple[np.ndarray, np.ndarray, float]:
-    """(attack, loop, source index where the attack ends). The attack is resampled with a
-    margin (no FFT edge ringing at the seam), and its last `xfade_cycles` periods crossfade
-    into the loop's periodic continuation, so attack -> loop is continuous in value and phase.
+                    loop_bytes: int, sustain_s: float = 0.4, xfade_cycles: float = 4.0,
+                    raw: bool = False) -> tuple[np.ndarray, np.ndarray, float, float]:
+    """(attack, loop, source index where the attack ends, source index the loop was taken at).
 
-    The loop starts at a rising zero crossing, with loop[0] exactly 0: Ninjaforce's converter
-    rotates every loop to its first sample nearest zero and moves the skipped bytes into the
-    loop header, which pushed our 2040 B headers past their 2 KB block (into 4 KB) and
-    overflowed DOC RAM. The attack window starts up to one period earlier (into the
-    near-silence before the onset) so its end meets that crossing."""
-    step = k * period / loop_bytes                       # source samples per loop byte
-    att_end = a + attack_bytes / rate * mb.SR
-    p = rising_zero(periodic_loop(x, att_end, period, k, loop_bytes))
-    shift = (p * step) % period                          # phase of the crossing after att_end
-    if shift > 0:
-        a = max(0, int(round(a + shift - period)))
-        att_end = a + attack_bytes / rate * mb.SR
-    loop = periodic_loop(x, att_end, period, k, loop_bytes)
-    loop = np.roll(loop, -rising_zero(loop, nearest_to=0))   # sub-sample remainder
-    loop[0] = 0.0
+    - The loop's cycles come from the steady sustain (`sustain_s` after the onset, earlier if
+      the sound has decayed below 20% of its peak by then), not from where the attack ends:
+      at 2040 B the attack is only ~0.12 s, before e.g. an organ's fundamental has built up
+      (Pipe Org 2 at key 60: 61% of its energy in the fundamental at 0.4 s, 17% at 0.12 s).
+    - The attack is resampled with a margin (no FFT edge ringing at the seam), and its last
+      `xfade_cycles` periods crossfade into the loop's periodic continuation.
+    - The loop starts at a rising zero crossing with loop[0] = 0 exactly: Ninjaforce's
+      converter rotates every loop to its first sample nearest zero and moves the skipped
+      bytes into the loop header, which pushed 2040 B headers into 4 KB blocks and overflowed
+      DOC RAM. Of the rising crossings, the one whose phase best matches the attack's tail is
+      used, so the crossfade doesn't cancel itself."""
+    SR = mb.SR
+    att_end = a + attack_bytes / rate * SR
+    env = mb.rms_envelope(x)
+    top = float(np.max(env[a:])) or 1.0
+    at = a + sustain_s * SR
+    while at > att_end and env[int(at)] < 0.2 * top:
+        at -= 0.01 * SR
+    at = max(at, att_end)
+    loop = (raw_loop if raw else periodic_loop)(x, at, period, k, loop_bytes)
     margin = int(4 * period)
     hi = min(len(x), int(round(att_end)) + margin)
     seg = x[a:hi]
-    attack = resample(seg, int(round(len(seg) * rate / mb.SR)))[:attack_bytes]
+    attack = resample(seg, int(round(len(seg) * rate / SR)))[:attack_bytes]
     if len(attack) < attack_bytes:
         attack = np.pad(attack, (0, attack_bytes - len(attack)))
-    n = min(attack_bytes, max(4, int(round(xfade_cycles * loop_bytes / k))))
+    n = min(attack_bytes // 4, max(4, int(round(xfade_cycles * loop_bytes / k))))
+    tail = attack[-n:]
+    idx = np.nonzero((np.roll(loop, 1) < 0) & (loop >= 0))[0]
+    if not len(idx):
+        idx = np.array([int(np.argmin(np.abs(loop)))])
+    def score(c):
+        ext = np.roll(loop, -c)[np.arange(-n, 0) % loop_bytes]
+        return float(np.dot(tail, ext)) / ((np.linalg.norm(tail) * np.linalg.norm(ext)) or 1.0)
+    loop = zero_start(loop, int(max(idx, key=score)))
     ext = loop[np.arange(-n, 0) % loop_bytes]           # what the loop would have been before its start
-    w = np.linspace(0, 1, n + 1)[1:]
-    attack[-n:] = attack[-n:] * (1 - w) + ext * w
-    return attack, loop, att_end
+    w = 0.5 - 0.5 * np.cos(np.linspace(0, np.pi, n + 1)[1:])
+    attack[-n:] = tail * (1 - w) + ext * w
+    return attack, loop, att_end, at
 
 
 def drum_rate(seg: np.ndarray, nbytes: int, lo: float, hi: float) -> float:
@@ -248,6 +282,53 @@ def cc7_curve(smf2wav, roms, cache, program: int = 50, key: int = 67) -> tuple[n
     return np.array(CC7_POINTS, float), np.array(lv) / ref
 
 
+def is_steady(env: np.ndarray, a: int, off: int, sustain_s: float, max_drop_db: float = 6.0) -> bool:
+    """True if the sound holds its level from the sustain start to note-off (organs, strings,
+    winds). Decaying sounds (marimba, bass, vibes) keep the short averaged loop: a raw
+    multi-cycle loop would bake the decay in and pump on every pass."""
+    SR = mb.SR
+    lv = np.exp(smooth(np.log(np.maximum(env, 1e-6)), int(0.25 * SR)))
+    i0, i1 = a + int(sustain_s * SR), off - int(0.15 * SR)
+    if i1 <= i0:
+        return False
+    seg = lv[i0:i1]
+    return 20 * math.log10(float(seg.max()) / max(float(seg.min()), 1e-9)) <= max_drop_db
+
+
+def plan_loops(samples: list[ModSample], usage: dict[int, float], last_page: int,
+               max_loop: int) -> dict[int, int]:
+    """Loop size per melodic sample index, spending the song's free DOC RAM (pages up to
+    `last_page`) on its steady sounds: repeatedly double the loop with the most sustained
+    playing time per byte, as long as everything still packs the way NTP packs it."""
+    sizes = {i: s.loop_len for i, s in enumerate(samples) if s.kind == "melodic"}
+    grow = {i for i, s in enumerate(samples) if s.kind == "melodic" and s.steady and usage.get(i, 0) > 0}
+
+    def fits(sz: dict[int, int]) -> bool:
+        blocks = []
+        for i, s in enumerate(samples):
+            b = s.ntp_blocks()
+            if i in sz:
+                b = [b[0], sz[i]]
+            blocks += b
+        try:
+            mb.allocate([mb.Wave(f"b{j}", bytes(b)) for j, b in enumerate(blocks)], 0, last_page)
+            return True
+        except ValueError:
+            return False
+
+    while grow:
+        i = max(grow, key=lambda j: usage[j] / sizes[j])
+        if sizes[i] * 2 > min(max_loop, samples[i].max_loop):
+            grow.discard(i)
+            continue
+        trial = {**sizes, i: sizes[i] * 2}
+        if fits(trial):
+            sizes = trial
+        else:
+            grow.discard(i)
+    return sizes
+
+
 def build_samples(spec: dict, cfg: dict, key_ranges: dict[int, tuple[int, int]], smf2wav, roms, cache,
                   tables, log=print) -> tuple[list[ModSample], dict, dict]:
     """Samples per gs/mt32bank.toml; returns (samples, program->index, rhythm key->(index, note, level gain))."""
@@ -264,10 +345,20 @@ def build_samples(spec: dict, cfg: dict, key_ranges: dict[int, tuple[int, int]],
         period = mb.refine_period(x, probe, f0)
         fm = SR / period
         lo, hi = key_ranges.get(m["slot"], (m["key"], m["key"]))
-        err, k, rate, n0, ft = _best_tuning(fm, tables, cfg["min_rate"], cfg["max_rate"],
-                                            cfg["loop_bytes"], m["key"], min(lo, m["key"]), max(hi, m["key"]))
-        # attack = source [a, a + attack_bytes/rate); loop = the next k periods
-        attack, loop, att_end = attack_and_loop(x, a, period, rate, k, cfg["attack_bytes"], cfg["loop_bytes"])
+        sustain_s = cfg.get("sustain_s", 0.4)
+        steady = is_steady(env, a, off, sustain_s)
+        loop_bytes = m.get("ntp_loop_bytes", cfg["loop_bytes"]) if steady else cfg["loop_bytes"]
+        while True:
+            err, k, rate, n0, ft = _best_tuning(fm, tables, cfg["min_rate"], cfg["max_rate"],
+                                                loop_bytes, m["key"], min(lo, m["key"]), max(hi, m["key"]))
+            # a long loop must fit in the recording between the sustain start and note-off
+            if loop_bytes <= cfg["loop_bytes"] or a + (sustain_s + loop_bytes / rate + 0.05) * SR <= off:
+                break
+            loop_bytes //= 2
+        # attack = source [a, a + attack_bytes/rate); loop = k periods from the sustain
+        att_bytes = m.get("ntp_attack_bytes", cfg["attack_bytes"])
+        attack, loop, att_end, loop_at = attack_and_loop(x, a, period, rate, k, att_bytes, loop_bytes,
+                                                         sustain_s, raw=loop_bytes > cfg["loop_bytes"])
         e_loop = float(np.sqrt(np.mean(loop ** 2))) or 1e-9
         # envelope after the attack, relative to the loop's own level
         t = np.arange(int(att_end), off, int(0.01 * SR))
@@ -280,10 +371,13 @@ def build_samples(spec: dict, cfg: dict, key_ranges: dict[int, tuple[int, int]],
         rel_g = rel / max(env[off], 1e-9)
         data = np.concatenate([attack, loop])
         peak = float(np.max(np.abs(data))) or 1.0
-        s = ModSample(m["name"], data / peak, loop_start=cfg["attack_bytes"], loop_len=cfg["loop_bytes"],
+        s = ModSample(m["name"], data / peak, loop_start=att_bytes, loop_len=loop_bytes,
                       finetune=ft, base_note=n0, key0=m["key"], kind="melodic",
                       env_t=(t - a) / SR, env_g=g, rel_g=np.clip(rel_g, 0, 1),
                       tune_cents=err, level=peak)
+        s.steady, s.rate = steady, rate
+        s.max_loop = 1 << int(math.log2(max(1.0, ((off - a) / SR - sustain_s - 0.05) * rate)))
+        s.max_loop = s.max_loop if steady else cfg["loop_bytes"]
         s.vel_v, s.vel_g = velocity_response(lambda v: mb.render(smf2wav, roms, cache, program=m["program"],
                                                                  key=m["key"], hold=0.5, velocity=v))
         s.key_v, s.key_g = key_response(lambda kk: mb.render(smf2wav, roms, cache, program=m["program"],
@@ -292,8 +386,12 @@ def build_samples(spec: dict, cfg: dict, key_ranges: dict[int, tuple[int, int]],
         idx = len(samples)
         samples.append(s)
         for p in m["covers"]:
-            programs[p] = idx
-        log(f"  {m['name']:<12} k={k:2d} rate {rate:7.0f} Hz note {n0:2d} ft {ft:+d} "
+            if "keys" in m:                          # key-split: (lo, hi, sample) per range
+                programs.setdefault(p, []).append((*m["keys"], idx))
+            else:
+                programs[p] = idx
+        log(f"  {m['name']:<12} loop {loop_bytes:5d} B{' raw' if loop_bytes > cfg['loop_bytes'] else '    '} "
+            f"k={k:3d} rate {rate:7.0f} Hz note {n0:2d} ft {ft:+d} "
             f"err {err:+5.1f} cents, swell x{g_max:.2f}, keys {lo}-{hi}")
 
     for d in spec["drum"]:
@@ -335,11 +433,11 @@ def build_samples(spec: dict, cfg: dict, key_ranges: dict[int, tuple[int, int]],
     return samples, programs, drums
 
 
-def ntp_doc_pages(samples: list[ModSample]) -> int:
+def ntp_doc_pages(samples: list[ModSample], last_page: int = 255) -> int:
     """DOC pages NTP needs for these samples (aligned blocks, packed largest first)."""
     blocks = sorted((b for s in samples for b in s.ntp_blocks()), reverse=True)
     waves = [mb.Wave(f"b{i}", bytes(b)) for i, b in enumerate(blocks)]
-    pages = mb.allocate(waves, 0, 255)                   # raises if it can't fit
+    pages = mb.allocate(waves, 0, last_page)             # raises if it can't fit
     return sum(b // 256 for b in blocks)
 
 
@@ -414,6 +512,7 @@ class Report:
     vel_default: int = 0
     level_ref: float = 1.0      # note loudness that maps to MOD volume 64
     tempo_changes: int = 0
+    track_kinds: list = field(default_factory=list)   # "melodic" (2 oscillators) / "drum" (1), in MOD order
     nudged: int = 0
     tracks_used: int = 0
     oscillators: int = 0
@@ -451,6 +550,24 @@ def tempo_commands(ideal: float, speed: int, rows: int, can_set, tol: float) -> 
     return out
 
 
+def ntp_oscillators(track_osc: list[int]) -> list[int] | None:
+    """First oscillator per track as Ninjaforce's converter assigns them (determine_osc_per_track):
+    first-fit in track order over oscillators 0-30, pairs starting on even oscillators. None if
+    some track gets no oscillator (the converter then silently writes 0)."""
+    used = [False] * 31
+    out = []
+    for need in track_osc:
+        for i in range(0, 31, need):
+            if all(i + j < 31 and not used[i + j] for j in range(need)):
+                for j in range(need):
+                    used[i + j] = True
+                out.append(i)
+                break
+        else:
+            return None
+    return out
+
+
 class Grid:
     """cells[track][row] = [note(0-72), instrument(0-31), effect, param]; effect -1 = empty."""
 
@@ -467,6 +584,28 @@ class Grid:
     def effect_free(self, tr, row) -> bool:
         c = self.cells[tr].get(row)
         return c is None or c[2] < 0
+
+
+def sample_for(programs: dict, prog: int, key: int) -> int | None:
+    """Sample index for a program and key: programs[prog] is an index, or a list of
+    (lo, hi, index) key ranges (NTP-only key splits, e.g. a low-register organ sample)."""
+    v = programs.get(prog)
+    if isinstance(v, list):                      # in range, else the nearest range
+        return min(v, key=lambda r: max(r[0] - key, key - r[1], 0))[2]
+    return v
+
+
+def melodic_entry(spec: dict, prog: int, key: int) -> dict | None:
+    """The spec's melodic entry that plays (prog, key), honouring `keys` splits."""
+    hits = [m for m in spec["melodic"] if prog in m["covers"]]
+    split = [m for m in hits if "keys" in m]
+    inside = [m for m in split if m["keys"][0] <= key <= m["keys"][1]]
+    if inside:
+        return inside[0]
+    whole = [m for m in hits if "keys" not in m]
+    if whole:
+        return whole[0]
+    return min(split, key=lambda m: max(m["keys"][0] - key, key - m["keys"][1], 0)) if split else None
 
 
 def convert_song(path: Path, samples, programs, drums, cfg: dict, song_cfg: dict,
@@ -529,7 +668,7 @@ def convert_song(path: Path, samples, programs, drums, cfg: dict, song_cfg: dict
     def sample_of(n: Note) -> int | None:
         if n.channel == RHYTHM:
             return drums[n.key][0] if n.key in drums else None
-        return programs.get(chan_prog.get(n.channel, -1))
+        return sample_for(programs, chan_prog.get(n.channel, -1), n.key)
 
     def amp(s: ModSample, n: Note) -> float:
         g7 = float(np.interp(n.volume, *cc7)) if cc7 is not None else 1.0
@@ -561,7 +700,7 @@ def convert_song(path: Path, samples, programs, drums, cfg: dict, song_cfg: dict
                 continue
             si, note_idx = hit[:2]
         else:
-            si = programs.get(chan_prog.get(n.channel, -1))
+            si = sample_for(programs, chan_prog.get(n.channel, -1), n.key)
             if si is None:
                 rep.dropped += 1
                 continue
@@ -628,16 +767,18 @@ def convert_song(path: Path, samples, programs, drums, cfg: dict, song_cfg: dict
             r_off = max(r_off, r + 1)
             trk_off[tr] = r_off
             prev = None
+            # the attack plays slower on lower notes: it hands over to the loop later
+            t_loop = s.env_t[0] * 2 ** (-(n.key - s.key0) / 12)
             for rr in range(r + 1, r_off):
                 dt = (rr - r) * row_s
-                g = env_at(s, dt, row_s)
+                g = env_at(s, dt, row_s, t_loop)
                 vv = max(0, min(64, round(vf * g)))
                 if vv != prev and grid.effect_free(tr, rr):
                     c = grid.get(tr, rr)
                     c[2], c[3] = 0xC, vv
                     prev = vv
                 last = rr
-            g_off = env_at(s, (r_off - r) * row_s, row_s)
+            g_off = env_at(s, (r_off - r) * row_s, row_s, t_loop)
             v_off = vf * g_off
             steps = max(1, int(round(len(s.rel_g) * 0.01 / row_s)))
             for i in range(steps + 1):
@@ -662,6 +803,14 @@ def convert_song(path: Path, samples, programs, drums, cfg: dict, song_cfg: dict
     rep.tracks_used, rep.oscillators = len(grid.cells), osc_used
     if len(grid.cells) < 2:
         new_track("drum")
+    # Two-oscillator (looped) tracks first: Ninjaforce's converter assigns oscillators first-fit
+    # in track order with pairs on even oscillators, so interleaved 1- and 2-oscillator tracks
+    # strand odd oscillators; tracks that then find no room silently get oscillator 0 (PHP
+    # "Undefined array key" at ntpconverter_lib.php:1613), clashing with track 1.
+    order = sorted(range(len(grid.cells)), key=lambda t: (trk_kind[t] != "melodic", t))
+    grid.cells = [grid.cells[t] for t in order]
+    trk_kind[:] = [trk_kind[t] for t in order]
+    rep.track_kinds = list(trk_kind)
     # speed + tempo on row 0 (the lead-in row is always free), loop jump at the very end
     changes = tempo_commands(tempo_ideal, speed, patterns * ROWS,
                              lambda r: any(grid.effect_free(t, r) for t in range(len(grid.cells))),
@@ -716,14 +865,55 @@ def mod_file(title: str, samples: list[ModSample], grid: Grid, patterns: int, ta
     return bytes(out)
 
 
-def ntp_spec(spec: dict, conf: dict) -> dict:
+def ntp_spec(spec: dict, conf: dict, mode: str | None = None) -> dict:
     """The MI1 bank spec plus gs/ntp.toml's NTP-only `[[melodic]]` sounds. An extra sound takes
     its `covers` away from the shared bank's merges (NTP has DOC RAM the 16-slot MIDI Synth
     bank doesn't), e.g. Pipe Org 2, which MI1.BNK plays with Elec Org 2's sample."""
-    extra = conf.get("melodic", [])
+    extra = [m for m in conf.get("melodic", []) if mode is None or mode in m.get("modes", [mode])]
     taken = {p for m in extra for p in m["covers"]}
     melodic = [{**m, "covers": [p for p in m["covers"] if p not in taken]} for m in spec["melodic"]]
     return {**spec, "melodic": [m for m in melodic if m["covers"]] + list(extra)}
+
+
+def loop_summary(samples: list[ModSample], cfg: dict) -> str:
+    return " ".join(f"{s.name}:{s.loop_len}{'r' if s.loop_len > cfg['loop_bytes'] else ''}"
+                    for s in samples if s.kind == "melodic")
+
+
+def sample_set(spec: dict, cfg: dict, songs: list[tuple[list, dict]], last_page: int, tables, args):
+    """(samples, programs, drums) for the sounds these songs play, with loop sizes planned into
+    the DOC RAM they leave free (pages up to `last_page`). One song: a per-song set; all songs:
+    the shared set."""
+    used, ranges, keys = {}, {}, set()
+    usage_notes = []
+    for notes, chan_prog in songs:
+        for n in notes:
+            if n.channel == RHYTHM:
+                keys.add(n.key)
+                continue
+            m = melodic_entry(spec, chan_prog.get(n.channel, -1), n.key)
+            if m is None:
+                continue
+            used[m["slot"]] = m
+            lo, hi = ranges.get(m["slot"], (n.key, n.key))
+            ranges[m["slot"]] = (min(lo, n.key), max(hi, n.key))
+            usage_notes.append((chan_prog.get(n.channel, -1), n))
+    song_spec = {**spec, "melodic": [m for m in spec["melodic"] if m["slot"] in used],
+                 "drum": [d for d in spec["drum"] if keys & set(d["covers"])]}
+    build = lambda sp: build_samples(sp, cfg, ranges, args.smf2wav, args.roms, args.cache, tables, log=lambda *a: None)
+    samples, programs, drums = build(song_spec)
+    usage: dict[int, float] = {}
+    for prog, n in usage_notes:
+        si = sample_for(programs, prog, n.key)
+        if si is not None:
+            usage[si] = usage.get(si, 0.0) + (n.off - n.t)
+    sizes = plan_loops(samples, usage, last_page, cfg.get("max_loop_bytes", 16384))
+    if any(sizes[i] != samples[i].loop_len for i in sizes):
+        by_name = {samples[i].name: sz for i, sz in sizes.items()}
+        song_spec = {**song_spec, "melodic": [{**m, "ntp_loop_bytes": by_name.get(m["name"], cfg["loop_bytes"])}
+                                              for m in song_spec["melodic"]]}
+        samples, programs, drums = build(song_spec)
+    return samples, programs, drums
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -736,37 +926,45 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--smf2wav", type=Path, default=Path("vendor/munt/bin/mt32emu-smf2wav"))
     ap.add_argument("--roms", type=Path, default=Path("original files/mt-32 roms"))
     ap.add_argument("--cache", type=Path, default=Path("gs/build/mt32samples"))
+    ap.add_argument("--samples", choices=("per-song", "shared"), help="override gs/ntp.toml `samples`")
     args = ap.parse_args(argv)
     conf = tomllib.loads(args.config.read_text())
-    cfg = conf["defaults"]
-    spec = ntp_spec(tomllib.loads(args.spec.read_text()), conf)
+    mode = args.samples or conf["defaults"].get("samples", "per-song")
+    if mode not in ("per-song", "shared"):
+        raise SystemExit(f"samples must be per-song or shared, not {mode!r}")
+    cfg = {**conf["defaults"], **conf.get("modes", {}).get(mode, {})}    # e.g. [modes.shared]
+    spec = ntp_spec(tomllib.loads(args.spec.read_text()), conf, mode)
     tables = period_tables(args.make_tables)
     cc7 = cc7_curve(args.smf2wav, args.roms, args.cache)
     print("MT-32 CC7 curve: " + " ".join(f"{int(v)}:{g:.2f}" for v, g in zip(*cc7)))
 
-    # key ranges per melodic slot across all songs (so one sample mapping fits every song)
-    prog_slot = {p: m["slot"] for m in spec["melodic"] for p in m["covers"]}
-    ranges: dict[int, tuple[int, int]] = {}
-    for p in args.inputs:
-        notes, chan_prog, _ = read_notes(p)
-        for n in notes:
-            slot = prog_slot.get(chan_prog.get(n.channel, -1))
-            if n.channel != RHYTHM and slot is not None:
-                lo, hi = ranges.get(slot, (n.key, n.key))
-                ranges[slot] = (min(lo, n.key), max(hi, n.key))
-
-    print("samples (shared by every song):")
-    samples, programs, drums = build_samples(spec, cfg, ranges, args.smf2wav, args.roms, args.cache, tables)
-    pages = ntp_doc_pages(samples)
-    print(f"  NTP DOC RAM: {pages} of 256 pages ({pages * 256} bytes), {len(samples)} samples")
+    # NTP files carry their own samples (loaded into DOC RAM by NTPprepare), so by default
+    # each song gets only the sounds it plays and its free DOC RAM goes to longer loops
+    # (`samples = "per-song"`). `samples = "shared"` builds one set for every song, like the
+    # MIDI Synth bank (a game that can't afford per-song sample loads).
+    last_page = 255 - cfg.get("reserve_pages", 16)
     args.out_dir.mkdir(parents=True, exist_ok=True)
-    print(f"{'song':<6} {'tempo':>5} {'spd':>3} {'row ms':>6} {'pat':>3} {'trk':>3} {'osc':>3} {'notes':>5} "
-          f"{'drop':>4} {'steal':>5} {'tchg':>4} {'delay':>5} {'v:cell':>6} {'v:prev':>6} {'v:dflt':>6} {'err ms':>6}")
-    for p in args.inputs:
+    songs = [(p, *read_notes(p)[:2]) for p in args.inputs]
+    shared = sample_set(spec, cfg, [(n, cp) for _, n, cp in songs], last_page, tables, args) if mode == "shared" else None
+    if shared:
+        print(f"shared samples ({len(shared[0])}, DOC {ntp_doc_pages(shared[0], last_page)}/256 pages, "
+              f"reserve {255 - last_page}): {loop_summary(shared[0], cfg)}")
+    reports = []
+    for p, notes, chan_prog in songs:
         sid = p.stem.split("-")[0]
         song_cfg = {**cfg, **conf.get("songs", {}).get(sid, {})}
+        samples, programs, drums = shared or sample_set(spec, cfg, [(notes, chan_prog)], last_page, tables, args)
+        if not shared:
+            print(f"MI{sid}: {len(samples)} samples, DOC {ntp_doc_pages(samples, last_page)}/256 pages "
+                  f"(reserve {255 - last_page}); loops {loop_summary(samples, cfg)}")
         grid, patterns, rep = convert_song(p, samples, programs, drums, cfg, song_cfg, cc7)
+        if ntp_oscillators([2 if k == "melodic" else 1 for k in rep.track_kinds]) is None:
+            raise SystemExit(f"MI{sid}: NTP's converter can't assign oscillators to these tracks")
         (args.out_dir / f"MI{sid}.mod").write_bytes(mod_file(f"MI1 {sid}", samples, grid, patterns, tables))
+        reports.append((sid, rep))
+    print(f"{'song':<6} {'tempo':>5} {'spd':>3} {'row ms':>6} {'pat':>3} {'trk':>3} {'osc':>3} {'notes':>5} "
+          f"{'drop':>4} {'steal':>5} {'tchg':>4} {'delay':>5} {'v:cell':>6} {'v:prev':>6} {'v:dflt':>6} {'err ms':>6}")
+    for sid, rep in reports:
         print(f"{sid:<6} {rep.tempo:5d} {rep.speed:3d} {rep.row_ms:6.1f} {rep.patterns:3d} {rep.tracks_used:3d} "
               f"{rep.oscillators:3d} {rep.notes:5d} {rep.dropped:4d} {rep.stolen:5d} {rep.tempo_changes:4d} {rep.delayed:5d} "
               f"{rep.vel_in_cell:6d} {rep.vel_preceding:6d} "

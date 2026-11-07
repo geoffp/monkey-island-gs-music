@@ -29,10 +29,14 @@ manual_url    := "https://www.brutaldeluxe.fr/documentation/synthlab/synthlab_us
 manual_sha    := "54a5ec84e5fd152043a9a5b666bec0dab366656effeae5bd4a759894aa488a93"
 ntpsrc_sha    := "461260e35dc0b10176c05865d01c4e31694f704c0c3a9e5760fc093623dc52fb"
 ntpdemo_sha   := "350843388bde213b10101212fcd6e3f5affa3b4f25b74ea970b0b6ab85d14d97"
-# Copy music/ntp/*.ntp (typed $D5/$0008) into <dir>/PART1, PART2, ... at most 12 per folder:
+# NTP sample-set modes built side by side (music/ntp/<mode>/): per-song (each song carries only
+# its own sounds, longer loops) and shared (one set for every song, like the MIDI Synth bank).
+ntp_modes     := "per-song shared"
+# Copy music/ntp/<mode>/*.ntp (typed $D5/$0008) into <dir>/<MODE>/PART1, PART2, ... (<=12 each):
 # SenseiPlay v2.0 skips the first entry of each later directory block (a ProDOS block holds
 # the header + 12 entries, then 13), so a 16-song folder hid MI165. Verified in GSSquared.
-ntp_folders   := 'ntpf() { local i=0 d; for f in music/ntp/*.ntp; do d="$1/PART$((i / 12 + 1))"; mkdir -p "$d"; cp "$f" "$d/$(basename "$f" .ntp | tr a-z A-Z).NTP#d50008"; i=$((i + 1)); done; }; ntpf'
+# ProDOS names allow no "-": per-song -> PER.SONG.
+ntp_folders   := 'ntpf() { local m i d; for m in ' + ntp_modes + '; do i=0; for f in music/ntp/$m/*.ntp; do [ -f "$f" ] || continue; d="$1/$(echo $m | tr a-z- A-Z.)/PART$((i / 12 + 1))"; mkdir -p "$d"; cp "$f" "$d/$(basename "$f" .ntp | tr a-z A-Z).NTP#d50008"; i=$((i + 1)); done; done; }; ntpf'
 sensei_ver    := "v2.0"     # digarok/senseiplay (no published checksums)
 
 # List recipes
@@ -211,7 +215,14 @@ ntpdisk: ntp
     {{ntp_folders}} "$st/songs"
     "$cp2" create-disk-image "$img" 32m prodos >/dev/null
     "$cp2" rename "$img" : MI.NTP >/dev/null
-    (cd "$st" && "$cp2" add "$img" PRODOS* sensei.system* ntpplayer* dgr.radio.dgr* songs >/dev/null)
+    # SenseiPlay lists entries in directory order, and `cp2 add` of a tree follows the host's
+    # readdir order: create the folders in sorted order first (songs first on the disk, so it's
+    # the first entry in SenseiPlay), then add each folder's files.
+    (cd "$st" && for d in $(find songs -type d | sort); do "$cp2" mkdir "$img" "$d" >/dev/null; done
+     "$cp2" add "$img" PRODOS* sensei.system* ntpplayer* dgr.radio.dgr* >/dev/null
+     for d in $(find songs -mindepth 1 -type d | sort); do
+       fs=$(find "$d" -maxdepth 1 -type f | sort); [ -n "$fs" ] && "$cp2" add "$img" $fs >/dev/null
+     done)
     rm -rf "$st"
     "$cp2" catalog "$img" | head -12
 
@@ -269,27 +280,32 @@ voices: seq
     @echo "== stock"; uv run voices gs/seq/stock/MI*.SEQ -b "{{vendor}}/synthlab"
     @echo "== mt32";  uv run voices gs/seq/mt32/MI*.SEQ -b gs/seq/mt32
 
-# MT-32 MIDI -> 15-channel-class ProTracker MODs within NinjaTrackerPlus limits (music/ntp/MInnn.mod),
-# plus desktop previews rendered with ffmpeg/libopenmpt (music/ntp/wav/). Config: gs/ntp.toml
-ntpmod: fetch-ntp fetch-munt
+# MT-32 MIDI -> ProTracker MODs within NinjaTrackerPlus limits (music/ntp/<mode>/MInnn.mod), for
+# each sample-set mode (default both), plus libopenmpt previews in music/ntp/<mode>/wav/. Config: gs/ntp.toml
+ntpmod modes=ntp_modes: fetch-ntp fetch-munt
     #!/usr/bin/env bash
     set -euo pipefail
-    uv run ntpmod music/midi/mt32/*.mid -o music/ntp
-    mkdir -p music/ntp/wav
-    for f in music/ntp/*.mod; do
-      ffmpeg -hide_banner -loglevel error -y -f libopenmpt -i "$f" -ac 2 -ar 44100 "music/ntp/wav/$(basename "$f" .mod).wav"
+    for m in {{modes}}; do
+      echo "== samples: $m"
+      rm -rf "music/ntp/$m" && mkdir -p "music/ntp/$m/wav"
+      uv run ntpmod music/midi/mt32/*.mid -o "music/ntp/$m" --samples "$m"
+      for f in music/ntp/$m/*.mod; do
+        ffmpeg -hide_banner -loglevel error -y -f libopenmpt -i "$f" -ac 2 -ar 44100 "music/ntp/$m/wav/$(basename "$f" .mod).wav"
+      done
+      echo "previews: music/ntp/$m/wav/"
     done
-    echo "previews: music/ntp/wav/"
 
 # MOD -> .NTP with Ninjaforce's converter (needs php-cli). Streaming forbidden: everything in DOC RAM
-ntp: ntpmod
+ntp modes=ntp_modes: (ntpmod modes)
     #!/usr/bin/env bash
     set -euo pipefail
     command -v php >/dev/null || { echo "php not found: sudo dnf install php-cli"; exit 1; }
-    for f in music/ntp/*.mod; do
-      php "{{vendor}}/ntp/src/ntpconverter.php" "$f" STREAM_FORBIDDEN > "${f%.mod}.log" || { cat "${f%.mod}.log"; exit 1; }
+    for m in {{modes}}; do
+      for f in music/ntp/$m/*.mod; do
+        php "{{vendor}}/ntp/src/ntpconverter.php" "$f" STREAM_FORBIDDEN > "${f%.mod}.log" || { echo "$f:"; cat "${f%.mod}.log"; exit 1; }
+      done
+      echo "$m: $(ls music/ntp/$m/*.ntp | wc -l) .NTP files in music/ntp/$m/"
     done
-    ls -la music/ntp/*.ntp
 
 # Tuning experiment bank/sequence (gs/seq/tune/TUNE.*), see src/migs/tunetest.py
 tunetest:
@@ -331,6 +347,7 @@ gsdisk: seq drum-audition
 hdimage: seq drum-audition tunetest
     #!/usr/bin/env bash
     set -euo pipefail
+    shopt -s extglob                       # !(SenseiPlay) below
     cp2="$PWD/{{cp2}}"; img="$PWD/gs/disks/MI.HD.PO"; st="$PWD/gs/disks/hdstage"
     rm -rf "$st" "$img" && mkdir -p "$st/synthLAB"
     x() { "$cp2" extract --preserve=naps --overwrite --exdir="$1" "${@:2}" >/dev/null; }
@@ -354,14 +371,22 @@ hdimage: seq drum-audition tunetest
     done
     mkdir -p "$st/synthLAB/Tune"; for f in gs/seq/tune/*; do typed "$f" "$st/synthLAB/Tune"; done
     # NinjaTrackerPlus: SenseiPlay (ProDOS 8 player) + our songs, if `just ntp` has run
-    if ls music/ntp/*.ntp >/dev/null 2>&1; then
+    if ls music/ntp/*/*.ntp >/dev/null 2>&1; then
       mkdir -p "$st/SenseiPlay"
       x "$st/SenseiPlay" "{{vendor}}/ntp/senseiplay800.2mg" sensei.system ntpplayer dgr.radio.dgr
       {{ntp_folders}} "$st/SenseiPlay/MI"
     fi
     "$cp2" create-disk-image "$img" 32m prodos >/dev/null
     "$cp2" rename "$img" : MI.HD >/dev/null
-    (cd "$st" && "$cp2" add "$img" * >/dev/null)
+    # /SenseiPlay goes in folder by folder in sorted order: SenseiPlay lists directory order,
+    # and `cp2 add` of a tree follows the host's readdir order
+    (cd "$st" && "$cp2" add "$img" !(SenseiPlay) >/dev/null
+     if [ -d SenseiPlay ]; then
+       for d in $(find SenseiPlay -type d | sort); do "$cp2" mkdir "$img" "$d" >/dev/null; done
+       for d in $(find SenseiPlay -type d | sort); do
+         fs=$(find "$d" -maxdepth 1 -type f | sort); [ -n "$fs" ] && "$cp2" add "$img" $fs >/dev/null
+       done
+     fi)
     rm -rf "$st"
     "$cp2" catalog "$img" | grep -E '^Disk|blocks free'
     "$cp2" list "$img" | grep -c . | sed 's/^/files: /'

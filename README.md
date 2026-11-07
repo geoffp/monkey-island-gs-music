@@ -73,8 +73,12 @@ These go in `original files/`, which is gitignored and never committed:
 1. **MT-32**: `just mt32-wav <mid> <wav>` renders with [Munt](https://github.com/munt/munt)'s `mt32emu-smf2wav`. Needs your ROMs. Plays `music/midi/mt32/`.
 2. **General MIDI**: `just gm-wav <mid> <wav>` renders with FluidSynth and the [GeneralUser GS](https://github.com/mrbumpy409/GeneralUser-GS) soundfont. Plays `music/midi/gm/`.
 3. **IIGS**: `just emu-music` boots the hard-disk image; open `MI.HD/synthLAB/synthLAB`, then a sequence from `Seq.and.Instr`.
-4. **NinjaTrackerPlus, desktop**: `just ntpmod` writes `music/ntp/MInnn.mod` and renders previews to `music/ntp/wav/` (ffmpeg/libopenmpt).
-5. **NinjaTrackerPlus, IIGS**: `just emu-ntp` converts the MODs to `.NTP` and boots straight into SenseiPlay. Open `songs`, then `PART1` or `PART2`, and press Return on a song. `just emu-music` also has SenseiPlay and the songs in `/SenseiPlay` (launch `sensei.system`).
+4. **NinjaTrackerPlus, desktop**: `just ntpmod` writes MODs in two sample-set modes:
+   - `music/ntp/per-song/`: each song carries only its own sounds, with longer loops;
+   - `music/ntp/shared/`: one set for every song, like the MIDI Synth bank.
+
+   It renders previews of each to `<mode>/wav/` (ffmpeg/libopenmpt). `just ntpmod per-song` builds just one mode.
+5. **NinjaTrackerPlus, IIGS**: `just emu-ntp` converts the MODs to `.NTP` and boots straight into SenseiPlay. Open `songs`, then `PER.SONG` or `SHARED`, then `PART1` or `PART2`, and press Return on a song. `just emu-music` also has SenseiPlay and the songs in `/SenseiPlay/MI` (launch `sensei.system`).
 
 ## Status
 - [x] Repo setup, ScummVM reference submodule
