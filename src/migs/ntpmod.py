@@ -20,6 +20,7 @@ default volume and the next row corrects it.
 from __future__ import annotations
 
 import argparse
+import functools
 import math
 import re
 import struct
@@ -102,28 +103,33 @@ class ModSample:
 def _best_tuning(freq: float, tables, min_rate, max_rate, loop_bytes, key0, key_lo, key_hi):
     """(err_cents, k, rate, base_note, finetune): `loop_bytes` = k periods at `rate`, played
     by note base_note with finetune so that period gives exactly that rate."""
-    best = None
-    for k in range(max(1, math.ceil(loop_bytes * freq / max_rate)), math.floor(loop_bytes * freq / min_rate) + 1):
-        rate = loop_bytes * freq / k
-        for ft, per in tables.items():
-            for n in range(NOTES):
-                lo, hi = n + key_lo - key0, n + key_hi - key0
-                if lo < 0 or hi >= NOTES:
-                    continue
-                err = 1200 * math.log2((PAL / per[n]) / rate)
-                if best is None or abs(err) < abs(best[0]):
-                    best = (err, k, rate, n, ft)
-    if best is None:
+    ks = np.arange(max(1, math.ceil(loop_bytes * freq / max_rate)), math.floor(loop_bytes * freq / min_rate) + 1)
+    n = np.arange(NOTES)
+    valid = (n + key_lo - key0 >= 0) & (n + key_hi - key0 < NOTES)
+    if not len(ks) or not valid.any():
         raise ValueError(f"no tuning for {freq:.1f} Hz over keys {key_lo}-{key_hi}")
-    return best
+    fts = list(tables)
+    per = np.array([tables[ft] for ft in fts], dtype=np.float64)          # (finetune, note)
+    rates = loop_bytes * freq / ks                                        # (k,)
+    err = 1200 * np.log2((PAL / per)[None, :, :] / rates[:, None, None])  # (k, finetune, note)
+    a = np.where(valid[None, None, :], np.abs(err), np.inf)
+    # first minimum in (k, finetune, note) scan order, as the original nested loops chose
+    ki, fi, ni = np.unravel_index(int(np.argmin(a)), a.shape)
+    return float(err[ki, fi, ni]), int(ks[ki]), float(rates[ki]), int(ni), fts[fi]
 
 
 def smooth(x: np.ndarray, n: int) -> np.ndarray:
-    """Centered moving average over n samples (edges averaged over what exists)."""
+    """Centered moving average over n samples (edges averaged over what exists): the window of
+    np.convolve(x, ones(n), "same") / the same of ones, i.e. x[i - n//2 .. i + (n-1)//2] clipped,
+    computed in O(len) from a cumulative sum instead of O(len * n) (250 ms windows at 32 kHz
+    made the direct convolution 2/3 of the whole build)."""
     if n <= 1:
         return x
-    k = np.ones(n)
-    return np.convolve(x, k, mode="same") / np.convolve(np.ones(len(x)), k, mode="same")
+    c = np.concatenate([[0.0], np.cumsum(x, dtype=np.float64)])
+    i = np.arange(len(x))
+    lo = np.maximum(i - n // 2, 0)
+    hi = np.minimum(i + (n - 1) // 2, len(x) - 1) + 1
+    return (c[hi] - c[lo]) / (hi - lo)
 
 
 def env_at(s: "ModSample", dt: float, width: float, t_loop: float | None = None) -> float:
@@ -251,8 +257,26 @@ def drum_rate(seg: np.ndarray, nbytes: int, lo: float, hi: float) -> float:
 VEL_POINTS = (20, 40, 64, 80, 100, 127)
 
 
+_PEAKS: dict[int, float] = {}
+
+
+@functools.lru_cache(maxsize=None)
+def _render(smf2wav: Path, roms: Path, cache: Path, program: int | None, key: int, hold: float,
+            velocity: int = 100, volume: int = 100) -> np.ndarray:
+    """mb.render, cached in-process (read-only arrays): each sound's velocity and key responses
+    were re-measured from the same WAVs for every song."""
+    x = mb.render(smf2wav, roms, cache, program=program, key=key, hold=hold, velocity=velocity, volume=volume)
+    x.flags.writeable = False
+    return x
+
+
 def _peak(x: np.ndarray) -> float:
-    return float(np.max(mb.rms_envelope(x, 0.005)))
+    if not x.flags.writeable and id(x) in _PEAKS:       # a cached render (kept alive by _render)
+        return _PEAKS[id(x)]
+    v = float(np.max(mb.rms_envelope(x, 0.005)))
+    if not x.flags.writeable:
+        _PEAKS[id(x)] = v
+    return v
 
 
 def velocity_response(render_at) -> tuple[np.ndarray, np.ndarray]:
@@ -277,7 +301,7 @@ CC7_POINTS = (0, 10, 20, 32, 40, 52, 64, 77, 90, 100, 110, 120, 127)
 def cc7_curve(smf2wav, roms, cache, program: int = 50, key: int = 67) -> tuple[np.ndarray, np.ndarray]:
     """The MT-32 part-volume (CC7) curve, gain relative to CC7 100, measured in Munt. It is
     steep (about 0.35 at 64, 0.11 at 40) and the same on melodic and rhythm parts."""
-    lv = [_peak(mb.render(smf2wav, roms, cache, program=program, key=key, hold=0.5, volume=v)) for v in CC7_POINTS]
+    lv = [_peak(_render(smf2wav, roms, cache, program=program, key=key, hold=0.5, volume=v)) for v in CC7_POINTS]
     ref = lv[CC7_POINTS.index(100)] or 1.0
     return np.array(CC7_POINTS, float), np.array(lv) / ref
 
@@ -336,7 +360,7 @@ def build_samples(spec: dict, cfg: dict, key_ranges: dict[int, tuple[int, int]],
     hold = spec.get("hold_seconds", 2.0)
     samples, programs, drums = [], {}, {}
     for m in spec["melodic"]:
-        x = mb.render(smf2wav, roms, cache, program=m["program"], key=m["key"], hold=hold)
+        x = _render(smf2wav, roms, cache, program=m["program"], key=m["key"], hold=hold)
         a = mb.onset(x)
         off = a + int(hold * SR)
         env = mb.rms_envelope(x)
@@ -378,9 +402,9 @@ def build_samples(spec: dict, cfg: dict, key_ranges: dict[int, tuple[int, int]],
         s.steady, s.rate = steady, rate
         s.max_loop = 1 << int(math.log2(max(1.0, ((off - a) / SR - sustain_s - 0.05) * rate)))
         s.max_loop = s.max_loop if steady else cfg["loop_bytes"]
-        s.vel_v, s.vel_g = velocity_response(lambda v: mb.render(smf2wav, roms, cache, program=m["program"],
+        s.vel_v, s.vel_g = velocity_response(lambda v: _render(smf2wav, roms, cache, program=m["program"],
                                                                  key=m["key"], hold=0.5, velocity=v))
-        s.key_v, s.key_g = key_response(lambda kk: mb.render(smf2wav, roms, cache, program=m["program"],
+        s.key_v, s.key_g = key_response(lambda kk: _render(smf2wav, roms, cache, program=m["program"],
                                                              key=kk, hold=0.5), m["key"], min(lo, m["key"]),
                                         max(hi, m["key"]))
         idx = len(samples)
@@ -395,7 +419,7 @@ def build_samples(spec: dict, cfg: dict, key_ranges: dict[int, tuple[int, int]],
             f"err {err:+5.1f} cents, swell x{g_max:.2f}, keys {lo}-{hi}")
 
     for d in spec["drum"]:
-        x = mb.render(smf2wav, roms, cache, program=None, key=d["key"], hold=0.5)
+        x = _render(smf2wav, roms, cache, program=None, key=d["key"], hold=0.5)
         a = mb.onset(x)
         env = mb.rms_envelope(x, 0.005)
         tail = np.nonzero(env[a:] > 0.005 * np.max(env))[0]
@@ -417,13 +441,13 @@ def build_samples(spec: dict, cfg: dict, key_ranges: dict[int, tuple[int, int]],
         peak = float(np.max(np.abs(data))) or 1.0
         s = ModSample(d["name"], data / peak, kind="drum", base_note=n0, key0=d["key"],
                       seconds=len(data) / rate, level=peak)
-        s.vel_v, s.vel_g = velocity_response(lambda v: mb.render(smf2wav, roms, cache, program=None,
+        s.vel_v, s.vel_g = velocity_response(lambda v: _render(smf2wav, roms, cache, program=None,
                                                                  key=d["key"], hold=0.5, velocity=v))
         idx = len(samples)
         samples.append(s)
         ref = _peak(x) or 1.0                            # each rhythm key has its own MT-32 level
         for c, o in offs.items():
-            gain = 1.0 if c == d["key"] else _peak(mb.render(smf2wav, roms, cache, program=None, key=c, hold=0.5)) / ref
+            gain = 1.0 if c == d["key"] else _peak(_render(smf2wav, roms, cache, program=None, key=c, hold=0.5)) / ref
             drums[c] = (idx, n0 + o, gain)
         log(f"  {d['name']:<12} {len(data)} B @ {rate:6.0f} Hz ({len(data) / rate * 1000:4.0f} ms) note {n0:2d}, "
             f"covers {offs}")
@@ -455,6 +479,15 @@ class Note:
 
 
 def read_notes(path: Path) -> tuple[list[Note], dict[int, int], float]:
+    """(notes, first program per channel, end s). Cached per file (path + mtime): a build reads
+    each song several times (sample planning, level passes, conversion). Callers must not
+    modify the returned notes."""
+    st = Path(path).stat()
+    return _read_notes(str(Path(path).resolve()), st.st_mtime_ns, st.st_size)
+
+
+@functools.lru_cache(maxsize=None)
+def _read_notes(path: str, _mtime: int, _size: int) -> tuple[list[Note], dict[int, int], float]:
     mf = mido.MidiFile(path)
     tempo = 500_000
     events = []
@@ -493,6 +526,11 @@ def read_notes(path: Path) -> tuple[list[Note], dict[int, int], float]:
 
 def detect_grid(onsets: list[float], unit_range=(14, 80)) -> tuple[float, float]:
     """(unit, phase) in MI1 ticks maximising circular concentration of the onsets."""
+    return _detect_grid(tuple(onsets), tuple(unit_range))
+
+
+@functools.lru_cache(maxsize=None)
+def _detect_grid(onsets: tuple[float, ...], unit_range: tuple[int, int]) -> tuple[float, float]:
     on = np.array(sorted(set(onsets))) / MI1_TICK
     best = (0.0, 30.0, 0.0)
     for P in np.arange(unit_range[0], unit_range[1], 0.05):

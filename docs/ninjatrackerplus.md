@@ -249,3 +249,15 @@ Goal: a game loads the instruments once and leaves them in DOC RAM, then loads o
 - **Bank, loaded once** (62,444 B): the `instruments` section (14-byte records + names: type, length, loop, volume, finetune, DOC page, DOC size) and the `samples` section. Copy each sample to its DOC page. The instrument records stay in RAM for the player.
 - **Per song** (7–78 KB; 534 KB for all 16): `header` + `tracks` + `order` + `patterns` (`NTP.song_part`).
 - The stock `NTPprepare` expects one contiguous file. A resident-bank game would rebuild that image in RAM (song header + resident instrument records + song order and patterns), skipping the sample copy. Alternatively it could patch the player to keep its instrument table and skip `NTPprepare`'s DOC upload. That's outside this project's scope; `ninjatrackerplus.s` is the reference.
+
+## Build speed (2026-11-07)
+`just ntpdisk` (both modes, previews, `.NTP`, bank check, boot disk) went from about 4 min to **22 s**. All 64 MOD/NTP outputs are byte-identical to the build before the changes (sha256).
+| cause (cProfile) | fix |
+|---|---|
+| `smooth()`: `np.convolve` with 250 ms (8000-tap) windows, O(n·w); 36 of 56 s in shared mode | cumulative-sum moving average, O(n), the same window as `np.convolve(..., "same")` (max deviation ~1e-12) |
+| velocity/key responses re-measured from the same WAVs for every song (3177 `rms_envelope` calls, 3000 WAV reads) | in-process `_render` cache (read-only arrays) plus `_peak` memo. `mt32bank` is untouched, so the MIDI Synth bank can't change |
+| `_best_tuning`: Python triple loop (k × finetune × note) | NumPy over (k, finetune, note). `argmin` picks the first minimum in the same scan order, so the same tuning is chosen (tested against the loop) |
+| MIDI parsing and grid detection repeated per pass | `read_notes` cached by path + mtime, `detect_grid` by onsets |
+| recipes serial | modes build concurrently; ffmpeg previews and PHP conversions run on all cores (`xargs -P $(nproc)`) |
+
+`ntpmod` itself: per-song mode 169 s → 10 s, shared mode 49 s → 10 s.

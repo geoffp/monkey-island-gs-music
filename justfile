@@ -285,15 +285,18 @@ voices: seq
 ntpmod modes=ntp_modes: fetch-ntp fetch-munt
     #!/usr/bin/env bash
     set -euo pipefail
-    for m in {{modes}}; do
-      echo "== samples: $m"
-      rm -rf "music/ntp/$m" && mkdir -p "music/ntp/$m/wav"
-      uv run ntpmod music/midi/mt32/*.mid -o "music/ntp/$m" --samples "$m"
-      for f in music/ntp/$m/*.mod; do
-        ffmpeg -hide_banner -loglevel error -y -f libopenmpt -i "$f" -ac 2 -ar 44100 "music/ntp/$m/wav/$(basename "$f" .mod).wav"
-      done
-      echo "previews: music/ntp/$m/wav/"
-    done
+    # modes build concurrently (logs in music/ntp/<mode>.log); previews render on all cores
+    build() {
+      rm -rf "music/ntp/$1" && mkdir -p "music/ntp/$1/wav"
+      uv run ntpmod music/midi/mt32/*.mid -o "music/ntp/$1" --samples "$1"
+      ls music/ntp/$1/*.mod | xargs -P "$(nproc)" -I{} sh -c \
+        'ffmpeg -hide_banner -loglevel error -y -f libopenmpt -i "$1" -ac 2 -ar 44100 "$2/wav/$(basename "$1" .mod).wav"' _ {} "music/ntp/$1"
+    }
+    pids=()
+    for m in {{modes}}; do mkdir -p music/ntp; build "$m" > "music/ntp/$m.log" 2>&1 & pids+=($!); done
+    fail=0; for p in "${pids[@]}"; do wait "$p" || fail=1; done
+    for m in {{modes}}; do echo "== samples: $m"; cat "music/ntp/$m.log"; echo "previews: music/ntp/$m/wav/"; done
+    exit $fail
 
 # MOD -> .NTP with Ninjaforce's converter (needs php-cli). Streaming forbidden: everything in DOC RAM
 ntp modes=ntp_modes: (ntpmod modes)
@@ -301,9 +304,10 @@ ntp modes=ntp_modes: (ntpmod modes)
     set -euo pipefail
     command -v php >/dev/null || { echo "php not found: sudo dnf install php-cli"; exit 1; }
     for m in {{modes}}; do
-      for f in music/ntp/$m/*.mod; do
-        php "{{vendor}}/ntp/src/ntpconverter.php" "$f" STREAM_FORBIDDEN > "${f%.mod}.log" || { echo "$f:"; cat "${f%.mod}.log"; exit 1; }
-      done
+      # all cores; a failed conversion prints its log and stops the batch (xargs exit 255)
+      ls music/ntp/$m/*.mod | xargs -P "$(nproc)" -I{} sh -c \
+        'php "$1" "$2" STREAM_FORBIDDEN > "${2%.mod}.log" || { echo "$2:"; cat "${2%.mod}.log"; exit 255; }' \
+        _ "{{vendor}}/ntp/src/ntpconverter.php" {}
       echo "$m: $(ls music/ntp/$m/*.ntp | wc -l) .NTP files in music/ntp/$m/"
       if [ "$m" = shared ]; then   # resident bank: identical instruments + samples in every song
         uv run ntpcheck --shared music/ntp/shared/*.ntp | tail -1

@@ -295,3 +295,32 @@ def test_track_order_lets_the_ntp_converter_assign_every_oscillator():
     kinds = rep.track_kinds
     assert kinds == sorted(kinds, key=lambda k: k != "melodic")
     assert nm.ntp_oscillators([2 if k == "melodic" else 1 for k in kinds]) is not None
+
+
+def test_smooth_matches_the_direct_moving_average():
+    rng = np.random.default_rng(3)
+    for length, n in ((1000, 7), (1000, 8), (5000, 801)):
+        x = rng.standard_normal(length)
+        k = np.ones(n)
+        ref = np.convolve(x, k, "same") / np.convolve(np.ones(length), k, "same")
+        assert np.allclose(nm.smooth(x, n), ref, atol=1e-12)
+
+
+def test_vectorized_tuning_search_matches_the_scan():
+    import math
+    tables = {ft: [int(1712 * 2 ** (-(n + ft / 8) / 12)) for n in range(72)] for ft in (0, 1, -1, 2, -2)}
+    def scan(freq, L, key0, lo_k, hi_k):
+        best = None
+        for k in range(max(1, math.ceil(L * freq / 22000)), math.floor(L * freq / 9000) + 1):
+            rate = L * freq / k
+            for ft, per in tables.items():
+                for n in range(72):
+                    if n + lo_k - key0 < 0 or n + hi_k - key0 >= 72:
+                        continue
+                    err = 1200 * math.log2((nm.PAL / per[n]) / rate)
+                    if best is None or abs(err) < abs(best[0]):
+                        best = (err, k, rate, n, ft)
+        return best
+    for freq, L, key0, lo_k, hi_k in ((261.6, 512, 60, 48, 84), (65.4, 16384, 36, 30, 47), (1046.5, 2048, 84, 70, 96)):
+        a, b = scan(freq, L, key0, lo_k, hi_k), nm._best_tuning(freq, tables, 9000, 22000, L, key0, lo_k, hi_k)
+        assert a[1:] == b[1:] and abs(a[0] - b[0]) < 1e-9
