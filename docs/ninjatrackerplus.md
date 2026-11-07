@@ -331,3 +331,33 @@ A size passes when either:
   Long raw loops are unchanged, and still pass through the tremolo/buzz gate.
 - **Measured on the built `shared-e` bank:** the 8-bit loop-rate buzz is gone in all 15 looped sounds. In `shared`, 10 have it, at −37 to −48 dB. Tuning error grows to at most 3.5 cents (Pipe Organ Lo).
 - **The original builds are unchanged:** `per-song` and `shared` are byte-identical to before (64 MOD/NTP checksums). Both shared banks pass `ntpcheck --shared`, at 236/256 pages.
+
+## Ghosts: delayed notes revive the previous note's loop (2026-11-07)
+User report: SenseiPlay has abrupt note endings that sound like evictions, absent when VLC plays the same MODs.
+
+**Cause** (NinjaTrackerPlus source, `vendor/ntp/src/ninjatrackerplus.s`, `setup_effect` and `setup_note_delay`):
+- A cell's instrument number is applied at **tick 0**, and so is its default volume (`what_to_do |= 1`, written to the DOC that tick).
+- `EDx` postpones only the **note** (`note_delay_note`). The old oscillators are stopped and restarted only at tick x.
+- Our note-offs fade to `C00`, and a looped sound keeps running silently after that.
+
+So on every delayed note, NTP first turned the *previous* note's loop up to the new instrument's default volume, for 1–2 ticks (23–56 ms), then cut it. Desktop players delay the whole cell (libmodplug, libopenmpt), so they never play it.
+
+There were about 3,500 such ghosts per build. Examples: MI152 ≈ 600, MI160 ≈ 500–580, MI163 ≈ 490.
+
+**Confirmed in GSSquared:**
+- Test MOD: a looped organ note, `C00`, then `ED2` notes with an instrument number. SenseiPlay was driven through `gs2-mcp` (keys plus `video_text`), and the DOC registers were polled at 60 Hz.
+- At the delayed row, the old loop oscillator (still at the old pitch, freq 327) went from volume 0 to 160. It ran for 100 ms (2 ticks at tempo 50), then the new note (freq 489) started.
+- A non-delayed control note had no ghost.
+- libopenmpt renders the same window as silence (−180 dB).
+
+**Fix** (`halt_released_loops`, on in every variant):
+- `build_samples` adds a silent 248 B one-shot, `rest`: 1 page and 1 sample slot. Shared now has 31 samples, the MOD maximum, and 237/256 pages.
+- Where a release reaches volume 0, `convert_song` writes `C00` *plus* a rest note into that cell. Triggering the rest stops the loop's oscillators, and the rest halts itself on its stopper bytes. MOD 0 = DOC 128 = silence; DOC 0 would stop it at once.
+- In GSSquared, at the same delayed rows the volume still rises at tick 0, but every oscillator is halted, so nothing sounds.
+- The built MODs now have 0 ghosts in all four variants, out of about 5,400 delayed notes each. The build log's `halt` column counts the halted releases.
+
+**Desktop output:** unchanged apart from inaudible mixer residue (−68 to −71 dB, at most about 20 LSB), as long as the rest doesn't alter track choice: `trk_inst` keeps the note's sample. Marking released tracks as "rest" had moved notes between the panned channels.
+
+**One cost:** per-song MI167 was exactly at its page limit, so the rest's page halved its Strings loop (16384 → 8192 B, about one beat long; it passes the tremolo gate).
+
+**Still open (theory 2):** steals, i.e. a releasing note cut for a new one, are abrupt on the DOC. NTP halts oscillators outright, with no declick ramp, where desktop players ramp over a few milliseconds. MI160 has about 620–780 of them.

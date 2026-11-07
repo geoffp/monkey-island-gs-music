@@ -625,6 +625,15 @@ def build_samples(spec: dict, cfg: dict, key_ranges: dict[int, tuple[int, int]],
         log(f"  {d['name']:<12} {len(data)} B @ {rate:6.0f} Hz ({len(data) / rate * 1000:4.0f} ms) note {n0:2d}, "
             f"covers {offs}")
 
+    if cfg.get("halt_released_loops", True):
+        # A silent one-shot ("rest") that note-offs trigger once a release reaches volume 0.
+        # NinjaTrackerPlus applies a cell's instrument number (and its default volume) at tick
+        # 0 but delays only the note under EDx, so the next delayed note on the track turned
+        # the previous note's loop, still running silently after C00, back up for 1-2 ticks:
+        # a ghost of the old note, then an abrupt cut (confirmed in GSSquared's DOC registers;
+        # desktop players delay the instrument too). The rest stops those oscillators instead;
+        # its 8 stopper bytes halt it. MOD 0 = DOC 128 = silence (DOC 0 would stop at once).
+        samples.append(ModSample("rest", np.zeros(248), kind="rest", base_note=24, key0=60, default_volume=0))
     if len(samples) > 31:
         raise ValueError(f"{len(samples)} samples > 31 (MOD limit)")
     return samples, programs, drums
@@ -726,6 +735,7 @@ class Report:
     track_kinds: list = field(default_factory=list)   # "melodic" (2 oscillators) / "drum" (1), in MOD order
     sample_volumes: dict = field(default_factory=dict)  # sample index -> note-on volumes in this song
     dropped_by: dict = field(default_factory=dict)      # sound name -> notes dropped for lack of oscillators
+    halted: int = 0             # releases ended with the silent "rest" one-shot
     nudged: int = 0
     tracks_used: int = 0
     oscillators: int = 0
@@ -903,7 +913,11 @@ def convert_song(path: Path, samples, programs, drums, cfg: dict, song_cfg: dict
             by_sample.setdefault(si, []).append(vol_for(samples[si], n))
     rep.sample_volumes = by_sample
     fixed = song_cfg.get("default_volumes")          # shared mode: the same for every song
+    rest = next((i for i, x in enumerate(samples) if x.kind == "rest"), None)
     for si, s in enumerate(samples):
+        if s.kind == "rest":
+            s.default_volume = 0
+            continue
         if fixed is not None:
             s.default_volume = fixed.get(si, 32)
         else:
@@ -1023,6 +1037,9 @@ def convert_song(path: Path, samples, programs, drums, cfg: dict, song_cfg: dict
                 if grid.effect_free(tr, rr) and grid.cells[tr].get(rr, [0])[0] == 0:
                     c = grid.get(tr, rr)
                     c[2], c[3] = 0xC, vv
+                    if vv == 0 and rest is not None:     # stop the silent loop (see build_samples)
+                        c[0], c[1] = samples[rest].base_note + 1, rest + 1
+                        rep.halted += 1                 # (trk_inst keeps the note's sample: track choice unchanged)
                 last = rr
                 if vv == 0:
                     break
@@ -1253,12 +1270,12 @@ def main(argv: list[str] | None = None) -> int:
         (args.out_dir / f"MI{sid}.mod").write_bytes(mod_file(f"MI1 {sid}", samples, grid, patterns, tables))
         reports.append((sid, rep))
     print(f"{'song':<6} {'tempo':>5} {'spd':>3} {'row ms':>6} {'pat':>3} {'trk':>3} {'osc':>3} {'notes':>5} "
-          f"{'drop':>4} {'steal':>5} {'tchg':>4} {'delay':>5} {'v:cell':>6} {'v:prev':>6} {'v:dflt':>6} {'err ms':>6}")
+          f"{'drop':>4} {'steal':>5} {'tchg':>4} {'delay':>5} {'v:cell':>6} {'v:prev':>6} {'v:dflt':>6} {'err ms':>6} {'halt':>5}")
     for sid, rep in reports:
         print(f"{sid:<6} {rep.tempo:5d} {rep.speed:3d} {rep.row_ms:6.1f} {rep.patterns:3d} {rep.tracks_used:3d} "
               f"{rep.oscillators:3d} {rep.notes:5d} {rep.dropped:4d} {rep.stolen:5d} {rep.tempo_changes:4d} {rep.delayed:5d} "
               f"{rep.vel_in_cell:6d} {rep.vel_preceding:6d} "
-              f"{rep.vel_default:6d} {rep.timing_err_ms:6.1f}")
+              f"{rep.vel_default:6d} {rep.timing_err_ms:6.1f} {rep.halted:5d}")
     for sid, rep in reports:
         if rep.dropped_by:
             print(f"MI{sid} dropped (no oscillator): " + ", ".join(f"{k} {v}" for k, v in sorted(rep.dropped_by.items(), key=lambda kv: -kv[1])))

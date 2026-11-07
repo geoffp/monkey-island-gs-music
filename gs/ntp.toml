@@ -28,6 +28,9 @@ sustain_s = 0.4         # where the loop's cycles are taken (s after onset): the
 min_rate = 9000         # sample-rate window for melodic samples (Hz)
 max_rate = 22000
 release_max = 0.3       # seconds of release ramp after note-off
+halt_released_loops = true  # end each release with a silent one-shot that stops the loop: NTP
+                        # applies a delayed (EDx) cell's instrument volume at tick 0, which made
+                        # the old loop audible until the note (docs/ninjatrackerplus.md "Ghosts")
 one_shots = true        # decaying sounds that reach the 8-bit floor (`one_shot_floor_lsb` RMS in
 one_shot_floor_lsb = 1.5  # a peak-normalised sample) within the DOC RAM their attack + loop would
 one_shot_max_rate_drop = 0.1  # take become one-shots (1 oscillator, exact tuning), at most 10 %

@@ -401,3 +401,41 @@ def test_loop_planner_skips_raw_sizes_that_fail_the_gate():
     assert sizes[0] == 8192
     small = nm.plan_loops([s], {0: 10.0}, 20, 16384)           # no room for 8192: stays averaged
     assert small[0] == 512
+
+
+# --- halting released loops (NTP applies a delayed cell's instrument volume at tick 0) ----------
+
+def test_released_loops_are_halted_before_any_delayed_note(tmp_path):
+    """NinjaTrackerPlus sets a cell's instrument default volume at tick 0 and delays only the
+    note (EDx), so a looped note left running silently after C00 sounds again until the delayed
+    note starts. Every release must end with the silent rest one-shot on that track."""
+    import mido
+    mf = mido.MidiFile(ticks_per_beat=120)
+    t = mido.MidiTrack([mido.Message("program_change", channel=1, program=9, time=0)])
+    tick = 0
+    for i in range(24):                                           # jittered, detached notes
+        at = 60 * i + (0, 11, 23, 5)[i % 4]
+        t.append(mido.Message("note_on", channel=1, note=60 + i % 5, velocity=90, time=at - tick))
+        t.append(mido.Message("note_off", channel=1, note=60 + i % 5, velocity=0, time=20))
+        tick = at + 20
+    mf.tracks.append(t)
+    p = tmp_path / "1.mid"
+    mf.save(p)
+    rest = nm.ModSample("rest", np.zeros(248), kind="rest", base_note=24, key0=60, default_volume=0)
+    cfg = {"rows_per_unit": 2, "speed": 3, "quantize": 0.0, "oscillators": 31}
+    grid, _, rep = nm.convert_song(p, [_fake(), rest], {9: 0}, {}, cfg, dict(cfg))
+    assert rep.halted > 0
+    delayed_after_release = 0
+    for cells in grid.cells:
+        state = None                                              # "loop" running, "rest" = halted
+        for row in sorted(cells):
+            note, inst, eff, par = cells[row]
+            if note and inst == 2:
+                assert (eff, par) == (0xC, 0)                     # the rest carries C00
+                state = "rest"
+            elif note and inst == 1:
+                if eff == 0xE and state is not None:
+                    delayed_after_release += 1
+                    assert state == "rest"                        # never a live silent loop
+                state = "loop"
+    assert delayed_after_release > 0
