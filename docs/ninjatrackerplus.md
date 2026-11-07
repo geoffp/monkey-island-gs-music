@@ -183,7 +183,7 @@ User report: velocity jumps up and down unnaturally in MI153, which is a single 
 - **Fix:** an NTP-only Pipe Organ sample, log-domain smoothing, and row-mean envelope sampling (above). The organ now follows Pipe Org 2's real slow swell (volume 29 → 40 → 29 over about 1 s).
 
 ## On the IIGS (verified in GSSquared, 2026-11-06)
-- **`just emu-ntp`** boots `build/disks/MI.NTP.PO` (`just ntpdisk`). This is a ProDOS 8 BazFast disk made from SenseiPlay's own `PRODOS` + `sensei.system` + `ntpplayer` + `dgr.radio.dgr`, with our songs in `/songs/PART1` and `/songs/PART2`. It boots straight into SenseiPlay. `just emu-music` also has them, under `/SenseiPlay/MI/PARTn`.
+- **`just emu-ntp`** boots `build/disks/MI.NTP.PO` (`just ntpdisk`). This is a ProDOS 8 BazFast disk made from SenseiPlay's own `PRODOS` + `sensei.system` + `ntpplayer` + `dgr.radio.dgr`, with our songs in `/songs/<VARIANT>` (`PER.SONG`, `PER.SONG.E`, `SHARED`, `SHARED.E`), all 16 in one folder. It boots straight into SenseiPlay. `just emu-music` also has them, under `/SenseiPlay/MI/<VARIANT>`.
 - **Checked in the emulator** by driving it through gs2-mcp (`tap_key`, `video_text`, `state_get`, `read_mem ENSONIQ`):
   - MI150, MI160 and MI165 play, with 10–17 oscillators running and frequencies and volumes changing;
   - DOC RAM holds every sample byte for byte at the page the `.NTP` header gives;
@@ -191,7 +191,9 @@ User report: velocity jumps up and down unnaturally in MI153, which is a single 
 
   Not yet listened to by ear.
 - **Converter loop rotation** (`split_rotate_loop`, since Nov 2019, "to reduce the swap bug"): each loop is rotated to start at its first sample nearest zero (unsigned 128), and the skipped bytes are appended to the loop header. It has no switch. With our 2040 B headers that made 2094 B + 8 stopper bytes, i.e. a 4 KB block per melodic sound, so DOC RAM overflowed ("Too large"). Fix: our loops start at a rising zero crossing with `loop[0] = 0` exactly, so the rotation is a no-op. The attack window shifts up to one period earlier to meet it.
-- **SenseiPlay v2.0 directory bug:** it skips the first entry of each directory block after the first. A ProDOS directory's first block holds the header + 12 entries, so the 13th file is the first entry of block 2. With all 16 songs in one folder, MI165 was missing from the list. Workaround: at most 12 songs per folder (`ntp_folders` in the justfile).
+- **SenseiPlay v2.0 directory bug:** it skips the first entry of each directory block after the first. A ProDOS directory's first block holds the header + 12 entries, so the 13th file is the first entry of block 2. With all 16 songs in one folder, MI165 was missing from the list.
+  - **Cause** (SenseiPlay `src/p8lib.s`, tag v2.0): after each directory-block READ it points at offset 4 and steps one entry length before the first read. That skips the header in block 1, but in every later block it skips a real file. Entries 13, 26, 39, … of a folder are never shown.
+  - **Workaround** (since 2026-11-07; before that, `PART1`/`PART2` folders of at most 12): `p8_tree` in the justfile adds a folder's files in sorted order and puts a small text file, `GAP.<n>`, in each skipped slot. `cp2 add` sorts the files of one call, so each run between placeholders is added separately. Verified in GSSquared: `PER.SONG` lists all 16 songs, with no `GAP.13`.
 - **Navigation:** Down/Return move through the browser (".." comes first); Return on a song plays it.
 
 ### MI153: low notes "not coming across" (2026-11-07)
@@ -217,7 +219,7 @@ NTP files carry their own samples, and `NTPprepare` copies them into DOC RAM for
 - **Fix:** `convert_song` emits all melodic (2-oscillator) tracks first, then drums. `ntp_oscillators` replays the converter's assignment, and `main` fails the build if it wouldn't fit.
 
 ### Disk folder order
-SenseiPlay lists entries in directory order, and `cp2 add` of a tree follows the host's readdir order: `SHARED` came before `PER.SONG`, and `PART2` before `PART1`. `ntpdisk` and `hdimage` now `cp2 mkdir` the folders in sorted order, then add each folder's files sorted.
+SenseiPlay lists entries in directory order, and `cp2 add` of a tree follows the host's readdir order: `SHARED` came before `PER.SONG`, and `PART2` before `PART1`. `ntpdisk` and `hdimage` now `cp2 mkdir` the folders in sorted order, then add each folder's files sorted (`p8_tree`).
 
 ## Shared set as a resident instrument bank (2026-11-07)
 Goal: a game loads the instruments once and leaves them in DOC RAM, then loads only each song's sequence data from disk. We don't write that loader; the shared-mode output is built to make it possible.

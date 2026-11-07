@@ -33,11 +33,16 @@ ntpdemo_sha   := "350843388bde213b10101212fcd6e3f5affa3b4f25b74ea970b0b6ab85d14d
 # its own sounds, longer loops) and shared (one set for every song, like the MIDI Synth bank),
 # plus trial variants of each ([modes.<name>] in config/ntp.toml; -e = E'+ loop construction).
 ntp_modes     := "per-song shared per-song-e shared-e"
-# Copy build/ntp/<mode>/*.ntp (typed $D5/$0008) into <dir>/<MODE>/PART1, PART2, ... (<=12 each):
-# SenseiPlay v2.0 skips the first entry of each later directory block (a ProDOS block holds
-# the header + 12 entries, then 13), so a 16-song folder hid MI165. Verified in GSSquared.
+# Copy build/ntp/<mode>/*.ntp (typed $D5/$0008) into <dir>/<MODE>/, one folder per variant.
 # ProDOS names allow no "-": per-song -> PER.SONG, shared-e -> SHARED.E.
-ntp_folders   := 'ntpf() { local m i d; for m in ' + ntp_modes + '; do i=0; for f in build/ntp/$m/*.ntp; do [ -f "$f" ] || continue; d="$1/$(echo $m | tr a-z- A-Z.)/PART$((i / 12 + 1))"; mkdir -p "$d"; cp "$f" "$d/$(basename "$f" .ntp | tr a-z A-Z).NTP#d50008"; i=$((i + 1)); done; done; }; ntpf'
+ntp_folders   := 'ntpf() { local m d f; for m in ' + ntp_modes + '; do d="$1/$(echo $m | tr a-z- A-Z.)"; for f in build/ntp/$m/*.ntp; do [ -f "$f" ] || continue; mkdir -p "$d"; cp "$f" "$d/$(basename "$f" .ntp | tr a-z A-Z).NTP#d50008"; done; done; }; ntpf'
+# Add host tree $3 (relative to cwd) to ProDOS image $2 with cp2 $1, in sorted order: folders
+# first (cp2 mkdir), then each folder's files. SenseiPlay lists directory order, and `cp2 add` of
+# a tree would follow the host's readdir order. SenseiPlay v2.0 also never shows the first entry
+# of a directory block after the first (src/p8lib.s treats every block's first slot as the
+# header): entries 13, 26, 39, ... of a folder. A placeholder text file fills those slots.
+# `cp2 add` sorts the files of one call, so each run between placeholders is its own call.
+p8_tree       := 'p8t() { local cp2=$1 img=$2 d f k g fs; for d in $(find "$3" -type d | sort); do "$cp2" mkdir "$img" "$d" >/dev/null; done; for d in $(find "$3" -type d | sort); do k=$(find "$d" -mindepth 1 -maxdepth 1 -type d | wc -l); fs=(); for f in $(find "$d" -maxdepth 1 -type f | sort); do if [ $k -ge 12 ] && [ $(( (k - 12) % 13 )) -eq 0 ]; then g="$d/GAP.$((k + 1))#040000"; echo "Placeholder: SenseiPlay v2.0 skips the first entry of each later directory block." > "$g"; [ ${#fs[@]} -eq 0 ] || "$cp2" add "$img" "${fs[@]}" >/dev/null; "$cp2" add "$img" "$g" >/dev/null; fs=(); k=$((k + 1)); fi; fs+=("$f"); k=$((k + 1)); done; [ ${#fs[@]} -eq 0 ] || "$cp2" add "$img" "${fs[@]}" >/dev/null; done; }; p8t'
 # Fingerprint of everything an NTP build of mode $1 reads (file names + contents): the code,
 # config/, the lockfile, this justfile, the MT-32 MIDI and the PHP converter. `ntpmod` skips a mode
 # whose build/ntp/<mode>/.inputs matches, and writes it only after a successful build.
@@ -225,14 +230,9 @@ ntpdisk: ntp
     {{ntp_folders}} "$st/songs"
     "$cp2" create-disk-image "$img" 32m prodos >/dev/null
     "$cp2" rename "$img" : MI.NTP >/dev/null
-    # SenseiPlay lists entries in directory order, and `cp2 add` of a tree follows the host's
-    # readdir order: create the folders in sorted order first (songs first on the disk, so it's
-    # the first entry in SenseiPlay), then add each folder's files.
-    (cd "$st" && for d in $(find songs -type d | sort); do "$cp2" mkdir "$img" "$d" >/dev/null; done
-     "$cp2" add "$img" PRODOS* sensei.system* ntpplayer* dgr.radio.dgr* >/dev/null
-     for d in $(find songs -mindepth 1 -type d | sort); do
-       fs=$(find "$d" -maxdepth 1 -type f | sort); [ -n "$fs" ] && "$cp2" add "$img" $fs >/dev/null
-     done)
+    # songs first on the disk, so it's the first entry in SenseiPlay
+    (cd "$st" && {{p8_tree}} "$cp2" "$img" songs
+     "$cp2" add "$img" PRODOS* sensei.system* ntpplayer* dgr.radio.dgr* >/dev/null)
     rm -rf "$st"
     "$cp2" catalog "$img" | head -12
 
@@ -417,15 +417,9 @@ hdimage: seq drum-audition tunetest
     fi
     "$cp2" create-disk-image "$img" 32m prodos >/dev/null
     "$cp2" rename "$img" : MI.HD >/dev/null
-    # /SenseiPlay goes in folder by folder in sorted order: SenseiPlay lists directory order,
-    # and `cp2 add` of a tree follows the host's readdir order
+    # /SenseiPlay goes in folder by folder in sorted order (p8_tree)
     (cd "$st" && "$cp2" add "$img" !(SenseiPlay) >/dev/null
-     if [ -d SenseiPlay ]; then
-       for d in $(find SenseiPlay -type d | sort); do "$cp2" mkdir "$img" "$d" >/dev/null; done
-       for d in $(find SenseiPlay -type d | sort); do
-         fs=$(find "$d" -maxdepth 1 -type f | sort); [ -n "$fs" ] && "$cp2" add "$img" $fs >/dev/null
-       done
-     fi)
+     if [ -d SenseiPlay ]; then {{p8_tree}} "$cp2" "$img" SenseiPlay; fi)
     rm -rf "$st"
     "$cp2" catalog "$img" | grep -E '^Disk|blocks free'
     "$cp2" list "$img" | grep -c . | sed 's/^/files: /'

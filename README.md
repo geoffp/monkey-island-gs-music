@@ -97,7 +97,7 @@ These go in `original files/`, which is gitignored and never committed:
    It renders previews of each to `<mode>/wav/` (ffmpeg/libopenmpt). `just ntpmod per-song` builds just one mode.
    A mode whose inputs (code, `config/`, MIDI, converter, justfile) haven't changed since its last successful build is skipped, and so are the `.NTP` conversion and the disk image; `just ntpmod-force` (or `just clean`) rebuilds anyway.
    `just looplab` measures attack/loop construction methods on the MT-32 samples (`build/looplab/report.md`, A/B WAVs, plots; see `docs/loop-detection.md`).
-5. **NinjaTrackerPlus, IIGS**: `just emu-ntp` converts the MODs to `.NTP` and boots straight into SenseiPlay. Open `songs`, then `PER.SONG`, `PER.SONG.E`, `SHARED` or `SHARED.E`, then `PART1` or `PART2`, and press Return on a song. `just emu-music` also has SenseiPlay and the songs in `/SenseiPlay/MI` (launch `sensei.system`).
+5. **NinjaTrackerPlus, IIGS**: `just emu-ntp` converts the MODs to `.NTP` and boots straight into SenseiPlay. Open `songs`, then `PER.SONG`, `PER.SONG.E`, `SHARED` or `SHARED.E`, and press Return on a song. `just emu-music` also has SenseiPlay and the songs in `/SenseiPlay/MI` (launch `sensei.system`).
 
 ## Status
 - [x] Repo setup, ScummVM reference submodule
