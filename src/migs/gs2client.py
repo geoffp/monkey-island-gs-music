@@ -119,7 +119,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--config", type=Path, help=".gs2 machine config to boot")
     ap.add_argument("--seconds", type=float, default=240)
     ap.add_argument("--interval", type=float, default=0.1)
-    ap.add_argument("--log", type=Path, default=Path("gs/disks/docscope.jsonl"))
+    ap.add_argument("--log", type=Path, default=Path("build/disks/docscope.jsonl"))
     args = ap.parse_args(argv)
     gs = GS2(str(Path(args.mcp).resolve()), str(Path(args.gs2).resolve()))
     try:

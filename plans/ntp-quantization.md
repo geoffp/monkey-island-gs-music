@@ -48,8 +48,8 @@ Get micro-timing from ticks instead of rows: **speed 6** (6 `EDx` positions per 
 
    Verify it against the current build: same timing error, pattern KB halved, listening.
 1. **Tempo tracking.** Estimate the grid's local phase across the song, and turn it into a tempo map written as `Fxx` changes. One step of tempo is about 1% at these tempos, enough to follow the drift. This reuses `tempo_commands` with a time-varying ideal.
-2. **Quantize as a separate MIDI step** (`quantize_notes`), writing `music/ntp/q/NNN.mid`, so quantization alone can be auditioned through Munt (`just mt32-wav`) before any IIgs sound is involved.
-3. **Snap selectively.** Notes within `snap_tolerance` of a row (say 30% of a row) snap. Outliers keep `EDx`: grace notes, rolled chords, pushes. Note-offs snap too (minimum 1 row). Config in `gs/ntp.toml`: `quantize` (strength), `snap_tolerance`, `rows_per_unit`, `tempo_follow`.
+2. **Quantize as a separate MIDI step** (`quantize_notes`), writing `build/ntp/q/NNN.mid`, so quantization alone can be auditioned through Munt (`just mt32-wav`) before any IIgs sound is involved.
+3. **Snap selectively.** Notes within `snap_tolerance` of a row (say 30% of a row) snap. Outliers keep `EDx`: grace notes, rolled chords, pushes. Note-offs snap too (minimum 1 row). Config in `config/ntp.toml`: `quantize` (strength), `snap_tolerance`, `rows_per_unit`, `tempo_follow`.
 4. **With rows = units (step 0), snapping is to the musical grid itself.** Outliers still have 6 `EDx` positions. Re-measure pattern de-duplication, since quantized repeats should now match.
 5. **Measure each setting.** New build-log columns: % snapped, % velocity in-cell, timing error before and after, pattern KB (before and after de-duplication), rows per second, ticks per second. Plus Munt previews of the quantized MIDI.
 6. **Tests:**

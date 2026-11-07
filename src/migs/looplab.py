@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Loop lab: measure and compare ways to build the attack + sustain-loop samples of the NTP
-bank from the Munt renders of the MT-32 sounds (gs/mt32bank.toml, gs/ntp.toml).
+bank from the Munt renders of the MT-32 sounds (config/mt32bank.toml, config/ntp.toml).
 
 Research harness, not part of the build. See docs/loop-detection.md.
 
@@ -713,13 +713,13 @@ def main(argv: list[str] | None = None) -> int:
     from . import ntpmod as nm
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("inputs", nargs="+", type=Path, help="MT-32 MIDI files (for key ranges and the shared set)")
-    ap.add_argument("-o", "--out-dir", type=Path, default=Path("gs/build/looplab"))
-    ap.add_argument("--config", type=Path, default=Path("gs/ntp.toml"))
-    ap.add_argument("--spec", type=Path, default=Path("gs/mt32bank.toml"))
+    ap.add_argument("-o", "--out-dir", type=Path, default=Path("build/looplab"))
+    ap.add_argument("--config", type=Path, default=Path("config/ntp.toml"))
+    ap.add_argument("--spec", type=Path, default=Path("config/mt32bank.toml"))
     ap.add_argument("--make-tables", type=Path, default=Path("vendor/ntp/src/make_tables.php"))
     ap.add_argument("--smf2wav", type=Path, default=Path("vendor/munt/bin/mt32emu-smf2wav"))
     ap.add_argument("--roms", type=Path, default=Path("original files/mt-32 roms"))
-    ap.add_argument("--cache", type=Path, default=Path("gs/build/mt32samples"))
+    ap.add_argument("--cache", type=Path, default=Path("build/cache/mt32samples"))
     ap.add_argument("--samples", choices=("per-song", "shared"), default="shared")
     ap.add_argument("--cands", default="A,A',B,C,E,E',E'+", help="candidates to trial")
     ap.add_argument("--listen", default="A,E'+", help="candidates to write WAVs for")

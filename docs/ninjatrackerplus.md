@@ -96,7 +96,7 @@ So the songs were played to a beat, but the outliers (50–150 ms: drift, grace 
 - Pattern RAM matters for a game. MI160 on a 31 ms grid ≈ 47 patterns × 15 tracks × 64 × 4 B ≈ 180 KB; on its unit grid ≈ 9 patterns ≈ 35 KB.
 
 ## Our MOD-first pipeline (`src/migs/ntpmod.py`, `just ntpmod` → `just ntp`)
-The MOD is the primary artefact: it renders on the desktop (ffmpeg's libopenmpt → `music/ntp/wav/`), and Ninjaforce's converter (`php-cli`, `STREAM_FORBIDDEN`) turns it into `.NTP`. Settings live in `gs/ntp.toml`; sounds come from `gs/mt32bank.toml` (the same 14 melodic and 14 drum sounds as MI1.BNK).
+The MOD is the primary artefact: it renders on the desktop (ffmpeg's libopenmpt → `build/ntp/wav/`), and Ninjaforce's converter (`php-cli`, `STREAM_FORBIDDEN`) turns it into `.NTP`. Settings live in `config/ntp.toml`; sounds come from `config/mt32bank.toml` (the same 14 melodic and 14 drum sounds as MI1.BNK).
 
 - **Samples:**
   - **Melodic:** the raw MT-32 attack (2040 B, so with NTP's 8 stopper bytes it fills a 2 KB block), then a 512 B loop holding k sustain cycles. The rate is set by 512 B = k periods. The note base + finetune (16 ProTracker finetune tables read from `make_tables.php`) tune it to within ±4 cents. NTP rate = PAL 3 546 894.6 / period.
@@ -113,7 +113,7 @@ The MOD is the primary artefact: it renders on the desktop (ffmpeg's libopenmpt 
   - **Memory:** sized and packed by NTP's rules (stopper bytes, loop split, power-of-two blocks, largest at page 0), giving **242 of 256 DOC pages** for 28 samples.
 - **Timing:** rows sit on each song's detected grid unit / `rows_per_unit` (default 32nds), speed 3, MOD tempo per song (48–136). `EDx` keeps micro-timing (`quantize = 0`). The measured mean error is 4.6–12 ms.
   - **Tempo dithering** (`tempo_commands`): MOD tempos are integers, so a single tempo misses the ideal row length by up to 0.65%. Notes are placed on the ideal grid, and `Fxx` commands switch between the two neighbouring integer tempos whenever the playback clock drifts more than `tempo_tolerance_ms` (default 2 ms) from it. They go in any free effect cell. This takes 1–106 commands per song.
-- **Levels (measured, `just ntpmod` prints the CC7 curve):** a note's loudness = sample peak (Munt, velocity 100, CC7 100) × its **velocity response** × **key response** (melodic) or per-key rhythm level (drum covers) × the MT-32 **CC7 curve**. All three are measured in Munt (`velocity_response`, `key_response`, `cc7_curve`). Each song is normalised so its loudest moment (99.5th percentile, including sounds that swell after the attack) is volume 64 (`level_ref` in `gs/ntp.toml` pins it).
+- **Levels (measured, `just ntpmod` prints the CC7 curve):** a note's loudness = sample peak (Munt, velocity 100, CC7 100) × its **velocity response** × **key response** (melodic) or per-key rhythm level (drum covers) × the MT-32 **CC7 curve**. All three are measured in Munt (`velocity_response`, `key_response`, `cc7_curve`). Each song is normalised so its loudest moment (99.5th percentile, including sounds that swell after the attack) is volume 64 (`level_ref` in `config/ntp.toml` pins it).
 - **Velocity placement:**
   - in the note's own cell when it needs no delay;
   - else, on a drum track that has gone silent, a `Cxx` in the preceding cell plus an instrument-less note (NTP keeps the track volume; `setup_effect` in `ninjatrackerplus.s`);
@@ -121,7 +121,7 @@ The MOD is the primary artefact: it renders on the desktop (ffmpeg's libopenmpt 
 - **Envelope:** per-row `Cxx` follows the MT-32 loudness contour after the attack, including swells above the attack level (strings and organ reach about 2×).
   - The contour is smoothed in the **log domain**: over 250 ms for decaying sounds (decays stay unbiased), and over 0.8 s (at least the raw loop's length) for steady sounds, so the rows carry only the slow contour (see "Smoother sustains" below).
   - Each row's `Cxx` is the contour's **mean over that row** (`env_at`), not a point sample. Release is a ramp of up to 0.3 s, then `C00`.
-- **NTP-only sounds:** `[[melodic]]` entries in `gs/ntp.toml` split programs out of the shared bank's merges (`ntp_spec`), using DOC RAM the MIDI Synth bank doesn't have.
+- **NTP-only sounds:** `[[melodic]]` entries in `config/ntp.toml` split programs out of the shared bank's merges (`ntp_spec`), using DOC RAM the MIDI Synth bank doesn't have.
   - `keys = [lo, hi]` makes a **key split** (`sample_for`, `melodic_entry`).
   - `ntp_attack_bytes` overrides the loop-header length.
   - Currently Pipe Org 2 (MI153): "Pipe Organ" for keys 52+, sampled at key 60, and "Pipe Organ Lo" for keys ≤ 51, sampled at key 41. Both use 1016 B attacks (organs speak in about 50 ms). Total: 254/256 pages, 30 samples.
@@ -134,14 +134,14 @@ The MOD is the primary artefact: it renders on the desktop (ffmpeg's libopenmpt 
 - About 60% of notes need an `EDx` delay. Most of those start at the default volume for one row (70–150 ms) before the envelope corrects them.
 
 ### First listening (2026-11-06)
-The user listened to the desktop previews (`music/ntp/wav/`): **the pipeline works**, but there are problems still to fix. The `.NTP` conversion and SenseiPlay on the IIGS are wired up (`just ntp`, `just emu-music`) but haven't been run yet; they need `php-cli`.
+The user listened to the desktop previews (`build/ntp/wav/`): **the pipeline works**, but there are problems still to fix. The `.NTP` conversion and SenseiPlay on the IIGS are wired up (`just ntp`, `just emu-music`) but haven't been run yet; they need `php-cli`.
 
 Known problems and open work, from the build log and analysis:
 - **MI167 drops 89 notes** (MI152 and MI160 drop 16 each). *Resolved 2026-11-07:* see "Track allocation" (drum tracks borrowing idle melodic tracks).
 - **Velocity on delayed notes:** about 60% of notes need `EDx`. Most of those start at the instrument's default volume for one row (70–150 ms) until the next row's `Cxx` corrects it. This may sound like uneven attacks. Fix options: put velocity in the preceding cell more often (needs an idle track), or pick the default volume per song from the median velocity.
 - **Drums are low-fi**: one-shots at about 5.9–8.3 kHz, to fit 64 KB.
 - **Level:** previews peak around −10 dB.
-- **Pattern size and player CPU** haven't been measured on the IIGS. Rows are 32nds of the detected grid unit (`rows_per_unit = 2`). `gs/ntp.toml` per-song overrides can coarsen this.
+- **Pattern size and player CPU** haven't been measured on the IIGS. Rows are 32nds of the detected grid unit (`rows_per_unit = 2`). `config/ntp.toml` per-song overrides can coarsen this.
 
 User's listening notes:
 1. **MI160's drums were almost inaudible.**
@@ -183,7 +183,7 @@ User report: velocity jumps up and down unnaturally in MI153, which is a single 
 - **Fix:** an NTP-only Pipe Organ sample, log-domain smoothing, and row-mean envelope sampling (above). The organ now follows Pipe Org 2's real slow swell (volume 29 → 40 → 29 over about 1 s).
 
 ## On the IIGS (verified in GSSquared, 2026-11-06)
-- **`just emu-ntp`** boots `gs/disks/MI.NTP.PO` (`just ntpdisk`). This is a ProDOS 8 BazFast disk made from SenseiPlay's own `PRODOS` + `sensei.system` + `ntpplayer` + `dgr.radio.dgr`, with our songs in `/songs/PART1` and `/songs/PART2`. It boots straight into SenseiPlay. `just emu-music` also has them, under `/SenseiPlay/MI/PARTn`.
+- **`just emu-ntp`** boots `build/disks/MI.NTP.PO` (`just ntpdisk`). This is a ProDOS 8 BazFast disk made from SenseiPlay's own `PRODOS` + `sensei.system` + `ntpplayer` + `dgr.radio.dgr`, with our songs in `/songs/PART1` and `/songs/PART2`. It boots straight into SenseiPlay. `just emu-music` also has them, under `/SenseiPlay/MI/PARTn`.
 - **Checked in the emulator** by driving it through gs2-mcp (`tap_key`, `video_text`, `state_get`, `read_mem ENSONIQ`):
   - MI150, MI160 and MI165 play, with 10–17 oscillators running and frequencies and volumes changing;
   - DOC RAM holds every sample byte for byte at the page the `.NTP` header gives;
@@ -207,7 +207,7 @@ User report: heard on the IIgs.
 
 ## Sample-set modes and long loops (2026-11-07)
 NTP files carry their own samples, and `NTPprepare` copies them into DOC RAM for each song. So the MIDI Synth "one shared bank" constraint doesn't apply. Both modes are built side by side (`ntp_modes` in the justfile):
-- **`per-song`** (default `samples` in `gs/ntp.toml`): each song carries only the sounds it plays (`sample_set`). Its free DOC RAM, after `reserve_pages` (16 pages = 4 KB for game sound effects), goes to longer loops (`plan_loops`). The planner repeatedly doubles the loop with the most sustained playing time per byte, while everything still packs the way NTP packs it, up to `max_loop_bytes` (16 KB) and the recording's length. Example: MI153 carries 3 organ samples with 16 KB loops (204 pages).
+- **`per-song`** (default `samples` in `config/ntp.toml`): each song carries only the sounds it plays (`sample_set`). Its free DOC RAM, after `reserve_pages` (16 pages = 4 KB for game sound effects), goes to longer loops (`plan_loops`). The planner repeatedly doubles the loop with the most sustained playing time per byte, while everything still packs the way NTP packs it, up to `max_loop_bytes` (16 KB) and the recording's length. Example: MI153 carries 3 organ samples with 16 KB loops (204 pages).
 - **`shared`**: one set for every song (union of sounds and key ranges; loops planned over all songs' usage). `[modes.shared]` sets `reserve_pages = 0`, because the full set needs 256/256 pages with 512 B loops. NTP-only sounds can be limited with `modes = [...]` (Pipe Organ Lo2 is per-song only; in shared mode keys 36–39 fall back to the nearest split).
 - **Long loops** (`raw_loop`) are for **steady** sounds only: the level must hold within 6 dB from the sustain start to note-off (`is_steady`). They hold k recorded periods (chorus, beating and vibrato kept), with a crossfade seam: the last 25% fades into the audio just before the loop start. Decaying sounds (bass, marimba, vibes, xylophone, horn) keep the 512 B averaged-cycle loop, because a raw loop would bake the decay in and pump.
 - **The loop start is still exactly zero** (`zero_start`): a fractional FFT rotation of the periodic loop. Forcing the start sample to 0 left a step of up to 11× a normal sample step at steep crossings, a click every pass (heard as a buzz in MI153, about 25 Hz).
@@ -264,7 +264,7 @@ Goal: a game loads the instruments once and leaves them in DOC RAM, then loads o
 
 ## Smoother sustains (2026-11-07)
 User report: shared-version sustains "still a little choppy". Measured from the MOD patterns, on held notes: note-volume level, ±1 flicker reversals, and step sizes. Then fixed in four steps:
-1. **Volume resolution (shared only).** The common loudness reference from the resident-bank work left quiet songs at MOD volume ~4 (MI153: median 4, 29.5% flicker, 2.5 dB per step; per-song: 32, 0.1%). **Fix:** shared mode normalises each song to its own loudest moment again, like per-song. Bank-compatible default volumes are each sample's median over the per-song-normalised volumes. The MT-32's song-to-song balance goes to `music/ntp/shared/levels.toml` (`gain_db`, `play_volume_scale`) for a game's `NTPsetplayvolume`.
+1. **Volume resolution (shared only).** The common loudness reference from the resident-bank work left quiet songs at MOD volume ~4 (MI153: median 4, 29.5% flicker, 2.5 dB per step; per-song: 32, 0.1%). **Fix:** shared mode normalises each song to its own loudest moment again, like per-song. Bank-compatible default volumes are each sample's median over the per-song-normalised volumes. The MT-32's song-to-song balance goes to `build/ntp/shared/levels.toml` (`gain_db`, `play_volume_scale`) for a game's `NTPsetplayvolume`.
 2. **Rounding flicker.** A slowly moving target near x.5 flipped the volume 4→5→4. **Fix:** `volume_hysteresis` (0.75): a row changes volume only when the target has moved ≥ 0.75 of a step from the current value.
 3. **Handover step.** The loop was level-matched to the source at the sustain point (0.4 s), not where the attack ends. Every note stepped at the attack→loop handover, against an MT-32 that doesn't: Strings +3.1 dB vs +1.2, French Horn −3.1 vs −0.4, Fantasy +1.7 vs −1.4. **Fix:** the loop is level-matched to the attack's tail, and the envelope eases from gain 1 to the contour over `handover_s` (150 ms, linear in dB). Handover changes are now within ±0.7 dB, following the MT-32's direction (Shakuhachi's real −4.4 dB fade is eased to −2.2).
 4. **Stepped tremolo.** Steady sounds' chorus/beating (Chorale: −1…−8 dB at 2.5 Hz) passed the 250 ms smoothing as ±1-step row flips: a stepped tremolo on a static loop. A raw loop already contains that modulation, so the rows doubled it. **Fix:** steady sounds smooth their contour over `env_smooth_steady_s` (0.8 s), and at least the raw loop's length.
@@ -321,7 +321,7 @@ A size passes when either:
   Note statistics are unchanged, except 9 more steals in shared MI160.
 
 ### E′+ trial variants (2026-11-07)
-`per-song-e` and `shared-e` (`[modes.<name>]` in `gs/ntp.toml`: `base` + `loop_construction = "eprime"`) are built next to `per-song` and `shared`, for listening side by side. They are in SenseiPlay's `PER.SONG.E` and `SHARED.E` folders and in `music/ntp/<variant>/wav/`.
+`per-song-e` and `shared-e` (`[modes.<name>]` in `config/ntp.toml`: `base` + `loop_construction = "eprime"`) are built next to `per-song` and `shared`, for listening side by side. They are in SenseiPlay's `PER.SONG.E` and `SHARED.E` folders and in `build/ntp/<variant>/wav/`.
 - **What changes:** only the short (512 B) loops, which are built as E′+ (`ntpmod.eprime_attack_and_loop`, which uses looplab's implementation):
   - whole samples per cycle (`_best_tuning(whole_cycles=True)`);
   - a power-averaged harmonic cycle over the sustain detected by `looplab.settle`;

@@ -29,15 +29,15 @@ manual_url    := "https://www.brutaldeluxe.fr/documentation/synthlab/synthlab_us
 manual_sha    := "54a5ec84e5fd152043a9a5b666bec0dab366656effeae5bd4a759894aa488a93"
 ntpsrc_sha    := "461260e35dc0b10176c05865d01c4e31694f704c0c3a9e5760fc093623dc52fb"
 ntpdemo_sha   := "350843388bde213b10101212fcd6e3f5affa3b4f25b74ea970b0b6ab85d14d97"
-# NTP sample-set modes built side by side (music/ntp/<mode>/): per-song (each song carries only
+# NTP sample-set modes built side by side (build/ntp/<mode>/): per-song (each song carries only
 # its own sounds, longer loops) and shared (one set for every song, like the MIDI Synth bank),
-# plus trial variants of each ([modes.<name>] in gs/ntp.toml; -e = E'+ loop construction).
+# plus trial variants of each ([modes.<name>] in config/ntp.toml; -e = E'+ loop construction).
 ntp_modes     := "per-song shared per-song-e shared-e"
-# Copy music/ntp/<mode>/*.ntp (typed $D5/$0008) into <dir>/<MODE>/PART1, PART2, ... (<=12 each):
+# Copy build/ntp/<mode>/*.ntp (typed $D5/$0008) into <dir>/<MODE>/PART1, PART2, ... (<=12 each):
 # SenseiPlay v2.0 skips the first entry of each later directory block (a ProDOS block holds
 # the header + 12 entries, then 13), so a 16-song folder hid MI165. Verified in GSSquared.
 # ProDOS names allow no "-": per-song -> PER.SONG, shared-e -> SHARED.E.
-ntp_folders   := 'ntpf() { local m i d; for m in ' + ntp_modes + '; do i=0; for f in music/ntp/$m/*.ntp; do [ -f "$f" ] || continue; d="$1/$(echo $m | tr a-z- A-Z.)/PART$((i / 12 + 1))"; mkdir -p "$d"; cp "$f" "$d/$(basename "$f" .ntp | tr a-z A-Z).NTP#d50008"; i=$((i + 1)); done; done; }; ntpf'
+ntp_folders   := 'ntpf() { local m i d; for m in ' + ntp_modes + '; do i=0; for f in build/ntp/$m/*.ntp; do [ -f "$f" ] || continue; d="$1/$(echo $m | tr a-z- A-Z.)/PART$((i / 12 + 1))"; mkdir -p "$d"; cp "$f" "$d/$(basename "$f" .ntp | tr a-z A-Z).NTP#d50008"; i=$((i + 1)); done; done; }; ntpf'
 sensei_ver    := "v2.0"     # digarok/senseiplay (no published checksums)
 
 # List recipes
@@ -166,50 +166,50 @@ fetch-docs:
     get apda_midisynth_synthlab_ocr.pdf "{{ers_url}}" "{{ers_sha}}"
     get synthlab_usersmanual.pdf "{{manual_url}}" "{{manual_sha}}"
 
-# Working copies of the System 6.0.4 disks (originals in gs/system6 stay untouched).
+# Working copies of the System 6.0.4 disks (originals in system6 stay untouched).
 # The boot disk copy also gets the MIDI Synth tool (Tool035) from the synthLAB disk.
 disks: fetch-cp2
     #!/usr/bin/env bash
     set -euo pipefail
-    mkdir -p gs/disks
-    cp -n gs/system6/*.PO gs/disks/
+    mkdir -p build/disks
+    cp -n system6/*.PO build/disks/
     cp2="$PWD/{{cp2}}"
-    if ! "$cp2" list gs/disks/SYSTEM.DISK.PO | grep -qi '^System:Tools:Tool035$'; then
+    if ! "$cp2" list build/disks/SYSTEM.DISK.PO | grep -qi '^System:Tools:Tool035$'; then
       t=$(mktemp -d)
-      "$cp2" extract --exdir="$t" --preserve=naps gs/system6/SYNTHLAB.PO System/Tools/Tool035 >/dev/null
-      (cd "$t" && "$cp2" add "$OLDPWD/gs/disks/SYSTEM.DISK.PO" System >/dev/null)
-      rm -rf "$t"; echo "installed Tool035 on gs/disks/SYSTEM.DISK.PO"
+      "$cp2" extract --exdir="$t" --preserve=naps system6/SYNTHLAB.PO System/Tools/Tool035 >/dev/null
+      (cd "$t" && "$cp2" add "$OLDPWD/build/disks/SYSTEM.DISK.PO" System >/dev/null)
+      rm -rf "$t"; echo "installed Tool035 on build/disks/SYSTEM.DISK.PO"
     fi
 
-# GSSquared machine configs are generated into gs/disks/<name>.gs2 by `gs2-config` (migs.emu),
+# GSSquared machine configs are generated into build/disks/<name>.gs2 by `gs2-config` (migs.emu),
 # keeping the id/battery RAM GSSquared saves on quit. Battery RAM is patched so the IIgs
 # boots straight from the right slot with the built-in 5.25" drives off (slot 6 = Your Card).
 # speed: 1.024mhz | 2.8mhz | 7.159mhz | 14.3mhz | ludicrous
-seed_bram := "gs/emu/default-bram.hex"
+seed_bram := "config/emu/default-bram.hex"
 
 # Boot the IIgs from floppies: System 6 + stock synthLAB (default: unlimited speed)
 emu speed="ludicrous": fetch-gssquared disks
-    uv run gs2-config gs/disks/synthlab.gs2 --name "MI1 synthLAB floppies" --speed {{speed}} \
+    uv run gs2-config build/disks/synthlab.gs2 --name "MI1 synthLAB floppies" --speed {{speed}} \
       --disk 5:1=SYSTEM.DISK.PO --disk 5:2=SYNTHLAB.PO --startup-slot 5 --your-card 6 --seed {{seed_bram}}
-    "{{gs2}}" "$PWD/gs/disks/synthlab.gs2"
+    "{{gs2}}" "$PWD/build/disks/synthlab.gs2"
 
 # Boot the IIgs from the BazFast hard disk image (System 6 + synthLAB + our music)
 emu-music speed="ludicrous": fetch-gssquared hdimage
-    uv run gs2-config gs/disks/mi-music.gs2 --name "MI1 music (BazFast HD)" --speed {{speed}} \
+    uv run gs2-config build/disks/mi-music.gs2 --name "MI1 music (BazFast HD)" --speed {{speed}} \
       --card 7=bazfast3 --disk 7:1=MI.HD.PO --startup-slot 7 --your-card 6 --your-card 7 --seed {{seed_bram}}
-    "{{gs2}}" "$PWD/gs/disks/mi-music.gs2"
+    "{{gs2}}" "$PWD/build/disks/mi-music.gs2"
 
 # Boot straight into SenseiPlay (ProDOS 8 NTP player) with our songs in /songs, from BazFast
 emu-ntp speed="ludicrous": fetch-gssquared ntpdisk
-    uv run gs2-config gs/disks/mi-ntp.gs2 --name "MI1 NinjaTrackerPlus (SenseiPlay)" --speed {{speed}} \
+    uv run gs2-config build/disks/mi-ntp.gs2 --name "MI1 NinjaTrackerPlus (SenseiPlay)" --speed {{speed}} \
       --card 7=bazfast3 --disk 7:1=MI.NTP.PO --startup-slot 7 --your-card 6 --your-card 7 --seed {{seed_bram}}
-    "{{gs2}}" "$PWD/gs/disks/mi-ntp.gs2"
+    "{{gs2}}" "$PWD/build/disks/mi-ntp.gs2"
 
 # ProDOS 8 disk that boots into SenseiPlay: its PRODOS + player, our .NTP songs in /songs
 ntpdisk: ntp
     #!/usr/bin/env bash
     set -euo pipefail
-    cp2="$PWD/{{cp2}}"; img="$PWD/gs/disks/MI.NTP.PO"; st="$PWD/gs/disks/ntpstage"
+    cp2="$PWD/{{cp2}}"; img="$PWD/build/disks/MI.NTP.PO"; st="$PWD/build/disks/ntpstage"
     rm -rf "$st" "$img" && mkdir -p "$st"
     "$cp2" extract --preserve=naps --overwrite --exdir="$st" "{{vendor}}/ntp/senseiplay800.2mg" \
       PRODOS sensei.system ntpplayer dgr.radio.dgr >/dev/null
@@ -229,9 +229,9 @@ ntpdisk: ntp
 
 # Same, from floppies (System 6 boot disk + the MI synthLAB floppy)
 emu-music-floppy speed="ludicrous": fetch-gssquared disks gsdisk
-    uv run gs2-config gs/disks/mi-music-floppy.gs2 --name "MI1 music (floppies)" --speed {{speed}} \
+    uv run gs2-config build/disks/mi-music-floppy.gs2 --name "MI1 music (floppies)" --speed {{speed}} \
       --disk 5:1=SYSTEM.DISK.PO --disk 5:2=MI.SYNTHLAB.PO --startup-slot 5 --your-card 6 --seed {{seed_bram}}
-    "{{gs2}}" "$PWD/gs/disks/mi-music-floppy.gs2"
+    "{{gs2}}" "$PWD/build/disks/mi-music-floppy.gs2"
 
 # Render an MT-32 MIDI file to WAV with Munt (needs ROMs)
 mt32-wav mid wav: fetch-munt
@@ -241,68 +241,68 @@ mt32-wav mid wav: fetch-munt
 gm-wav mid wav: fetch-soundfont
     fluidsynth -ni -F "{{wav}}" "{{sf2}}" "{{mid}}"
 
-# Extract the MT-32 soundtrack: music/midi/{mt32,gm}/*.mid + music/patches/*.toml
+# Extract the MT-32 soundtrack: build/music/midi/{mt32,gm}/*.mid + build/music/patches/*.toml
 extract:
-    uv run extract-music "{{game}}" music
+    uv run extract-music "{{game}}" build/music
 
-# Render every extracted song to WAV via both paths (music/wav/{mt32,gm}/)
+# Render every extracted song to WAV via both paths (build/music/wav/{mt32,gm}/)
 render: extract fetch-munt fetch-soundfont
     #!/usr/bin/env bash
     set -euo pipefail
-    mkdir -p music/wav/mt32 music/wav/gm
-    for f in music/midi/mt32/*.mid; do
+    mkdir -p build/music/wav/mt32 build/music/wav/gm
+    for f in build/music/midi/mt32/*.mid; do
       n=$(basename "$f" .mid)
-      "{{smf2wav}}" --quiet -m "{{roms}}" -f -o "music/wav/mt32/$n.wav" "$f"
-      fluidsynth -ni -q -F "music/wav/gm/$n.wav" "{{sf2}}" "music/midi/gm/$n.mid" >/dev/null
+      "{{smf2wav}}" --quiet -m "{{roms}}" -f -o "build/music/wav/mt32/$n.wav" "$f"
+      fluidsynth -ni -q -F "build/music/wav/gm/$n.wav" "{{sf2}}" "build/music/midi/gm/$n.mid" >/dev/null
     done
-    ls music/wav/*/ | head -50
+    ls build/music/wav/*/ | head -50
 
-# Stock synthLAB banks/waves/sample sequences, extracted from gs/system6/SYNTHLAB.PO
+# Stock synthLAB banks/waves/sample sequences, extracted from system6/SYNTHLAB.PO
 stock-banks: fetch-cp2
     #!/usr/bin/env bash
     set -euo pipefail
     d="{{vendor}}/synthlab"; [ -f "$d/COMBO.BNK" ] && exit 0
     rm -rf "$d.tmp" && mkdir -p "$d.tmp" "$d"
-    "$PWD/{{cp2}}" extract --exdir="$d.tmp" gs/system6/SYNTHLAB.PO SEQ.AND.INSTR >/dev/null
+    "$PWD/{{cp2}}" extract --exdir="$d.tmp" system6/SYNTHLAB.PO SEQ.AND.INSTR >/dev/null
     for f in "$d.tmp"/Seq.and.Instr/*; do cp "$f" "$d/$(basename "$f" | tr a-z A-Z)"; done
     rm -rf "$d.tmp"; ls "$d"
 
-# Convert the GM MIDI files to MIDI Synth sequences, per export profile (gs/seq/<profile>/MInnn.SEQ)
+# Convert the GM MIDI files to MIDI Synth sequences, per export profile (build/seq/<profile>/MInnn.SEQ)
 seq: stock-banks mt32bank
-    rm -rf gs/seq/stock && uv run mid2seq music/midi/gm/*.mid -p stock -o gs/seq/stock -b "{{vendor}}/synthlab"
-    rm -f gs/seq/mt32/*.SEQ && uv run mid2seq music/midi/mt32/*.mid -p mt32 -o gs/seq/mt32 -b gs/seq/mt32
+    rm -rf build/seq/stock && uv run mid2seq build/music/midi/gm/*.mid -p stock -o build/seq/stock -b "{{vendor}}/synthlab"
+    rm -f build/seq/mt32/*.SEQ && uv run mid2seq build/music/midi/mt32/*.mid -p mt32 -o build/seq/mt32 -b build/seq/mt32
 
-# Sample the MT-32 (Munt) into our MI1 bank per gs/mt32bank.toml -> gs/seq/mt32/MI1.{BNK,WAV,map.toml}
+# Sample the MT-32 (Munt) into our MI1 bank per config/mt32bank.toml -> build/seq/mt32/MI1.{BNK,WAV,map.toml}
 mt32bank: fetch-munt
-    uv run mt32bank -o gs/seq/mt32
+    uv run mt32bank -o build/seq/mt32
 
 # Estimated MIDI Synth voice pressure per sequence (voices free only when envelopes reach 0)
 voices: seq
-    @echo "== stock"; uv run voices gs/seq/stock/MI*.SEQ -b "{{vendor}}/synthlab"
-    @echo "== mt32";  uv run voices gs/seq/mt32/MI*.SEQ -b gs/seq/mt32
+    @echo "== stock"; uv run voices build/seq/stock/MI*.SEQ -b "{{vendor}}/synthlab"
+    @echo "== mt32";  uv run voices build/seq/mt32/MI*.SEQ -b build/seq/mt32
 
-# MT-32 MIDI -> ProTracker MODs within NinjaTrackerPlus limits (music/ntp/<mode>/MInnn.mod), for
-# each sample-set mode (default both), plus libopenmpt previews in music/ntp/<mode>/wav/. Config: gs/ntp.toml
+# MT-32 MIDI -> ProTracker MODs within NinjaTrackerPlus limits (build/ntp/<mode>/MInnn.mod), for
+# each sample-set mode (default both), plus libopenmpt previews in build/ntp/<mode>/wav/. Config: config/ntp.toml
 ntpmod modes=ntp_modes: fetch-ntp fetch-munt
     #!/usr/bin/env bash
     set -euo pipefail
-    # modes build concurrently (logs in music/ntp/<mode>.log); previews render on all cores
+    # modes build concurrently (logs in build/ntp/<mode>.log); previews render on all cores
     build() {
-      rm -rf "music/ntp/$1" && mkdir -p "music/ntp/$1/wav"
-      uv run ntpmod music/midi/mt32/*.mid -o "music/ntp/$1" --samples "$1"
-      ls music/ntp/$1/*.mod | xargs -P "$(nproc)" -I{} sh -c \
-        'ffmpeg -hide_banner -loglevel error -y -f libopenmpt -i "$1" -ac 2 -ar 44100 "$2/wav/$(basename "$1" .mod).wav"' _ {} "music/ntp/$1"
+      rm -rf "build/ntp/$1" && mkdir -p "build/ntp/$1/wav"
+      uv run ntpmod build/music/midi/mt32/*.mid -o "build/ntp/$1" --samples "$1"
+      ls build/ntp/$1/*.mod | xargs -P "$(nproc)" -I{} sh -c \
+        'ffmpeg -hide_banner -loglevel error -y -f libopenmpt -i "$1" -ac 2 -ar 44100 "$2/wav/$(basename "$1" .mod).wav"' _ {} "build/ntp/$1"
     }
     pids=()
-    for m in {{modes}}; do mkdir -p music/ntp; build "$m" > "music/ntp/$m.log" 2>&1 & pids+=($!); done
+    for m in {{modes}}; do mkdir -p build/ntp; build "$m" > "build/ntp/$m.log" 2>&1 & pids+=($!); done
     fail=0; for p in "${pids[@]}"; do wait "$p" || fail=1; done
-    for m in {{modes}}; do echo "== samples: $m"; cat "music/ntp/$m.log"; echo "previews: music/ntp/$m/wav/"; done
+    for m in {{modes}}; do echo "== samples: $m"; cat "build/ntp/$m.log"; echo "previews: build/ntp/$m/wav/"; done
     exit $fail
 
 # Loop lab (research, not part of the build): attack detection + loop-construction candidates
-# measured on the MT-32 sample set -> gs/build/looplab/ (report.md, wav/, plots/). docs/loop-detection.md
+# measured on the MT-32 sample set -> build/looplab/ (report.md, wav/, plots/). docs/loop-detection.md
 looplab mode="shared": fetch-ntp fetch-munt
-    uv run --group lab looplab music/midi/mt32/*.mid --samples "{{mode}}"
+    uv run --group lab looplab build/music/midi/mt32/*.mid --samples "{{mode}}"
 
 # MOD -> .NTP with Ninjaforce's converter (needs php-cli). Streaming forbidden: everything in DOC RAM
 ntp modes=ntp_modes: (ntpmod modes)
@@ -311,48 +311,51 @@ ntp modes=ntp_modes: (ntpmod modes)
     command -v php >/dev/null || { echo "php not found: sudo dnf install php-cli"; exit 1; }
     for m in {{modes}}; do
       # all cores; a failed conversion prints its log and stops the batch (xargs exit 255)
-      ls music/ntp/$m/*.mod | xargs -P "$(nproc)" -I{} sh -c \
+      ls build/ntp/$m/*.mod | xargs -P "$(nproc)" -I{} sh -c \
         'php "$1" "$2" STREAM_FORBIDDEN > "${2%.mod}.log" || { echo "$2:"; cat "${2%.mod}.log"; exit 255; }' \
         _ "{{vendor}}/ntp/src/ntpconverter.php" {}
-      echo "$m: $(ls music/ntp/$m/*.ntp | wc -l) .NTP files in music/ntp/$m/"
+      echo "$m: $(ls build/ntp/$m/*.ntp | wc -l) .NTP files in build/ntp/$m/"
       case "$m" in shared*)       # resident bank: identical instruments + samples in every song
-        uv run ntpcheck --shared music/ntp/$m/*.ntp | tail -1;; esac
+        uv run ntpcheck --shared build/ntp/$m/*.ntp | tail -1;; esac
     done
 
-# Tuning experiment bank/sequence (gs/seq/tune/TUNE.*), see src/migs/tunetest.py
+# Tuning experiment bank/sequence (build/seq/tune/TUNE.*), see src/migs/tunetest.py
 tunetest:
-    uv run tunetest -o gs/seq/tune
+    uv run tunetest -o build/seq/tune
 
-# Boot the HD and sample the DOC oscillators to gs/disks/docscope.jsonl while you play something
+# Boot the HD and sample the DOC oscillators to build/disks/docscope.jsonl while you play something
 docscope seconds="240": fetch-gssquared fetch-mcp hdimage
-    uv run gs2-config gs/disks/mi-music.gs2 --name "MI1 music (BazFast HD)" --speed ludicrous \
+    uv run gs2-config build/disks/mi-music.gs2 --name "MI1 music (BazFast HD)" --speed ludicrous \
       --card 7=bazfast3 --disk 7:1=MI.HD.PO --startup-slot 7 --your-card 6 --your-card 7 --seed {{seed_bram}}
-    uv run gs2-docscope --config gs/disks/mi-music.gs2 --seconds {{seconds}}
+    uv run gs2-docscope --config build/disks/mi-music.gs2 --seconds {{seconds}}
 
-# Drum-kit audition sequences (gs/seq/stock/AUDITnn.SEQ + .txt key tables) for the default bank's kits
+# Drum-kit audition sequences (build/seq/stock/AUDITnn.SEQ + .txt key tables) for the default bank's kits
 drum-audition: stock-banks
-    uv run audition "{{vendor}}/synthlab/COMBO.BNK" 0 --wave "{{vendor}}/synthlab/COMBO.WAV" -o gs/seq/stock --lo 28 --hi 100
-    uv run audition "{{vendor}}/synthlab/COMBO.BNK" 9 --wave "{{vendor}}/synthlab/COMBO.WAV" -o gs/seq/stock --lo 28 --hi 100
+    uv run audition "{{vendor}}/synthlab/COMBO.BNK" 0 --wave "{{vendor}}/synthlab/COMBO.WAV" -o build/seq/stock --lo 28 --hi 100
+    uv run audition "{{vendor}}/synthlab/COMBO.BNK" 9 --wave "{{vendor}}/synthlab/COMBO.WAV" -o build/seq/stock --lo 28 --hi 100
 
-# Build gs/disks/MI.SYNTHLAB.PO: a copy of the synthLAB disk whose /Seq.and.Instr holds
+# Build build/disks/MI.SYNTHLAB.PO: a copy of the synthLAB disk whose /Seq.and.Instr holds
 # our sequences plus the bank/wave files they use (Apple's samples removed to make room)
 gsdisk: seq drum-audition
     #!/usr/bin/env bash
     set -euo pipefail
-    cp2="$PWD/{{cp2}}"; img="$PWD/gs/disks/MI.SYNTHLAB.PO"; stage="$PWD/gs/disks/stage"
-    mkdir -p gs/disks && rm -rf "$stage" && cp gs/system6/SYNTHLAB.PO "$img"
+    cp2="$PWD/{{cp2}}"; img="$PWD/build/disks/MI.SYNTHLAB.PO"; stage="$PWD/build/disks/stage"
+    mkdir -p build/disks && rm -rf "$stage" && cp system6/SYNTHLAB.PO "$img"
     "$cp2" list "$img" | grep '^Seq.and.Instr:' | tr : / | while read -r f; do "$cp2" delete "$img" "$f" >/dev/null; done
     mkdir -p "$stage/Seq.and.Instr"
-    for f in gs/seq/stock/*.SEQ; do cp "$f" "$stage/Seq.and.Instr/$(basename "$f")#d50001"; done
-    for b in $(uv run python -I -c "import tomllib;c=tomllib.load(open('gs/instruments.toml','rb'));print(' '.join(v['file']+' '+v['wave_file'] for v in c['banks'].values()))"); do
+    for f in build/seq/stock/*.SEQ; do cp "$f" "$stage/Seq.and.Instr/$(basename "$f")#d50001"; done
+    for b in $(uv run python -I -c "import tomllib;c=tomllib.load(open('config/instruments.toml','rb'));print(' '.join(v['file']+' '+v['wave_file'] for v in c['banks'].values()))"); do
       case "$b" in *.BNK) t=d60001;; *.WAV) t=d80004;; esac
+      # stock synthLAB banks only: this floppy carries the stock profile; the MT-32 bank
+      # (generated into build/seq/mt32/) goes on the HD image (`just hdimage`)
+      [ -f "{{vendor}}/synthlab/$b" ] || continue
       cp "{{vendor}}/synthlab/$b" "$stage/Seq.and.Instr/$b#$t"
     done
     (cd "$stage" && "$cp2" add "$img" Seq.and.Instr >/dev/null)
     rm -rf "$stage"
     "$cp2" catalog "$img" | grep -E 'Seq.and.Instr|blocks free'
 
-# 32 MB ProDOS hard disk image for BazFast (gs/disks/MI.HD.PO): System 6.0.4 merged from the
+# 32 MB ProDOS hard disk image for BazFast (build/disks/MI.HD.PO): System 6.0.4 merged from the
 # boot disk + SystemTools1 (Finder, CDevs, DAs, FSTs, tools, fonts; not its SCSI/printer
 # drivers) + SystemTools3 (sounds, fonts), Tool035, and /synthLAB with a folder per export
 # profile (Stock, ...), the tuning test (Tune), and /SenseiPlay with our NTP songs (MI).
@@ -360,30 +363,30 @@ hdimage: seq drum-audition tunetest
     #!/usr/bin/env bash
     set -euo pipefail
     shopt -s extglob                       # !(SenseiPlay) below
-    cp2="$PWD/{{cp2}}"; img="$PWD/gs/disks/MI.HD.PO"; st="$PWD/gs/disks/hdstage"
+    cp2="$PWD/{{cp2}}"; img="$PWD/build/disks/MI.HD.PO"; st="$PWD/build/disks/hdstage"
     rm -rf "$st" "$img" && mkdir -p "$st/synthLAB"
     x() { "$cp2" extract --preserve=naps --overwrite --exdir="$1" "${@:2}" >/dev/null; }
-    x "$st" gs/system6/SYSTEM.DISK.PO
-    x "$st" gs/system6/SYSTEMTOOLS1.PO System/Finder System/CDevs System/Desk.Accs System/FSTs System/Tools System/Fonts Icons
-    x "$st" gs/system6/SYSTEMTOOLS3.PO System
-    x "$st" gs/system6/SYNTHLAB.PO System/Tools/Tool035
-    x "$st/synthLAB" gs/system6/SYNTHLAB.PO synthLAB Icons Reference
+    x "$st" system6/SYSTEM.DISK.PO
+    x "$st" system6/SYSTEMTOOLS1.PO System/Finder System/CDevs System/Desk.Accs System/FSTs System/Tools System/Fonts Icons
+    x "$st" system6/SYSTEMTOOLS3.PO System
+    x "$st" system6/SYNTHLAB.PO System/Tools/Tool035
+    x "$st/synthLAB" system6/SYNTHLAB.PO synthLAB Icons Reference
     # A folder per export profile (sequences + the banks they reference) and the tuning test
     typed() {   # copy file $1 into dir $2 with its ProDOS type (NAPS suffix)
       case "$1" in *.SEQ) t=d50001;; *.BNK) t=d60001;; *.WAV) t=d80004;; *) return;; esac
       cp "$1" "$2/$(basename "$1")#$t"
     }
-    for prof in $(uv run python -I -c "import tomllib;c=tomllib.load(open('gs/instruments.toml','rb'));print(' '.join(f'{k}:{v[\"folder\"]}:{c[\"banks\"][v[\"default_bank\"]][\"file\"]}:{c[\"banks\"][v[\"default_bank\"]][\"wave_file\"]}' for k,v in c['profiles'].items()))"); do
+    for prof in $(uv run python -I -c "import tomllib;c=tomllib.load(open('config/instruments.toml','rb'));print(' '.join(f'{k}:{v[\"folder\"]}:{c[\"banks\"][v[\"default_bank\"]][\"file\"]}:{c[\"banks\"][v[\"default_bank\"]][\"wave_file\"]}' for k,v in c['profiles'].items()))"); do
       IFS=: read -r name folder bnk wav <<< "$prof"
       d="$st/synthLAB/$folder"; mkdir -p "$d"
-      for f in gs/seq/$name/*.SEQ; do typed "$f" "$d"; done
-      for f in "{{vendor}}/synthlab/$bnk" "{{vendor}}/synthlab/$wav" "gs/seq/$name/$bnk" "gs/seq/$name/$wav"; do
+      for f in build/seq/$name/*.SEQ; do typed "$f" "$d"; done
+      for f in "{{vendor}}/synthlab/$bnk" "{{vendor}}/synthlab/$wav" "build/seq/$name/$bnk" "build/seq/$name/$wav"; do
         [ -f "$f" ] && typed "$f" "$d"
       done
     done
-    mkdir -p "$st/synthLAB/Tune"; for f in gs/seq/tune/*; do typed "$f" "$st/synthLAB/Tune"; done
+    mkdir -p "$st/synthLAB/Tune"; for f in build/seq/tune/*; do typed "$f" "$st/synthLAB/Tune"; done
     # NinjaTrackerPlus: SenseiPlay (ProDOS 8 player) + our songs, if `just ntp` has run
-    if ls music/ntp/*/*.ntp >/dev/null 2>&1; then
+    if ls build/ntp/*/*.ntp >/dev/null 2>&1; then
       mkdir -p "$st/SenseiPlay"
       x "$st/SenseiPlay" "{{vendor}}/ntp/senseiplay800.2mg" sensei.system ntpplayer dgr.radio.dgr
       {{ntp_folders}} "$st/SenseiPlay/MI"
@@ -406,3 +409,15 @@ hdimage: seq drum-audition tunetest
 # Run the unit tests
 test *args:
     uv run pytest {{args}}
+
+# Remove generated output (build/), keeping the slow Munt render cache (build/cache/)
+clean:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    [ -d build ] || exit 0
+    find build -mindepth 1 -maxdepth 1 ! -name cache -exec rm -rf {} +
+    echo "build/ cleaned (kept build/cache/)"
+
+# Remove all of build/, including the Munt render cache (re-rendering needs the MT-32 ROMs)
+clean-all:
+    rm -rf build

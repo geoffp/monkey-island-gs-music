@@ -4,9 +4,9 @@ from migs.bram import STARTUP_SLOT, SLOT_INTERNAL, checksum, is_valid, patch
 
 from pathlib import Path
 
-# gs/emu/default-bram.hex: a BRAM image saved by GSSquared after a real IIgs session.
+# config/emu/default-bram.hex: a BRAM image saved by GSSquared after a real IIgs session.
 REAL = bytes.fromhex("".join(
-    (Path(__file__).resolve().parents[1] / "gs" / "emu" / "default-bram.hex").read_text().split()))
+    (Path(__file__).resolve().parents[1] / "config" / "emu" / "default-bram.hex").read_text().split()))
 
 
 def test_checksum_matches_bram_saved_by_a_real_rom_session():

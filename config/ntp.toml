@@ -1,5 +1,5 @@
 # MI1 -> ProTracker MOD (15CH) -> NinjaTrackerPlus. See docs/ninjatrackerplus.md.
-# Instruments/drums come from gs/mt32bank.toml (same MT-32 sounds and merges as MI1.BNK).
+# Instruments/drums come from config/mt32bank.toml (same MT-32 sounds and merges as MI1.BNK).
 #
 # Timing: rows sit on each song's detected grid unit (usually a 16th); rows_per_unit
 # subdivides it. Each note keeps its micro-timing with EDx (quantize = 0) or is snapped
@@ -66,7 +66,7 @@ loop_construction = "eprime"
 # unit_ticks = 40.6     # override the detected grid unit (MI1 ticks, 120 per beat)
 # phase_ticks = 12.0
 
-# NTP-only sounds: split out of the shared bank's merges (gs/mt32bank.toml). `slot` only
+# NTP-only sounds: split out of the shared bank's merges (config/mt32bank.toml). `slot` only
 # needs to be unique; it isn't a MIDI Synth slot.
 # Optional: `keys = [lo, hi]` limits a sound to a key range (key splits: the MT-32 voices some
 # timbres differently by register; keys outside every range use the nearest one);

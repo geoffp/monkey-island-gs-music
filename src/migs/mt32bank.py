@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Build the MI1 MIDI Synth bank by sampling the MT-32 (Munt) per gs/mt32bank.toml.
+"""Build the MI1 MIDI Synth bank by sampling the MT-32 (Munt) per config/mt32bank.toml.
 
 Melodic slot: OscConfig 3 = osc A plays a short attack sample once, then osc B loops one
 sustain cycle (256 B, single-cycle mode). The attack is "flattened" (divided by its own
@@ -357,11 +357,11 @@ def build(spec: dict, smf2wav: Path, roms: Path, cache: Path, log=print):
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--spec", type=Path, default=Path("gs/mt32bank.toml"))
+    ap.add_argument("--spec", type=Path, default=Path("config/mt32bank.toml"))
     ap.add_argument("--smf2wav", type=Path, default=Path("vendor/munt/bin/mt32emu-smf2wav"))
     ap.add_argument("--roms", type=Path, default=Path("original files/mt-32 roms"))
-    ap.add_argument("--cache", type=Path, default=Path("gs/build/mt32samples"))
-    ap.add_argument("-o", "--out-dir", type=Path, default=Path("gs/seq/mt32"))
+    ap.add_argument("--cache", type=Path, default=Path("build/cache/mt32samples"))
+    ap.add_argument("-o", "--out-dir", type=Path, default=Path("build/seq/mt32"))
     args = ap.parse_args(argv)
     spec = tomllib.loads(args.spec.read_text())
     print(f"sampling MT-32 per {args.spec}")

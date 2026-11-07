@@ -1,19 +1,13 @@
-# User-supplied, non-redistributable data (game files, MT-32 ROMs): never commit
-/original files/
-# Fetched/built by `just fetch`
+# User-supplied, non-redistributable data (game files, MT-32 ROMs): never commit.
+# Only the README describing what goes there is tracked.
+/original files/*
+!/original files/README.md
+# Fetched/built tools (`just fetch` / `just setup`)
 /vendor/
+# Everything generated (`just clean` / `just clean-all`). Contains copyrighted derivatives of
+# the game and ROMs (extracted music, renders, songs, disk images): never commit or publish.
+/build/
 # Python (uv)
 .venv/
 __pycache__/
 *.pyc
-# Working copies of IIGS disk images (`just disks`)
-/gs/disks/
-# Generated from the game data (`just extract` / `just render`); copyrighted music, never commit
-/music/midi/
-/music/patches/
-/music/wav/
-/music/ntp/
-# Generated sequences (derived from the soundtrack)
-/gs/seq/
-# Build intermediates (Munt sample renders)
-/gs/build/

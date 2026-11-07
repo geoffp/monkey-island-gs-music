@@ -1,6 +1,6 @@
 # Attack detection and loop construction for the NTP samples
 
-Research and measurements, 2026-11-07 (branch `loop-research`). Tool: `src/migs/looplab.py`, run with `just looplab [mode]` (output in `gs/build/looplab/`: `report.md`, `wav/`, `plots/`). Tests: `tests/test_looplab.py`.
+Research and measurements, 2026-11-07 (branch `loop-research`). Tool: `src/migs/looplab.py`, run with `just looplab [mode]` (output in `build/looplab/`: `report.md`, `wav/`, `plots/`). Tests: `tests/test_looplab.py`.
 
 **Goal (user):** a reliable, RAM-efficient and good-sounding way to build the attack and sustain-loop sections:
 - no buzz, no audible seam and no handover jump, for every sound, without tuning each sound by hand;
@@ -35,7 +35,7 @@ The shared bank must still fit in 240/256 DOC pages (16 pages are kept for sound
   - **Known limit:** very deep beating (Strings, ±4 dB at 2.3 Hz) makes the ranges so wide that the attack end comes out early (30 ms).
 
 ## What the sampled MT-32 sounds actually do
-From the 6 s Munt renders (harmonic plots in `gs/build/looplab/plots/`):
+From the 6 s Munt renders (harmonic plots in `build/looplab/plots/`):
 - **No slow swells.** Every steady sound reaches full level within about 0.1–0.2 s. What looked like 0.6–1.6 s "swells" in the level is **deep periodic beating between detuned partials**:
 
   | sound | beat period | depth |
@@ -157,7 +157,7 @@ Keep today's attack sizes. (Xylophone is now a one-shot, see above; Taiko doesn'
 
 **For long per-song raw loops,** use the seam search (C) with the adaptive crossfade. Choose the length at a whole number of beat periods (the Elec Organ / Shakuhachi follow-up in `plans/TODO.md`). Measure them with the same metrics.
 
-**Integration** into `ntpmod.build_samples` waits for the user's listening verdict: `gs/build/looplab/wav/<sound>.wav` plays the Munt source, then A (today), then E′+. Each is played at the sampled key, the lowest song key and the highest, through a DOC-style no-interpolation player.
+**Integration** into `ntpmod.build_samples` waits for the user's listening verdict: `build/looplab/wav/<sound>.wav` plays the Munt source, then A (today), then E′+. Each is played at the sampled key, the lowest song key and the highest, through a DOC-style no-interpolation player.
 
 [soodek]: https://music-tech-archive-2024.netlify.app/files/soodek/Soodek_Capstone_Paper_Final.pdf
 [la-guide]: https://loopauditioneer.sourceforge.io/userguide.html

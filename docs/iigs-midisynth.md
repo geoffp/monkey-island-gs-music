@@ -5,7 +5,7 @@ MIDI Synth is Apple's integrated sequencer and synthesizer tool set, tool #35 (`
 Each fact is tagged with its source:
 - **[ERS]**: *SynthLAB and MIDI Synth ERS* (APDA, Mark Cecys), `vendor/docs/apda_midisynth_synthlab_ocr.pdf` (`just fetch-docs`). Page numbers are the ERS's own: "ERS n" for the MIDI Synth part, "synthLAB n" for the synthLAB part.
 - **[SF]**: Dave Tribby's synthfile 1.5 source, `vendor/synthfile/src/` (`just fetch-synthfile`): `SynthFile.h`, `GSStuff.h` (structs from Apple's `MidiSynth.h`), `synthfile.c`.
-- **[DATA]**: verified by decoding the stock files on `gs/system6/SYNTHLAB.PO` `/SEQ.AND.INSTR/` (2026-11-06).
+- **[DATA]**: verified by decoding the stock files on `system6/SYNTHLAB.PO` `/SEQ.AND.INSTR/` (2026-11-06).
 - **[GL]**: GEnie Lamp A2Pro 1994-03 (midi2gs note).
 
 All multi-byte values are **little-endian** (65816).
@@ -13,7 +13,7 @@ All multi-byte values are **little-endian** (65816).
 ## Hard limits (these drive the whole port)
 - **At most 7 simultaneous voices.** [ERS 6, 12] The DOC has 32 oscillators. MIDI Synth reserves #31 (5 ms update timebase), #30 (metronome) and #28–29 ("generator 7", for the app's Sound Tool Set use). That leaves 28 oscillators, and **every voice uses 4** (2 generators × 2 oscillators), whatever the instrument. Beyond 7, MIDI Synth "steals" the least noticeable active note.
   - A note keeps its voice until **both envelopes reach zero**, i.e. through the release segments, not just until note-off. [ERS 16]
-  - MI1 peaks at 7–16 simultaneous notes (see `music/patches/*.toml` `max_polyphony`).
+  - MI1 peaks at 7–16 simultaneous notes (see `build/music/patches/*.toml` `max_polyphony`).
   - **Decision:** by default the converter passes every note through and lets MIDI Synth's voice stealing cap the polyphony at playback time. It knows the real voice state, release tails included, and targets the least noticeable note. The converter only reports peak polyphony. Thinning notes in the converter is a per-song fallback, only for songs that sound bad in listening tests.
 - **16 instruments per bank, and the MIDI channel *is* the instrument.** [ERS 8, 9, 24; synthLAB 12] The sequencer always plays in Multi mode: "the MIDI channel field specifies which of the 16 Synthesizer Instruments gets the MIDI message".
   - **Program Change does not change the instrument.** `$Cx` (0–15) is only passed to a call-back. [ERS 8]
@@ -170,14 +170,14 @@ The `num_inst` byte doesn't always match the number of named slots: COMBO says 9
 7. `SeqPlayer` with `PbufStart` = the item buffer and `SeqFlags = $0100` (play).
 
 ## Disks and installation [DATA]
-- System 6.0.4's `System.Disk` does **not** contain `Tool035`. The synthLAB disk carries it in its own `System:Tools:Tool035`. `just disks` installs it into the working copy of the boot disk (`gs/disks/SYSTEM.DISK.PO`).
+- System 6.0.4's `System.Disk` does **not** contain `Tool035`. The synthLAB disk carries it in its own `System:Tools:Tool035`. `just disks` installs it into the working copy of the boot disk (`build/disks/SYSTEM.DISK.PO`).
 - The synthLAB disk layout: `/synthLAB` (S16 `$DB02`), `Icons`, `Reference` (a GWP+ document), `System/Tools/Tool035`, `System/CDevs/MIDI`, `Seq.and.Instr/` (the banks, waves and sample sequences).
-- `just gsdisk` builds `gs/disks/MI.SYNTHLAB.PO`: the synthLAB disk with `Seq.and.Instr` replaced by our `MInnn.SEQ` files and the bank/wave files they use.
+- `just gsdisk` builds `build/disks/MI.SYNTHLAB.PO`: the synthLAB disk with `Seq.and.Instr` replaced by our `MInnn.SEQ` files and the bank/wave files they use.
 - File types are set with CiderPress II NAPS suffixes (`MI160.SEQ#d50001`, `COMBO.BNK#d60001`, `COMBO.WAV#d80004`), then `cp2 add`. `cp2 list` paths use `:` separators; `cp2 delete` takes `/`.
 - The stored-byte junk we ignore: leftover memory in Pascal-string padding, and unused data bytes in 1-byte messages. Semantic round trips of every sample pass (`tests/test_midisynth.py`).
 
 ## Our converter (`src/migs/mid2seq.py`, `just seq`)
-- Input: `music/midi/gm/*.mid`. Output: `gs/seq/MInnn.SEQ`. Mapping: `gs/instruments.toml`.
+- Input: `build/music/midi/gm/*.mid`. Output: `build/seq/MInnn.SEQ`. Mapping: `config/instruments.toml`.
 - **Channel → slot:** each source channel's first GM program picks a bank slot (or a per-song override). Every event on that channel is rewritten onto the slot's channel. Each source channel gets its own seq track, named `"<ch> <instrument>"`.
 - **Rhythm:** GM drum keys are remapped to keys inside the kit's zones (`[banks.X.drums]`); unmapped keys are dropped.
 - **Kept:** notes, CC7, CC64, pitch bend. **Dropped:** program change, pan, reverb, modulation, SysEx. `c_volume[slot]` = the first CC7 value.
@@ -222,10 +222,10 @@ The `num_inst` byte doesn't always match the number of named slots: COMBO says 9
   - The zone boundaries match the decoded TopKeys to within a key, which is about the resolution of measure-level notes.
   - **Hats:** the "Hi-hat" zone is open hat for most of its range and closed hat at its top key (84). That matches Apple playing hats near the top of the zone (85–89 on Kit 3). **The kit has no crash** (the top of the ride/"Cymbal" zone, 78, stands in) and no rim/side stick (the "Rim" zone, 85+, is unusable).
   - Drum Kit 2 (`AUDIT09.SEQ`) hasn't been auditioned yet.
-- `just drum-audition` builds `AUDITnn.SEQ` (nn = kit slot). It plays one hit per beat across a key range, so synthLAB's measure:beat counter identifies the key. `gs/seq/AUDITnn.txt` lists measure:beat → key.
+- `just drum-audition` builds `AUDITnn.SEQ` (nn = kit slot). It plays one hit per beat across a key range, so synthLAB's measure:beat counter identifies the key. `build/seq/AUDITnn.txt` lists measure:beat → key.
 
 ## Measured: how MIDI Synth drives the DOC (2026-11-06, `just tunetest` + `just docscope`)
-Measured in GSSquared by playing `/synthLAB/Tune/TUNE.SEQ` and sampling the Ensoniq oscillator state through gs2-mcp (`src/migs/gs2client.py`). Log: `gs/disks/docscope.jsonl`.
+Measured in GSSquared by playing `/synthLAB/Tune/TUNE.SEQ` and sampling the Ensoniq oscillator state through gs2-mcp (`src/migs/gs2client.py`). Log: `build/disks/docscope.jsonl`.
 - With MIDI Synth running, **all 32 oscillators are enabled**, so the DOC rate is 894 886 / 34 ≈ **26 320 Hz**. Before MIDI Synth starts, 1 oscillator runs at 298 295 Hz.
 - **Each note uses 4 oscillators** (Gen 1 A/B, Gen 2 A/B), all with the same frequency register.
 - DOC rule (GSSquared `ensoniq.cpp`): the address is `acc >> (9 + res − size)`, and `acc += freq` per sample. So **one pass through the wave = rate × freq / 2^(17 + res) Hz**, and **bytes per second = rate × freq / 2^(9 + res − size)**.
@@ -274,7 +274,7 @@ Measured in GSSquared by playing `/synthLAB/Tune/TUNE.SEQ` and sampling the Enso
 
   Held notes alone (no tails) exceed 7 voices for 23% of MI160, so that song needs musical thinning on top of this.
 
-## Custom MT-32 bank: MI1 (`just mt32bank`, gs/mt32bank.toml, src/migs/mt32bank.py)
+## Custom MT-32 bank: MI1 (`just mt32bank`, config/mt32bank.toml, src/migs/mt32bank.py)
 - **Why one shared bank:** a game port can't stop to load banks between songs. The bank is loaded once and every sequence references `MI1.BNK`.
 - **Effects reserve:** `reserve_pages` (16 = 4 KB) keeps DOC pages free at the top for game sound effects, which MIDI Synth's generator 7 plays from the same 64 KB.
 - **Slot layout:**

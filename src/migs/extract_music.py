@@ -6,7 +6,7 @@ For each distinct RO sound, writes:
   <out>/midi/gm/NNN[-name].mid     General MIDI conversion (docs/mt32-to-gm.md)
   <out>/patches/NNN[-name].toml    per-channel instrument notes and statistics
 
-Song names come from an optional TOML file (default <out>/song_names.toml):
+Song names come from an optional TOML file (default config/song_names.toml):
   [names]
   160 = "main-title"
 """
@@ -275,11 +275,11 @@ def load_songs(game: Game, names: dict[str, str], warn=None) -> list[Song]:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("game_dir", type=Path, help="SCUMM v4 game directory (000.LFL, DISKnn.LEC)")
-    ap.add_argument("out_dir", type=Path, help="output directory (e.g. music)")
-    ap.add_argument("--names", type=Path, help="song names TOML (default: <out_dir>/song_names.toml)")
+    ap.add_argument("out_dir", type=Path, help="output directory (e.g. build/music)")
+    ap.add_argument("--names", type=Path, help="song names TOML (default: config/song_names.toml, optional)")
     args = ap.parse_args(argv)
 
-    names_path = args.names or args.out_dir / "song_names.toml"
+    names_path = args.names or Path("config/song_names.toml")
     names: dict[str, str] = {}
     if names_path.exists():
         names = {str(k): v for k, v in tomllib.loads(names_path.read_text()).get("names", {}).items()}

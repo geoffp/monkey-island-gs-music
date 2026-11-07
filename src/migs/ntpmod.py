@@ -2,7 +2,7 @@
 """MI1 MT-32 MIDI -> 15-channel ProTracker MOD, built to NinjaTrackerPlus' constraints.
 
 The MOD is the primary artefact: it renders on the desktop (ffmpeg/libopenmpt) and converts
-to .NTP for the IIGS. Samples come from Munt renders of the sounds in gs/mt32bank.toml and
+to .NTP for the IIGS. Samples come from Munt renders of the sounds in config/mt32bank.toml and
 are packed as NTP will pack them into the 64 KB DOC RAM. See docs/ninjatrackerplus.md.
 
 Melodic sample = raw MT-32 attack (`attack_bytes`, loop header) + a 512-byte loop holding
@@ -466,7 +466,7 @@ def plan_loops(samples: list[ModSample], usage: dict[int, float], last_page: int
 
 def build_samples(spec: dict, cfg: dict, key_ranges: dict[int, tuple[int, int]], smf2wav, roms, cache,
                   tables, log=print) -> tuple[list[ModSample], dict, dict]:
-    """Samples per gs/mt32bank.toml; returns (samples, program->index, rhythm key->(index, note, level gain))."""
+    """Samples per config/mt32bank.toml; returns (samples, program->index, rhythm key->(index, note, level gain))."""
     SR = mb.SR
     hold = spec.get("hold_seconds", 2.0)
     samples, programs, drums = [], {}, {}
@@ -1123,7 +1123,7 @@ def mod_file(title: str, samples: list[ModSample], grid: Grid, patterns: int, ta
 
 
 def ntp_spec(spec: dict, conf: dict, mode: str | None = None) -> dict:
-    """The MI1 bank spec plus gs/ntp.toml's NTP-only `[[melodic]]` sounds. An extra sound takes
+    """The MI1 bank spec plus config/ntp.toml's NTP-only `[[melodic]]` sounds. An extra sound takes
     its `covers` away from the shared bank's merges (NTP has DOC RAM the 16-slot MIDI Synth
     bank doesn't), e.g. Pipe Org 2, which MI1.BNK plays with Elec Org 2's sample."""
     extra = [m for m in conf.get("melodic", []) if mode is None or mode in m.get("modes", [mode])]
@@ -1192,16 +1192,16 @@ def sample_set(spec: dict, cfg: dict, songs: list[tuple[list, dict]], last_page:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("inputs", nargs="+", type=Path, help="MT-32 MIDI files (music/midi/mt32)")
+    ap.add_argument("inputs", nargs="+", type=Path, help="MT-32 MIDI files (build/music/midi/mt32)")
     ap.add_argument("-o", "--out-dir", type=Path, required=True)
-    ap.add_argument("--config", type=Path, default=Path("gs/ntp.toml"))
-    ap.add_argument("--spec", type=Path, default=Path("gs/mt32bank.toml"))
+    ap.add_argument("--config", type=Path, default=Path("config/ntp.toml"))
+    ap.add_argument("--spec", type=Path, default=Path("config/mt32bank.toml"))
     ap.add_argument("--make-tables", type=Path, default=Path("vendor/ntp/src/make_tables.php"))
     ap.add_argument("--smf2wav", type=Path, default=Path("vendor/munt/bin/mt32emu-smf2wav"))
     ap.add_argument("--roms", type=Path, default=Path("original files/mt-32 roms"))
-    ap.add_argument("--cache", type=Path, default=Path("gs/build/mt32samples"))
+    ap.add_argument("--cache", type=Path, default=Path("build/cache/mt32samples"))
     ap.add_argument("--samples", help="build variant: per-song, shared, or a [modes.<name>] with a `base` "
-                                      "(e.g. per-song-e, shared-e); default gs/ntp.toml `samples`")
+                                      "(e.g. per-song-e, shared-e); default config/ntp.toml `samples`")
     args = ap.parse_args(argv)
     conf = tomllib.loads(args.config.read_text())
     variant = args.samples or conf["defaults"].get("samples", "per-song")
