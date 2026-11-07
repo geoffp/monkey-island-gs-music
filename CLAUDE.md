@@ -67,5 +67,6 @@ Pipeline:
   - `original files/`: user-supplied game data and MT-32 ROMs. Only its README is tracked.
   - `build/`: all generated output, gitignored. That's `music/`, `ntp/<variant>/`, `seq/`, `disks/` (images plus the `.gs2` configs beside them), `cache/mt32samples/` and `looplab/`. `just clean` keeps `build/cache/`; `just clean-all` removes it all.
 - Outputs must be reproducible from the game data plus `config/`.
+- `just` has no freshness tracking (every dependency recipe runs). Recipes skip themselves with guards: `fetch-*` by checksum, the NTP chain by an input fingerprint (`ntp_inputs` → `build/ntp/<mode>/.inputs`, written only after success; `just ntpmod-force` overrides). If you add an input to the NTP build, add it to `ntp_inputs`.
 - **Distribution:** never commit or publish `original files/` or `build/`. `build/` holds copyrighted derivatives of the game and ROMs: the extracted soundtrack, renders, NTP songs, sequences and disk images. Don't propose checking them in, even for CI.
 - When a format fact is learned, record it in the matching `docs/*.md` file with its source.

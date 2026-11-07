@@ -38,6 +38,11 @@ ntp_modes     := "per-song shared per-song-e shared-e"
 # the header + 12 entries, then 13), so a 16-song folder hid MI165. Verified in GSSquared.
 # ProDOS names allow no "-": per-song -> PER.SONG, shared-e -> SHARED.E.
 ntp_folders   := 'ntpf() { local m i d; for m in ' + ntp_modes + '; do i=0; for f in build/ntp/$m/*.ntp; do [ -f "$f" ] || continue; d="$1/$(echo $m | tr a-z- A-Z.)/PART$((i / 12 + 1))"; mkdir -p "$d"; cp "$f" "$d/$(basename "$f" .ntp | tr a-z A-Z).NTP#d50008"; i=$((i + 1)); done; done; }; ntpf'
+# Fingerprint of everything an NTP build of mode $1 reads (file names + contents): the code,
+# config/, the lockfile, this justfile, the MT-32 MIDI and the PHP converter. `ntpmod` skips a mode
+# whose build/ntp/<mode>/.inputs matches, and writes it only after a successful build.
+# Deliberately broad: an extra rebuild is cheap, a stale one isn't. Munt renders are cached by spec.
+ntp_inputs    := 'ntpi() { { find src/migs config "' + vendor + '/ntp/src" build/music/midi/mt32 -name __pycache__ -prune -o -type f -print; printf "%s\\n" pyproject.toml uv.lock justfile; } | LC_ALL=C sort | xargs -d "\\n" sha256sum | { echo "mode $1"; cat; } | sha256sum | cut -d" " -f1; }; ntpi'
 sensei_ver    := "v2.0"     # digarok/senseiplay (no published checksums)
 
 # List recipes
@@ -210,6 +215,10 @@ ntpdisk: ntp
     #!/usr/bin/env bash
     set -euo pipefail
     cp2="$PWD/{{cp2}}"; img="$PWD/build/disks/MI.NTP.PO"; st="$PWD/build/disks/ntpstage"
+    # up to date: no song, player disk or justfile (the variant list) newer than the image
+    if [ -f "$img" ] && [ -z "$(find build/ntp -name '*.ntp' -newer "$img"; find "{{vendor}}/ntp/senseiplay800.2mg" justfile -newer "$img")" ]; then
+      echo "build/disks/MI.NTP.PO: up to date"; exit 0
+    fi
     rm -rf "$st" "$img" && mkdir -p "$st"
     "$cp2" extract --preserve=naps --overwrite --exdir="$st" "{{vendor}}/ntp/senseiplay800.2mg" \
       PRODOS sensei.system ntpplayer dgr.radio.dgr >/dev/null
@@ -293,18 +302,33 @@ ntpmod modes=ntp_modes: fetch-ntp fetch-munt
       ls build/ntp/$1/*.mod | xargs -P "$(nproc)" -I{} sh -c \
         'ffmpeg -hide_banner -loglevel error -y -f libopenmpt -i "$1" -ac 2 -ar 44100 "$2/wav/$(basename "$1" .mod).wav"' _ {} "build/ntp/$1"
     }
-    pids=()
-    for m in {{modes}}; do mkdir -p build/ntp; build "$m" > "build/ntp/$m.log" 2>&1 & pids+=($!); done
+    pids=(); fresh=()
+    for m in {{modes}}; do
+      mkdir -p build/ntp; fp=$({{ntp_inputs}} "$m")
+      if [ "$(cat "build/ntp/$m/.inputs" 2>/dev/null)" = "$fp" ] && compgen -G "build/ntp/$m/*.mod" >/dev/null; then
+        fresh+=("$m"); continue
+      fi
+      { build "$m" && echo "$fp" > "build/ntp/$m/.inputs"; } > "build/ntp/$m.log" 2>&1 & pids+=($!)
+    done
     fail=0; for p in "${pids[@]}"; do wait "$p" || fail=1; done
-    for m in {{modes}}; do echo "== samples: $m"; cat "build/ntp/$m.log"; echo "previews: build/ntp/$m/wav/"; done
+    for m in {{modes}}; do
+      if [[ " ${fresh[*]} " == *" $m "* ]]; then echo "== samples: $m: up to date (just ntpmod-force to rebuild)"; continue; fi
+      echo "== samples: $m"; cat "build/ntp/$m.log"; echo "previews: build/ntp/$m/wav/"
+    done
     exit $fail
+
+# Rebuild the MODs even if their inputs are unchanged (so does `just clean`)
+ntpmod-force modes=ntp_modes:
+    for m in {{modes}}; do rm -f "build/ntp/$m/.inputs"; done
+    just ntpmod "{{modes}}"
 
 # Loop lab (research, not part of the build): attack detection + loop-construction candidates
 # measured on the MT-32 sample set -> build/looplab/ (report.md, wav/, plots/). docs/loop-detection.md
 looplab mode="shared": fetch-ntp fetch-munt
     uv run --group lab looplab build/music/midi/mt32/*.mid --samples "{{mode}}"
 
-# MOD -> .NTP with Ninjaforce's converter (needs php-cli). Streaming forbidden: everything in DOC RAM
+# MOD -> .NTP with Ninjaforce's converter (needs php-cli). Streaming forbidden: everything in DOC RAM.
+# Converts only MODs newer than their .ntp (ntpmod rewrites a mode's folder when it rebuilds it).
 ntp modes=ntp_modes: (ntpmod modes)
     #!/usr/bin/env bash
     set -euo pipefail
@@ -312,7 +336,7 @@ ntp modes=ntp_modes: (ntpmod modes)
     for m in {{modes}}; do
       # all cores; a failed conversion prints its log and stops the batch (xargs exit 255)
       ls build/ntp/$m/*.mod | xargs -P "$(nproc)" -I{} sh -c \
-        'php "$1" "$2" STREAM_FORBIDDEN > "${2%.mod}.log" || { echo "$2:"; cat "${2%.mod}.log"; exit 255; }' \
+        '[ "${2%.mod}.ntp" -nt "$2" ] && exit 0; php "$1" "$2" STREAM_FORBIDDEN > "${2%.mod}.log" || { echo "$2:"; cat "${2%.mod}.log"; exit 255; }' \
         _ "{{vendor}}/ntp/src/ntpconverter.php" {}
       echo "$m: $(ls build/ntp/$m/*.ntp | wc -l) .NTP files in build/ntp/$m/"
       case "$m" in shared*)       # resident bank: identical instruments + samples in every song
