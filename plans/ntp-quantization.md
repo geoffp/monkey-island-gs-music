@@ -1,6 +1,22 @@
 # Plan (deferred): pack rows to the beat, then quantize MI1 MIDI before NTP conversion
 
-Status: **not started**; recorded 2026-11-06 to try later. Background measurements: `docs/ninjatrackerplus.md`, "Grid analysis for quantization" and "Fixes".
+Status: **on hold** (user, 2026-11-08); recorded 2026-11-06 to try later. Background measurements: `docs/ninjatrackerplus.md`, "Grid analysis for quantization" and "Fixes".
+
+## The tradeoff, measured first (2026-11-08)
+Compact music data is a priority, so read this before the rest. Shared build, all 16 songs, unquantized, before the quietest-release steal rule. "Velocity lost" = notes whose `EDx` micro-delay takes the effect column, so they start at the sample's default volume until the next row.
+
+| rows/unit, speed | velocity lost | timing err | steals | drops | pattern KB |
+|---|---|---|---|---|---|
+| 1, 6 (step 0 below) | 47.2 % | 7.7 ms | **1679** | **31** | **295** |
+| **2, 3 (current)** | **45.7 %** | **7.7 ms** | **706** | **11** | **527** |
+| 2, 6 | 67.4 % | 3.7 ms | 724 | 12 | 530 |
+| 3, 2 | 39.8 % | 7.7 ms | 464 | 8 | 764 |
+| 6, 1 | 0 % | 7.7 ms | 356 | 7 | 1476 |
+
+- **Finer rows are the only grid-side cure for velocity loss, and they inflate the data:** every note in-cell costs 2.8× the pattern RAM. Ruled out.
+- **Row packing (1, 6) nearly halves the data at the same velocity and timing, but costs polyphony:** a track's occupancy (note, envelope, release) rounds up to whole rows, now twice as long, so steals more than double and drops triple. It needs occupancy finer than a row (e.g. end releases with an `EDx`-timed cut, or count busy in ticks) before it is acceptable.
+- **More ticks per row (2, 6) halves timing error but loses more velocity,** since more notes land off-row.
+- **How wrong a lost velocity is** (current grid, 5078 notes): median 1.6 dB for 1–2 ticks; 24 % over 3 dB, 6 % over 6 dB (worst in MI162, 164, 166).
 
 ## Why
 - A note with an `EDx` micro-delay can't carry its velocity `Cxx` in the same cell: a MOD cell has one effect. Unless the track is a silent one-shot track, the note starts at the sample's default volume for one row. Rows are 55–154 ms, so that flattens velocity nuance.
