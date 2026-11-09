@@ -73,3 +73,10 @@ def test_real_game_mt32_soundtrack():
     assert all(s.resource_room == 94 and s.resource_disk == 4 for s in songs)
     lengths = {s.sound_id: s.track.end_tick for s in songs}
     assert round(lengths[160] / 120 * 0.5, 1) == 93.6                 # matches docs/ro-format.md
+
+
+def test_a_zero_size_block_is_an_error_not_an_endless_scan():
+    from migs.scumm_v4 import blocks
+    data = blk(b"AA", b"xy") + struct.pack("<I", 0) + b"BB"
+    with pytest.raises(ValueError, match="size 0"):
+        list(blocks(data))
