@@ -61,7 +61,7 @@ delay_snap_db = 4.0     # a delayed (EDx) note whose start at the sample's defau
                         # (never onto a same-part neighbour: flams, rolls). Remove to keep all delays
 track_plan = true       # choose each song's 2-/1-oscillator track split for the least polyphony loss
                         # (plan_tracks) instead of letting the first notes fix it
-halt_released_loops = true  # end each release with a silent one-shot that stops the loop: NTP
+halt_released_loops = true  # end each release with a silent looped rest that replaces the loop: NTP
                         # applies a delayed (EDx) cell's instrument volume at tick 0, which made
                         # the old loop audible until the note (docs/ninjatrackerplus.md "Ghosts")
 one_shots = true        # decaying sounds that reach the 8-bit floor (`one_shot_floor_lsb` RMS in

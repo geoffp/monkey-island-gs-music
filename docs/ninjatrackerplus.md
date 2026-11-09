@@ -367,7 +367,7 @@ There were about 3,500 such ghosts per build. Examples: MI152 ≈ 600, MI160 ≈
 - libopenmpt renders the same window as silence (−180 dB).
 
 **Fix** (`halt_released_loops`, on in every variant):
-- `build_samples` adds a silent 248 B one-shot, `rest`: 1 page and 1 sample slot. Shared now has 31 samples, the MOD maximum, and 237/256 pages.
+- `build_samples` adds a silent 248 B one-shot, `rest`: 1 page and 1 sample slot. Shared now has 31 samples, the MOD maximum, and 237/256 pages. (Since 2026-11-09 the rest is looped, 2 pages, and only 2-oscillator tracks get it: see "Flicker" below.)
 - Where a release reaches volume 0, `convert_song` writes `C00` *plus* a rest note into that cell. Triggering the rest stops the loop's oscillators, and the rest halts itself on its stopper bytes. MOD 0 = DOC 128 = silence; DOC 0 would stop it at once.
 - In GSSquared, at the same delayed rows the volume still rises at tick 0, but every oscillator is halted, so nothing sounds.
 - The built MODs now have 0 ghosts in all four variants built then (per-song, shared and their E′+ trials), out of about 5,400 delayed notes each. The build log's `halt` column counts the halted releases.
@@ -375,6 +375,19 @@ There were about 3,500 such ghosts per build. Examples: MI152 ≈ 600, MI160 ≈
 **Desktop output:** unchanged apart from inaudible mixer residue (−68 to −71 dB, at most about 20 LSB), as long as the rest doesn't alter track choice: `trk_inst` keeps the note's sample. Marking released tracks as "rest" had moved notes between the panned channels.
 
 **One cost:** per-song MI167 was exactly at its page limit, so the rest's page halved its Strings loop (16384 → 8192 B, about one beat long; it passes the tremolo gate).
+
+**Flicker: delayed notes started their loop at a stale volume (fixed 2026-11-09).**
+- **User report:** "some flicker on the notes" early in MI153's pattern 3.
+- **Measured** with a GSSquared DOC register log (all 32 oscillators about every 17 ms):
+  - a delayed note's attack oscillator started at the new default volume, but its loop oscillator still held the last release level of the track's previous note;
+  - track 11 (key 82): attack 120, loop 28. The attack lasts about 35 ms, then the loop played 12.6 dB down for about 65 ms until the next row's `Cxx` (92);
+  - track 7 (key 48): 132, then 24, then 104.
+- **Cause** (`ninjatrackerplus.s`): at tick 0 the player writes the cell's default volume through the routine for the *current* instrument's type (`talk_to_doc_play`, indexed by `osc_instrument_type`). After a halt that instrument is the rest. As a one-shot, the rest used `talk_to_doc_1osc`, which writes oscillator A only. At tick `x` the note starts with control, pointer and size writes but no volume write (`talk_to_doc_2osc`, `what_to_do` bit 7), so B kept its old value. On a track's very first note there is no instrument yet, with the same result (MI153 track 12: loop at 0).
+- **Fix:**
+  - **The rest is looped:** a silent 248 B header plus a silent 256 B loop. NTP treats it as a 2-oscillator instrument (converter types `%0010` and `%0111`), so tick 0 writes both volumes. Cost: 2 DOC pages instead of 1 (+1 page in every song; no loop changed), still 1 sample slot.
+  - **Only 2-oscillator tracks get it:** on a 1-oscillator track it would make the converter give the track a pair. Cut one-shots there (MI160 and MI162 Xylophone: 179 and 130 halts) now end with `C00` alone. Ghost check on the built MODs: of 345–363 delayed notes on MI160's 1-oscillator tracks and 200–208 on MI162's, none follows a cut one-shot that is still sounding. This also removes a latent bug: `preceding_silent` could put a delayed drum note with no instrument right after a rest, which NTP would have played with the rest.
+  - **A melodic track whose first note is delayed** gets the rest on the row before it (idle on every pass, the loop jump included): +1 to +7 halts per song.
+- **After** (GSSquared, whole of per-song MI153): 199 attack-to-loop handovers. The only one with the loop more than 3 dB below the attack is a row's `Cxx` landing at the same moment (both oscillators 144 → 96). Every other build number is unchanged in both modes, apart from the halt counts.
 
 **Still open (theory 2):** steals, i.e. a releasing note cut for a new one, are abrupt on the DOC. NTP halts oscillators outright, with no declick ramp, where desktop players ramp over a few milliseconds. MI160 had about 620–780 of them; since 2026-11-08 most fall on a release that has already reached 0 (see "Track allocation", step 4).
 
@@ -392,7 +405,7 @@ What each option buys and costs, as measured. Sizes are totals over all 16 songs
 - **Song-sized one-shots** (rejected 2026-11-08): +100 KB of samples (+9 %) for no polyphony gain and little audible difference; see `docs/loop-detection.md`.
 - **`drum_floor_lsb = 1.5`** (default since 2026-11-08; 0 = the old −46 dB length). Drums end at the 8-bit floor, with junk near the floor after the decay cut too (above). *Gains:* the kick, snare, bongo and mute conga drop to smaller DOC blocks: shared bank 237 → 220 pages (shared-lo 233 → 216); `.NTP` shared 1480 → 1376 KB (−7 %), per-song 1142 → 1101 KB. Per-song free DOC RAM goes to loop growth: MI167, the one song at its page limit, gets its Strings 16384 B raw loop back (was halved to 8192). The shared bank's freed pages are unused so far. A shorter drum also frees its track sooner. *Polyphony:* unchanged (drops and steals identical in all four variants). *Cost:* the last few dB of each tail (below 8-bit resolution); not yet listened to.
 - **`tremolo`** (trial `shared-trem`, 2026-11-09; **rejected and removed**: the organ pumped, its wobble being tonal, and no measurement predicts which sounds are safe). Replayed the MT-32's chorus/beating level modulation in the per-row `Cxx` of sounds whose 512 B averaged loop is flat ("Tremolo trial" below). *Gains:* MI159's chords pulse as in Munt instead of holding still. *Size:* `.NTP` unchanged (fixed cells); deflated patterns 92 → 93 KB; DOC unchanged. *Polyphony:* audible steals 181 → 185 (the quietest-release choice moves). Not yet listened to.
-- **`halt_released_loops`** (default on). Ends each release with a silent one-shot that stops the loop. *Gains:* no ghost of the previous note before a delayed note. *Cost:* one 256 B rest sample per set; per-song MI167 was at its page limit, so its Strings loop halved (16384 → 8192 B) until the drum trim freed pages.
+- **`halt_released_loops`** (default on). Ends each release on a 2-oscillator track with a silent looped rest that replaces the loop. *Gains:* no ghost of the previous note before a delayed note, and delayed notes start their loop at the right volume ("Flicker"). *Cost:* one 512 B rest sample (2 pages) per set; per-song MI167 was at its page limit, so its Strings loop halved (16384 → 8192 B) until the drum trim freed pages.
 
 **Sampling**
 - **`pitch_plan`** (default on since 2026-11-09, both modes; `pitch_plan = false` restores the configured keys, e.g. as a trial mode with a `base`). Each sound's sampled key(s), up to `pitch_max_zones` key zones (each needing ≥ `pitch_zone_gain_db`; a lone sample moves only for ≥ `pitch_move_gain_db`) and short-loop rate, from the notes played ("Sampled pitch and rate"). *Gains:* the DOC-vs-Munt measure −21.5 → −26.1 dB per-song, −21.3 → −22.9 shared. Listening: MI152 "way way better"; after the Panpipes and Pipe Organ fixes, "everything else I've listened to sounds good". *Costs:* per-song `.NTP` +168 KB (+14 %); per-song steals 275 → 433 (MI160); extra zones take DOC RAM before loop growth.
@@ -513,6 +526,16 @@ Main per-song gains come from the raw-loop rate alone; shared and shared-pitch h
 
 ## Track allocation (`convert_song`; current rules, 2026-11-07)
 NTP has no voice allocation: each MOD track owns its oscillators for the whole song (`determine_osc_per_track`). So `convert_song` assigns every note to a track itself, once, in onset order.
+
+**One note per key, as on the MT-32 (`read_notes`, 2026-11-09).** User report: MI153 has "major polyphony problems … many notes are just not making it", although it's a single organ part, never more than 8 notes at once. Checked first: the MOD holds all 197 notes (no drops or steals, 13 tracks), and a DOC register log in GSSquared (all 32 oscillators about every 17 ms, `gs2client` state blob) shows NTP starting every one of them, row for row as in the MOD.
+- **The cause was in reading the MIDI.** MI153 strikes 21 keys again while they're still held (no sustain pedal: the song sends only CC7 and CC10). Every other song together does it 5 times (MI160: 3, MI166: 2). `read_notes` paired note-offs first-in-first-out per key. So a re-struck key became two overlapping notes, and the second lasted until the *later* note-off.
+- **What the MT-32 does:** MT-32 patches in single-assign mode (assign modes POLY1 and POLY2) abort a key's sounding poly when the key is struck again (Munt `Part::playPoly` → `abortFirstPoly(key)`). A note-off releases the first sounding poly of its key, and a note-off with none sounding does nothing (`Part::stopNote`).
+- **Measured through Munt** (on 1.0 s, re-struck 2.0 s, offs 3.0 s and 4.5 s). Pipe Org 2 (program 13), program 9 and program 104 are all quiet from 3.0 s on, while a single note held to 4.5 s keeps sounding. Pipe Org 2's level between 2 and 3 s is the single note's (−31 dB), not two notes'.
+- **Rule now:** one note per channel and key. Striking a sounding key ends the old note at the new onset. The next note-off ends the new note, and a stray note-off is ignored. A key struck twice at the same tick plays once.
+- **Effect:**
+  - MI153: notes 197 → 195, and Pipe Organ note time 225 → 206 s (19 s of notes that went on sounding after the MT-32 had ended them). The loop plan moved one 16 KB loop from key 88 to Pipe Organ Lo key 50.
+  - MI160: 2727 → 2726 notes, steals 415 → 414 (shared 94 → 92).
+  - Every other song is identical, in both modes.
 
 **Track types and budget.** A track's type is fixed when it is created:
 - **melodic** (2 oscillators): plays looped samples (attack header + loop, in swap mode);

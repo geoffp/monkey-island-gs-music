@@ -74,7 +74,10 @@ def _read_notes(path: str, _mtime: int, _size: int) -> tuple[list[Note], dict[in
     sec = lambda tick: tick * tempo / 1e6 / mf.ticks_per_beat
     programs: dict[int, int] = {}
     notes: list[Note] = []
-    sounding: dict[tuple[int, int], list[Note]] = {}
+    # One note per channel and key, as the MT-32 plays them (single-assign; Munt Part::playPoly
+    # abortFirstPoly, stopNote): striking a sounding key again ends it there, the next note-off
+    # ends the new note, and a note-off with nothing sounding is ignored.
+    sounding: dict[tuple[int, int], Note] = {}
     volume: dict[int, int] = {}
     end = 0.0
     for tick, m in events:
@@ -83,18 +86,21 @@ def _read_notes(path: str, _mtime: int, _size: int) -> tuple[list[Note], dict[in
         elif m.type == "control_change" and m.control == 7:
             volume[m.channel] = m.value
         elif m.type == "note_on" and m.velocity > 0:
-            sounding.setdefault((m.channel, m.note), []).append(
-                Note(sec(tick), sec(tick), m.note, m.velocity, m.channel, volume.get(m.channel, 100)))
-        elif m.type in ("note_on", "note_off") and sounding.get((m.channel, m.note)):
-            n = sounding[(m.channel, m.note)].pop(0)
+            old = sounding.get((m.channel, m.note))
+            if old is not None and old.t < sec(tick):    # (struck twice at one tick: never heard)
+                old.off = sec(tick)
+                notes.append(old)
+            sounding[(m.channel, m.note)] = Note(sec(tick), sec(tick), m.note, m.velocity, m.channel,
+                                                 volume.get(m.channel, 100))
+        elif m.type in ("note_on", "note_off") and (m.channel, m.note) in sounding:
+            n = sounding.pop((m.channel, m.note))
             n.off = sec(tick)
             notes.append(n)
         elif m.type == "end_of_track":
             end = max(end, sec(tick))
-    for lst in sounding.values():            # never released: held to the end
-        for n in lst:
-            n.off = end
-            notes.append(n)
+    for n in sounding.values():              # never released: held to the end
+        n.off = end
+        notes.append(n)
     notes.sort(key=lambda n: (n.t, n.channel, n.key))
     return notes, programs, max(end, max((n.off for n in notes), default=0))
 
@@ -446,7 +452,8 @@ class _Arranger:
             vv = max(0, min(64, round(v_off * gg)))
             if self.grid.effect_free(tr, rr) and self.grid.cells[tr].get(rr, CELL_EMPTY)[0] == 0:
                 c = self.grid.set_effect(tr, rr, FX_VOLUME, vv)
-                if vv == 0 and self.rest is not None:     # stop the silent loop (ntpsamples.rest_sample)
+                if vv == 0 and self.rest is not None and self.tracks[tr].kind == "melodic":
+                    # replace the silent loop with the rest (ntpsamples.rest_sample)
                     c[0], c[1] = self.samples[self.rest].base_note + 1, self.rest + 1
                     self.rep.halted += 1                  # (the track keeps the note's sample: choice unchanged)
             last = rr
@@ -495,6 +502,18 @@ class _Arranger:
         tr = next((t for t in tracks if grid.effect_free(t, last_row)), None)
         if tr is not None:
             grid.set_effect(tr, last_row, FX_JUMP, 0)          # loop to the start (like the game's FF)
+        # A melodic track whose first note is delayed has no 2-oscillator instrument yet, so NTP
+        # writes that note's tick-0 volume to its attack oscillator only and the loop starts at
+        # volume 0 until the next row (ntpsamples.rest_sample). The rest on the row before
+        # (idle on every pass, the loop jump included) makes the track 2-oscillator first.
+        for t in tracks:
+            if self.rest is None or self.tracks[t].kind != "melodic":
+                continue
+            first = min((r for r, c in grid.cells[t].items() if c[0]), default=None)
+            if first and grid.cells[t][first][2] == FX_EXTENDED and grid.cells[t][first][1]:
+                c = grid.get(t, first - 1)
+                c[0], c[1] = self.samples[self.rest].base_note + 1, self.rest + 1
+                rep.halted += 1
         return patterns
 
 

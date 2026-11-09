@@ -719,15 +719,24 @@ def build_drum(d: dict, cfg: dict, munt: Munt, tables) -> tuple[ModSample, dict[
 
 
 def rest_sample() -> ModSample:
-    """A silent one-shot ("rest") that note-offs trigger once a release reaches volume 0.
+    """A silent looped sample ("rest") that ends each release on a 2-oscillator track once it
+    reaches volume 0.
 
     NinjaTrackerPlus applies a cell's instrument number (and its default volume) at tick 0
     but delays only the note under EDx, so the next delayed note on the track turned the
     previous note's loop, still running silently after C00, back up for 1-2 ticks: a ghost of
     the old note, then an abrupt cut (confirmed in GSSquared's DOC registers; desktop players
-    delay the instrument too). The rest stops those oscillators instead; its 8 stopper bytes
-    halt it. MOD 0 = DOC 128 = silence (DOC 0 would stop at once)."""
-    return ModSample("rest", np.zeros(248), kind="rest", base_note=24, key0=60, default_volume=0)
+    delay the instrument too). The rest replaces that loop with silence.
+
+    It is looped (a 248 B header + a 256 B loop, both silent), so NTP treats it as a
+    2-oscillator instrument: at a delayed note's tick 0 the player writes the new default
+    volume to both oscillators (`talk_to_doc_2osc`). The first rest was a one-shot, and the
+    player wrote only the attack oscillator's volume (`talk_to_doc_1osc`). The loop oscillator
+    kept the old release level, so after the attack the new note's loop played at it until
+    the next row (MI153: 120 -> 28 for 65 ms, a flicker). 1-oscillator tracks never get the
+    rest: it would make them 2-oscillator. MOD 0 = DOC 128 = silence (DOC 0 would stop at once)."""
+    return ModSample("rest", np.zeros(248 + 256), kind="rest", loop_start=248, loop_len=256,
+                     base_note=24, key0=60, default_volume=0)
 
 
 def build_samples(spec: dict, cfg: dict, key_ranges: dict[int, tuple[int, int]], munt: Munt, tables,

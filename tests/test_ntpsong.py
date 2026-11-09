@@ -324,38 +324,62 @@ def test_track_order_lets_the_ntp_converter_assign_every_oscillator():
 
 def test_released_loops_are_halted_before_any_delayed_note(tmp_path):
     """NinjaTrackerPlus sets a cell's instrument default volume at tick 0 and delays only the
-    note (EDx), so a looped note left running silently after C00 sounds again until the delayed
-    note starts. Every release must end with the silent rest one-shot on that track."""
+    note (EDx). So a looped note left running silently after C00 sounds again until the delayed
+    note starts: every release ends with the silent rest on that track. The player writes that
+    volume to both oscillators only if the track's current instrument is 2-oscillator (else the
+    new loop starts at a stale volume), so the rest is looped, and a melodic track whose first
+    note is delayed gets the rest on the row before it."""
     import mido
     mf = mido.MidiFile(ticks_per_beat=120)
     t = mido.MidiTrack([mido.Message("program_change", channel=1, program=9, time=0)])
     tick = 0
     for i in range(24):                                           # jittered, detached notes
-        at = 60 * i + (0, 11, 23, 5)[i % 4]
+        at = 60 * i + (11, 0, 23, 5)[i % 4]                        # the first note delayed
         t.append(mido.Message("note_on", channel=1, note=60 + i % 5, velocity=90, time=at - tick))
         t.append(mido.Message("note_off", channel=1, note=60 + i % 5, velocity=0, time=20))
         tick = at + 20
     mf.tracks.append(t)
     p = tmp_path / "1.mid"
     mf.save(p)
-    rest = smp.ModSample("rest", np.zeros(248), kind="rest", base_note=24, key0=60, default_volume=0)
+    rest = smp.rest_sample()
+    assert rest.loop_start and rest.loop_len and len(rest.ntp_blocks()) == 2   # header + loop: 2 oscillators
+    assert not rest.data.any()
     cfg = {"rows_per_unit": 2, "speed": 3, "quantize": 0.0, "oscillators": 31}
     grid, _, rep = sg.convert_song(p, [fake_sample(), rest], {9: 0}, {}, cfg, dict(cfg))
     assert rep.halted > 0
-    delayed_after_release = 0
+    delayed = 0
     for cells in grid.cells:
         state = None                                              # "loop" running, "rest" = halted
         for row in sorted(cells):
             note, inst, eff, par = cells[row]
             if note and inst == 2:
-                assert (eff, par) == (0xC, 0)                     # the rest carries C00
+                assert eff != 0xC or par == 0                     # silent: C00 or no volume at all
                 state = "rest"
             elif note and inst == 1:
-                if eff == 0xE and state is not None:
-                    delayed_after_release += 1
-                    assert state == "rest"                        # never a live silent loop
+                if eff == 0xE:
+                    delayed += 1
+                    assert state == "rest"                        # never a live loop, never the first
                 state = "loop"
-    assert delayed_after_release > 0
+    assert delayed > 1
+
+
+def test_one_oscillator_tracks_never_get_the_looped_rest(tmp_path):
+    """The rest is a 2-oscillator instrument: on a 1-oscillator (one-shot) track it would make
+    NTP's converter give the track a pair. Cut one-shots there end with C00 alone."""
+    import mido
+    ev = [mido.Message("program_change", channel=1, program=9)]
+    for i in range(8):
+        ev += [mido.Message("note_on", channel=1, note=60, velocity=90, time=0 if i == 0 else 100),
+               mido.Message("note_off", channel=1, note=60, time=20)]
+    p = midi_song(tmp_path, ev)
+    shot = smp.ModSample("x", np.zeros(8000), kind="melodic", base_note=30, key0=60, seconds=1.0,
+                         env_t=np.array([0.1, 1.0]), env_g=np.array([1.0, 0.5]), rel_g=np.array([1.0, 0.5, 0.0]))
+    cfg = {"rows_per_unit": 2, "speed": 3, "quantize": 0.0, "oscillators": 31, "melodic_one_shots": "any"}
+    grid, _, rep = sg.convert_song(p, [shot, smp.rest_sample()], {9: 0}, {}, cfg, dict(cfg))
+    assert set(rep.track_kinds) == {"drum"}
+    cells = [c for track in grid.cells for c in track.values()]
+    assert any(c[2:] == [0xC, 0] for c in cells)                  # cut: released to C00
+    assert not any(c[1] == 2 for c in cells)
 
 
 def test_drums_borrow_idle_melodic_tracks_when_the_budget_is_full(tmp_path):
@@ -393,3 +417,16 @@ def test_read_notes_refuses_tempo_changes(tmp_path):
     mf.save(p)
     with pytest.raises(ValueError, match="tempo changes"):
         sg.read_notes(p)
+
+
+def test_a_struck_key_sounds_once_as_on_the_mt32(tmp_path):
+    """MT-32 single-assign (Munt Part::playPoly, stopNote; MI153's organ): striking a sounding
+    key again ends the old note there, the next note-off ends the new one, and the stray
+    note-off after it is ignored. Struck twice at the same tick, only the second is heard."""
+    import mido
+    on = lambda k, dt=0: mido.Message("note_on", channel=1, note=k, velocity=90, time=dt)
+    off = lambda k, dt=0: mido.Message("note_off", channel=1, note=k, time=dt)
+    p = midi_song(tmp_path, [on(60), on(60, 240), off(60, 240), off(60, 240),       # held, restruck at 1 s
+                             on(64), on(64), off(64, 60), off(64, 60)])             # twice at 3 s
+    notes, _, _ = sg.read_notes(p)
+    assert [(n.key, n.t, n.off) for n in notes] == [(60, 0.0, 1.0), (60, 1.0, 2.0), (64, 3.0, 3.25)]
