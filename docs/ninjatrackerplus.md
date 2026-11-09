@@ -380,9 +380,10 @@ What each option buys and costs, as measured. Sizes are totals over all 16 songs
 
 **Sounds**
 - **`one_shots`** (default on). A decaying sound that fades into 8-bit noise within its attack + loop budget is stored whole: only Xylophone qualifies. *Gains:* exactly in tune (was −1.0 cents), no loop of quantisation noise, 1 oscillator, frees its track when the sample ends (MI162 drops 8 → 0). *Cost:* none measured; shared bank 240 → 238 pages.
-- **`loop_only`** (trial `per-song-lo` / `shared-lo`, Elec Organ). *Gains:* 1 oscillator instead of 2: drops 11 → 1, audible steals 262 → 195, and with the track plan and one-shot routing 184 → 39 (shared). *Costs:* the attack is lost. Over the first 100 ms the tone is about 2 dB further from Munt, and the first 0.2–0.3 s is quieter: the 5.4 dB onset peak and the gain-1 handover are gone. **Listening: clearly audible and significantly quieter, much more so in shared.** *Size:* patterns +29…+30 KB (more 1-oscillator tracks), samples −16…−20 KB (no attack headers), `.NTP` +10…+13 KB; DOC −4 pages (shared 237 → 233). Undecided.
+- **Loop-only Elec Organ** (trial `per-song-lo` / `shared-lo`; **rejected and removed 2026-11-09**, user: "I don't think they hold up"). *Gains:* 1 oscillator instead of 2: drops 11 → 1, audible steals 262 → 195, and with the track plan and one-shot routing 184 → 39 (shared). *Costs:* the attack is lost. Over the first 100 ms the tone is about 2 dB further from Munt, and the first 0.2–0.3 s is quieter: the 5.4 dB onset peak and the gain-1 handover are gone. **Listening: clearly audible and significantly quieter, much more so in shared.** *Size:* patterns +29…+30 KB (more 1-oscillator tracks), samples −16…−20 KB (no attack headers), `.NTP` +10…+13 KB; DOC −4 pages (shared 237 → 233). The converter rule it relied on (a loop starting at 0 takes 1 oscillator) stays modelled in `ntp_blocks` and track kinds.
 - **Song-sized one-shots** (rejected 2026-11-08): +100 KB of samples (+9 %) for no polyphony gain and little audible difference; see `docs/loop-detection.md`.
 - **`drum_floor_lsb = 1.5`** (default since 2026-11-08; 0 = the old −46 dB length). Drums end at the 8-bit floor, with junk near the floor after the decay cut too (above). *Gains:* the kick, snare, bongo and mute conga drop to smaller DOC blocks: shared bank 237 → 220 pages (shared-lo 233 → 216); `.NTP` shared 1480 → 1376 KB (−7 %), per-song 1142 → 1101 KB. Per-song free DOC RAM goes to loop growth: MI167, the one song at its page limit, gets its Strings 16384 B raw loop back (was halved to 8192). The shared bank's freed pages are unused so far. A shorter drum also frees its track sooner. *Polyphony:* unchanged (drops and steals identical in all four variants). *Cost:* the last few dB of each tail (below 8-bit resolution); not yet listened to.
+- **`tremolo`** (trial `shared-trem`, 2026-11-09; **rejected and removed**: the organ pumped, its wobble being tonal, and no measurement predicts which sounds are safe). Replayed the MT-32's chorus/beating level modulation in the per-row `Cxx` of sounds whose 512 B averaged loop is flat ("Tremolo trial" below). *Gains:* MI159's chords pulse as in Munt instead of holding still. *Size:* `.NTP` unchanged (fixed cells); deflated patterns 92 → 93 KB; DOC unchanged. *Polyphony:* audible steals 181 → 185 (the quietest-release choice moves). Not yet listened to.
 - **`halt_released_loops`** (default on). Ends each release with a silent one-shot that stops the loop. *Gains:* no ghost of the previous note before a delayed note. *Cost:* one 256 B rest sample per set; per-song MI167 was at its page limit, so its Strings loop halved (16384 → 8192 B) until the drum trim freed pages.
 
 **Allocation** (`convert_song`, "Track allocation" below)
@@ -408,14 +409,50 @@ What each option buys and costs, as measured. Sizes are totals over all 16 songs
 - **Current 2 rows per unit, speed 3:** 45.7 % of notes start at the default volume for 1–2 ticks (median 1.6 dB off), timing error 7.7 ms, patterns 527 KB (before the plan).
 - **Finer rows** cure velocity loss (6 rows/unit: 0 %) but cost 2.8× the pattern data. **Row packing** (1 row/unit, speed 6) halves it (295 KB) at the same velocity and timing, but more than doubles steals. **More ticks per row** (2, 6) halves timing error and loses more velocity (67 %). Quantization is on hold.
 
+**Volume commands and size (measured 2026-11-09, shared, all songs).** NTP patterns are uncompressed fixed 4-byte cells (format above), so the per-row `Cxx` volume envelopes cost nothing in the `.NTP`: the size is set by tracks × patterns alone. Cells: 57 % empty, 28 % volume-only `Cxx`, 10 % note + `Cxx`, 4 % note + `EDx`, 0.5 % `Fxx`. They would cost under compression: patterns 505 KB raw, 92 KB deflated, **45 KB deflated without the volume-only cells**. So the envelopes are about half of any compressed music data, and they keep repeated sections from matching for pattern de-duplication. Their other cost is the single effect column (see "Velocity of delayed notes").
+
 **Current totals:**
 
 | variant | `.NTP` total | patterns | samples + header | largest |
 |---|---|---|---|---|
 | per-song | 1101 KB | 516 KB | 585 KB | MI160 132 KB |
 | shared | 1376 KB | 516 KB | 860 KB | MI160 134 KB |
-| per-song-lo | 1113 KB | 546 KB | 567 KB | MI160 139 KB |
-| shared-lo | 1386 KB | 545 KB | 841 KB | MI160 142 KB |
+
+## Tremolo trial (`shared-trem`, 2026-11-09; rejected and removed)
+User report: in Munt's MI159 the main chords have a slight tremolo. **It isn't in the MIDI:** MI159 has one CC7 and one CC10 per channel at the start, and no modulation, aftertouch, pitch bend or SysEx. **It's the patches:** Elec Org 2 (channel 3, the chords) and Chorale (channel 4) pulse by themselves while held.
+
+**Measured (Munt, 8 s holds, 2026-11-09):** the modulation is quasi-periodic beating, not an LFO. Its period changes erratically with key, and the autocorrelation peak is only 0.4–0.7:
+
+| sound | swing p5–p95, 35 ms smoothing | 70 ms | period by key (50…79) |
+|---|---|---|---|
+| Elec Org 2 | 8.9–10.8 dB | 6.5–10.0 dB | 0.28–1.35 s |
+| Chorale | 4.5–5.3 dB | 3.8–5.0 dB | 0.19–1.04 s |
+
+The organ also has sharp 20–40 ms dips (−11 dB) that no row rate can follow. **What we kept, MI159 loops:** per-song raw loops 9.4 dB (organ, 8192 B) and 6.4 dB (Chorale, 16384 B); shared 512 B averaged loops 0.0 dB. That flatness is by design, since a short raw slice of the wobble looped at 15 Hz ("Tremolo from short raw loops").
+
+**Trial (removed):** `tremolo` (sound names, per mode) recorded a trace for each key in the sound's range: dB of the 35 ms-smoothed envelope minus the 0.8 s contour (`tremolo_traces`), per 10 ms, faded in over 0.2–0.5 s. `env_at` multiplies each loop row by the trace of the nearest key, averaged over the row. So every chord voice pulses with its own key's pattern, as on the MT-32, and notes longer than the 8 s trace replay it from 1 s. It applies only to averaged (≤ `loop_bytes`) loops: raw loops already carry the motion. MI159's organ rows went from a held 4 to moving between 2 and 8. Those low volumes step by 1–2.5 dB, so the motion is coarse. The trace overshoots a pure sine's swing by about 1 dB, because the 0.8 s contour isn't a whole number of periods.
+
+**First listening (user, 2026-11-09): little difference in shared MI159.** Why, measured:
+- MI159's organ chords (channel 3) are staccato: 144 notes, median 0.21 s, none over 0.5 s. They're over before the trace fades in, and before one wobble period (0.3–1.3 s). Only 44 organ cells changed. In 0.2 s the MT-32 shows at most one of its sharp dips, which rows can't carry.
+- Chorale (channel 4: median 1.6 s, p90 3.2 s) does carry it: 554 cells changed, at its gentler 4–5 dB.
+- The one long organ note, a 40 s drone (channel 2, key 62), **faded to volume 1 after 2 s in every mode**. That was a bug, below.
+
+**Second listening (user, 2026-11-09):** the per-song organ "sounds really good" with the contour fix. The shared-trem organ has "a slightly off-putting mmmlllleeemmmlleemm sort of quality", worse than the flat shared one; audible in MI160. **Why, measured** (Munt, key 62, 8 s, STFT band levels over 0.8–7.5 s, p5–p95 swing):
+
+| band | Elec Org 2 | Chorale |
+|---|---|---|
+| overall | 10.1 dB | 5.6 dB |
+| 0–500 Hz | 2.5 | 7.0 |
+| 500–1000 Hz | 16.6 | 7.5 |
+| 1–2 kHz | 11.4 | 10.4 |
+| 2–4 kHz | 5.1 | 5.4 |
+| 4–8 kHz | 1.6 | 2.2 |
+
+The organ's fundamental hardly moves. Its 2nd–5th harmonics come and go (detuned copies beating), so the wobble is a change of tone, a slow wah, not of loudness. A `Cxx` tremolo on a fixed-tone loop moves the fundamental too, which is a pumping "mlem". Raw loops (per-song) record the tone change itself.
+
+**No general gate, so the trial was removed (2026-11-09).** The aim: decide per sound from a measurement, not from names, since the pipeline should serve other soundtracks too (user). The candidate was a "level share": the energy-weighted fraction of the band-level motion (6 octave bands, 0.8 s contour removed) that the overall level explains. It ranks the sounds the wrong way: Elec Organ 0.77 (rejected by ear) is above Shakuhachi 0.59, Chorale 0.53, Strings 0.51 and Fantasy 0.40. What sounds wrong is the fundamental being dragged along: it's quiet in energy terms but carries the pitch. The underlying limit is general: a `Cxx` tremolo on a fixed-tone loop changes loudness where the instrument changes tone. Only a raw loop carries that motion. Raw loops are already chosen by measurement, with no names: `is_steady`, the `raw_loop_ok` gate and usage-based growth.
+
+**Bug found: steady contours drooped at the sampled note-off (fixed 2026-11-09).** A sound's row contour comes from a 2 s render (`hold_seconds`). Its 0.8 s smoothing window reached past note-off into the release and pulled the last 0.4 s down: at 1.95 s, Elec Organ −14.5 dB, Strings −9.3, Chorale −4.0. Envelopes hold their last value, so **every steady note held past ~1.7 s played 4–14 dB too quiet** from then on, in every mode. The loop-only trial's quietness and MI153's quiet long organ notes may partly be this. **Fix:** `sustain_contour` smooths only the held part, up to onset + hold − 20 ms (smf2wav drops leading silence: `docs/iigs-midisynth.md`). The tremolo traces end there too; reaching 0.5 s into the release had given the drone a +14 dB spike at 7.3 s. **Effect:** the MI159 drone holds 4 (shared) instead of fading to 1. Per-song-and-instrument summed level rises up to +1.2 dB (MI153 Pipe Organ, MI159 Elec Organ/Chorale, MI165 Trombone/Shakuhachi, MI167 Strings); single long notes rise up to 14 dB. Polyphony: audible steals shared 181 → 184, per-song 282 → 284; drops unchanged.
 
 ## Track allocation (`convert_song`; current rules, 2026-11-07)
 NTP has no voice allocation: each MOD track owns its oscillators for the whole song (`determine_osc_per_track`). So `convert_song` assigns every note to a track itself, once, in onset order.
@@ -478,8 +515,8 @@ A track is *free* at row r when it isn't busy and its cell there is empty.
 
 **What the numbers mean:** `trk` and `osc` in the build log are the tracks and oscillators used. Overload remains where demand really exceeds 31: MI160 peaks at 44 oscillators, over budget for 9.6 % of the song, measured with notes ringing to note-off plus release. That's where its steals and 9–11 dropped Claves come from. Loop-only (1-oscillator) organ samples would cut that to 2.3 %; that's a proposal, not built.
 
-### Loop-only sounds (trial `per-song-lo` / `shared-lo`, 2026-11-08)
-`loop_only` (sound names, per mode) drops a sound's attack header, so it needs **1 oscillator** instead of 2. Ninjaforce's converter gives a looped MOD sample 1 oscillator when its loop starts at 0 and its length is a power of two (`modinstrument::get_instrument_type`, `ntpinstrument::get_osc_count`, `ntpconverter_lib.php:49`, `:337`). Such notes go on the 1-oscillator (drum) tracks; the envelope rows follow the contour from the onset. Loops are planned with the attack in place and the attack is removed afterwards, so the loop is byte-identical to the base mode and only the attack differs. The freed attack pages stay free (shared 237 → 233 pages).
+### Loop-only sounds (trial `per-song-lo` / `shared-lo`, 2026-11-08; rejected and removed 2026-11-09)
+The trial's `loop_only` (sound names, per mode) dropped a sound's attack header, so it needs **1 oscillator** instead of 2. Ninjaforce's converter gives a looped MOD sample 1 oscillator when its loop starts at 0 and its length is a power of two (`modinstrument::get_instrument_type`, `ntpinstrument::get_osc_count`, `ntpconverter_lib.php:49`, `:337`). Such notes go on the 1-oscillator (drum) tracks; the envelope rows follow the contour from the onset. Loops are planned with the attack in place and the attack is removed afterwards, so the loop is byte-identical to the base mode and only the attack differs. The freed attack pages stay free (shared 237 → 233 pages).
 
 **What the attack contributes,** measured against Munt over the first 300 ms (10 ms frames; tone distance = log-spectral distance after level-normalising each frame, 0–8 kHz; the 0–100 ms figure for attack + loop is the baseline):
 

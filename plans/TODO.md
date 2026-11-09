@@ -43,7 +43,10 @@ Overnight work list, 2026-11-07, in order. Commit after each item.
 - [ ] **Per-song raw-loop seams with deep modulation** (try looplab's seam search C + whole beat periods). Spectral flux shows a jump at the loop seam for Elec Organ (rotary wobble, ~1.8 Hz, 36% depth) and Shakuhachi, about 1 s in: the crossfade joins two different wobble phases. Candidates: choose the loop length/position so the seam falls at the same modulation phase (autocorrelation of the envelope), or a longer crossfade for those sounds.
 - [x] **MI167 drops 82 notes** (all percussion): track-type fragmentation; drums now borrow idle melodic tracks (`drum_borrow`). MI167 0, totals 105 -> 13 (per-song) / 11 (shared).
 - [x] Polyphony: steal the quietest release (2026-11-08; MI160 cut volume median 9 → 0), sparing parts of ≤ 2 active notes (`steal_protect`: bass, solos, duets; MI160 89 → 0 such cuts).
-- [~] Polyphony: loop-only (1-oscillator) Elec Organ: trial variants `per-song-lo` / `shared-lo` (drops 11 → 1, steals 262 → 195). Audible, more so in shared; user undecided (2026-11-08).
+- [x] Polyphony: loop-only (1-oscillator) Elec Organ: trial variants `per-song-lo` / `shared-lo` (drops 11 → 1, steals 262 → 195). Rejected by listening and removed (2026-11-09).
+- [x] Shared: replay the MT-32 chorus/beating tremolo in the `Cxx` rows: trial `shared-trem` (2026-11-09). Rejected and removed: the organ pumped (its wobble is tonal), and no measurement separates safe sounds.
+- [ ] Shared: spend free DOC pages (20 after the drum trim) on raw loops for steady sounds, using the per-song planner (usage over all songs, `raw_loop_ok` gate) instead of fixed 512 B loops.
+- [ ] Shared: choose the shortened attacks (`ntp_attack_bytes`, now hand-listed) by measured cost until the bank fits.
 - [x] Per-song song-sized one-shots: tried and rejected (2026-11-08): +100 KB samples, no polyphony gain, little audible difference.
 - [x] Polyphony: whole-song track planner (`plan_tracks`, 2026-11-08). Base modes were already at the best split; loop-only MI160 steals 195 → 81. Melodic one-shots may now use 1-oscillator tracks too: MI160 shared drops 9 → 0, steals 244 → 167.
 - [ ] **Quantization / row packing:** see `plans/ntp-quantization.md` (on hold; its tradeoff table comes first).

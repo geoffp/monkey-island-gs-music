@@ -390,6 +390,17 @@ def cc7_curve(smf2wav, roms, cache, program: int = 50, key: int = 67) -> tuple[n
     return np.array(CC7_POINTS, float), np.array(lv) / ref
 
 
+def sustain_contour(env: np.ndarray, held: int, win_s: float) -> np.ndarray:
+    """The envelope's slow contour (log-domain moving average over `win_s`) up to sample
+    `held` (the note-off), smoothed over the held part only: a window reaching past note-off
+    averaged the release in and pulled the last 0.4 s of the contour down (Elec Organ
+    -14.5 dB, Strings -9.3, Chorale -4.0 at 1.95 s), and envelopes hold their last value, so
+    every steady note held past ~1.7 s played that much too quiet. Near `held` the window
+    shrinks (`smooth`'s edge handling)."""
+    out = np.exp(smooth(np.log(np.maximum(env[:held], 1e-6)), int(win_s * mb.SR)))
+    return np.concatenate([out, np.full(max(0, len(env) - held), out[-1] if len(out) else 1.0)])
+
+
 def is_steady(env: np.ndarray, a: int, off: int, sustain_s: float, max_drop_db: float = 6.0) -> bool:
     """True if the sound holds its level from the sustain start to note-off (organs, strings,
     winds). Decaying sounds (marimba, bass, vibes) keep the short averaged loop: a raw
@@ -534,8 +545,11 @@ def build_samples(spec: dict, cfg: dict, key_ranges: dict[int, tuple[int, int]],
                                                              sustain_s, cfg.get("attack_xfade_cycles", 4.0),
                                                              raw=loop_bytes > cfg["loop_bytes"])
         e_loop = float(np.sqrt(np.mean(loop ** 2))) or 1e-9
-        # envelope after the attack, relative to the loop's own level
-        t = np.arange(int(att_end), off, int(0.01 * SR))
+        # envelope after the attack, relative to the loop's own level, up to the render's
+        # note-off (`off` = onset + hold: smf2wav drops the MIDI file's leading silence, so
+        # the note starts at the onset), less 20 ms for the onset threshold and RMS window
+        held = off - int(0.02 * SR)
+        t = np.arange(int(att_end), held, int(0.01 * SR))
         # Smooth in the log domain over 250 ms: MT-32 organs/strings have tremolo and partial
         # beating (Pipe Org 2: gain 0.7-2.3, ~4 Hz) that the static loop can't follow and that
         # per-row Cxx would alias into random jumps; exponential decays stay unbiased in log.
@@ -546,7 +560,7 @@ def build_samples(spec: dict, cfg: dict, key_ranges: dict[int, tuple[int, int]],
         win = 0.25
         if steady:
             win = max(cfg.get("env_smooth_steady_s", 0.8), loop_bytes / rate if loop_bytes > cfg["loop_bytes"] else 0.0)
-        contour = np.exp(smooth(np.log(np.maximum(env, 1e-6)), int(min(win, 1.5) * SR)))
+        contour = sustain_contour(env, held, min(win, 1.5))
         g = contour[t] / e_loop
         # the loop continues the attack's tail at gain 1; ease to the contour over 150 ms
         # (geometric: linear in dB) instead of jumping to it at the first loop row
@@ -601,20 +615,6 @@ def build_samples(spec: dict, cfg: dict, key_ranges: dict[int, tuple[int, int]],
                           seconds=nb / r1, tune_cents=0.0, level=peak)
             s.rate, s.max_loop = r1, 0
             rate = r1
-        # Loop-only (trial, `loop_only` = sound names): drop the attack header, so the sound needs
-        # 1 oscillator instead of 2 (NTP's converter: a loop starting at 0 with a power-of-two
-        # length). The note starts in the loop; the envelope rows follow the contour from the
-        # onset. The loop is the one the attack + loop build planned, so only the attack differs.
-        lonly = shot is None and m["name"] in cfg.get("loop_only", ())
-        if lonly:
-            lp = s.data[s.loop_start:] * s.level
-            pk = float(np.max(np.abs(lp))) or 1.0
-            t0 = np.arange(a, off, int(0.01 * SR))
-            s2 = ModSample(m["name"], lp / pk, loop_start=0, loop_len=len(lp), finetune=ft, base_note=n0,
-                           key0=m["key"], kind="melodic", env_t=(t0 - a) / SR, env_g=contour[t0] / e_loop,
-                           rel_g=s.rel_g, tune_cents=err, level=pk)
-            s2.steady, s2.rate, s2.cycles, s2.max_loop, s2.raw_ok = s.steady, s.rate, s.cycles, s.max_loop, s.raw_ok
-            s = s2
         s.vel_v, s.vel_g = velocity_response(lambda v: _render(smf2wav, roms, cache, program=m["program"],
                                                                  key=m["key"], hold=0.5, velocity=v))
         s.key_v, s.key_g = key_response(lambda kk: _render(smf2wav, roms, cache, program=m["program"],
@@ -634,7 +634,7 @@ def build_samples(spec: dict, cfg: dict, key_ranges: dict[int, tuple[int, int]],
             log(f"  {m['name']:<12} loop {loop_bytes:5d} B{' raw' if loop_bytes > cfg['loop_bytes'] else '    '} "
                 f"k={k:3d} rate {rate:7.0f} Hz note {n0:2d} ft {ft:+d} "
                 f"err {err:+5.1f} cents, swell x{g_max:.2f}, keys {lo}-{hi}, "
-                f"tremolo {loop_tremolo_db(loop, k):.1f} dB @ {rate / loop_bytes:.1f} Hz{', loop-only' if lonly else ''}")
+                f"tremolo {loop_tremolo_db(loop, k):.1f} dB @ {rate / loop_bytes:.1f} Hz")
 
     for d in spec["drum"]:
         x = _render(smf2wav, roms, cache, program=None, key=d["key"], hold=0.5)
@@ -1024,7 +1024,7 @@ def convert_song(path: Path, samples, programs, drums, cfg: dict, song_cfg: dict
         # 1-oscillator track first, else a free 2-oscillator one, and the track plan bounds how
         # many 1-oscillator tracks there are. Under first come that starved the percussion
         # (MI160: 16 -> 31-77 dropped), so "melodic" (2-oscillator tracks only) remains.
-        # Loop-only sounds need 1 oscillator: they share the 1-oscillator (drum) tracks.
+        # A loop starting at 0 needs 1 oscillator (converter rule): it shares the 1-oscillator tracks.
         flex = not s.loop_len and song_cfg.get("melodic_one_shots", cfg.get("melodic_one_shots", "any")) == "any"
         kind = "drum" if s.kind == "drum" or (s.loop_len and not s.loop_start) or flex else "melodic"
         # choose a track (docs/ninjatrackerplus.md "Track allocation")
@@ -1348,14 +1348,14 @@ def sample_set(spec: dict, cfg: dict, songs: list[tuple[list, dict]], last_page:
     # one-shot never takes more than its attack + loop and what it saves stays free (reserve)
     # instead of growing some other loop into a short raw loop.
     one_shots = cfg.get("one_shots", True)
-    samples, programs, drums = build(song_spec, {**cfg, "one_shots": False, "loop_only": ()})
+    samples, programs, drums = build(song_spec, {**cfg, "one_shots": False})
     usage: dict[int, float] = {}
     for prog, n in usage_notes:
         si = sample_for(programs, prog, n.key)
         if si is not None:
             usage[si] = usage.get(si, 0.0) + (n.off - n.t)
     sizes = plan_loops(samples, usage, last_page, cfg.get("max_loop_bytes", 16384))
-    if one_shots or cfg.get("loop_only") or any(sizes[i] != samples[i].loop_len for i in sizes):
+    if one_shots or any(sizes[i] != samples[i].loop_len for i in sizes):
         by_name = {samples[i].name: sz for i, sz in sizes.items()}
         song_spec = {**song_spec, "melodic": [{**m, "ntp_loop_bytes": by_name.get(m["name"], cfg["loop_bytes"])}
                                               for m in song_spec["melodic"]]}

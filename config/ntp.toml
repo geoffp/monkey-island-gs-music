@@ -67,16 +67,6 @@ ntp_attack_bytes = { "Elec Organ" = 1016, "Sax" = 1016, "Acou Bass" = 1016, "Vib
 # base = "shared"
 # loop_construction = "averaged"
 
-# Trial (2026-11-08): Elec Organ loop-only, so it needs 1 oscillator instead of 2 (MI160/MI152
-# overload). Same loops as the base mode; only the attack header is gone.
-[modes.per-song-lo]
-base = "per-song"
-loop_only = ["Elec Organ"]
-
-[modes.shared-lo]
-base = "shared"
-loop_only = ["Elec Organ"]
-
 # Per-song overrides, e.g.:
 # [songs.160]
 # rows_per_unit = 1

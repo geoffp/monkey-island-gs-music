@@ -636,3 +636,14 @@ def test_loop_construction_defaults_to_eprime_and_rejects_unknown_names():
     assert nm.loop_construction({"loop_construction": "averaged"}) == "averaged"
     with pytest.raises(ValueError, match="loop_construction"):
         nm.loop_construction({"loop_construction": "eprim"})
+
+
+def test_sustain_contour_does_not_droop_into_the_release():
+    # a steady note held 2 s, then a fast release: smoothing over the release pulled the last
+    # 0.4 s of the contour down, and envelopes hold their last value for longer notes
+    sr = nm.mb.SR
+    env = np.concatenate([np.ones(2 * sr), np.exp(-np.arange(sr) / (0.05 * sr))])
+    c = nm.sustain_contour(env, 2 * sr, 0.8)
+    assert 20 * np.log10(c[int(1.95 * sr)]) > -0.1
+    old = np.exp(nm.smooth(np.log(np.maximum(env, 1e-6)), int(0.8 * sr)))
+    assert 20 * np.log10(old[int(1.95 * sr)]) < -10                 # the old droop
