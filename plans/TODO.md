@@ -42,5 +42,7 @@ Overnight work list, 2026-11-07, in order. Commit after each item.
 ## Follow-ups found along the way
 - [ ] **Per-song raw-loop seams with deep modulation** (try looplab's seam search C + whole beat periods). Spectral flux shows a jump at the loop seam for Elec Organ (rotary wobble, ~1.8 Hz, 36% depth) and Shakuhachi, about 1 s in: the crossfade joins two different wobble phases. Candidates: choose the loop length/position so the seam falls at the same modulation phase (autocorrelation of the envelope), or a longer crossfade for those sounds.
 - [x] **MI167 drops 82 notes** (all percussion): track-type fragmentation; drums now borrow idle melodic tracks (`drum_borrow`). MI167 0, totals 105 -> 13 (per-song) / 11 (shared).
-- [ ] Polyphony: loop-only (1-oscillator) Elec Organ for MI160/MI152 overload; per-sound release lengths; steal the quietest release.
-- [ ] **Quantization / row packing:** see `plans/ntp-quantization.md` (deferred by the user).
+- [x] Polyphony: steal the quietest release (2026-11-08; MI160 cut volume median 9 → 0), sparing parts of ≤ 2 active notes (`steal_protect`: bass, solos, duets; MI160 89 → 0 such cuts).
+- [ ] Polyphony: loop-only (1-oscillator) Elec Organ for MI160/MI152 overload; per-sound release lengths.
+- [ ] **Quantization / row packing:** see `plans/ntp-quantization.md` (on hold; its tradeoff table comes first).
+- [ ] **Velocity of delayed notes, at no data cost:** 45.7 % of notes carry `EDx` and start at the sample's default volume until the next row (median 1.6 dB off; 24 % > 3 dB, 6 % > 6 dB; worst MI162, 164, 166). Per note, choose between keeping the delay and moving one tick to a row boundary with in-cell velocity, only when the velocity error is large (≳ 4 dB). Trades one tick (18–51 ms) of timing for the worst onsets. Measure both errors before and after.

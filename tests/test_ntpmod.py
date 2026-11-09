@@ -166,6 +166,54 @@ def test_channel_volume_and_swell_set_levels(tmp_path):
     assert b0 == pytest.approx(a0 * 0.35, abs=1.5)              # CC7 64 vs 100 per the curve
 
 
+def test_steals_take_the_quietest_release(tmp_path):
+    import mido
+    # two tracks only; a loud note releases first, a quiet one later; a third note needs a track
+    ev = [mido.Message("program_change", channel=ch, program=9) for ch in (1, 2, 3)]
+    ev += [mido.Message("note_on", channel=1, note=60, velocity=127),
+           mido.Message("note_on", channel=2, note=64, velocity=30),
+           mido.Message("note_off", channel=1, note=60, time=240),     # 1.0 s
+           mido.Message("note_off", channel=2, note=64, time=60),      # 1.25 s
+           mido.Message("note_on", channel=3, note=67, velocity=100, time=60),
+           mido.Message("note_off", channel=3, note=67, time=120)]
+    p = _song(tmp_path, ev)
+    s = _fake()
+    s.rel_g = np.linspace(1.0, 0.0, 101)                               # 1 s release ramp
+    cfg = {"rows_per_unit": 2, "speed": 3, "quantize": 0.0, "oscillators": 4,
+           "unit_ticks": 30, "phase_ticks": 0}
+    grid, _, rep = nm.convert_song(p, [s], {9: 0}, {}, cfg, dict(cfg))
+    assert rep.tracks_used == 2 and rep.dropped == 0 and rep.stolen == 1
+    played = [{c[0] for c in cells.values() if c[0] and c[1]} for cells in grid.cells]
+    quiet, third = s.base_note + 4 + 1, s.base_note + 7 + 1
+    assert any({quiet, third} <= notes for notes in played)               # the quiet tail was cut
+    assert 0 < rep.stolen_levels[0] < 20                                   # not the loud one (~30)
+
+
+def test_steals_spare_small_parts(tmp_path):
+    import mido
+    # a loud 3-note chord (channel 1) and a quiet bass note (channel 2) release together; a new
+    # note (channel 3) finds the 4-track budget full
+    ev = [mido.Message("program_change", channel=ch, program=9) for ch in (1, 2, 3)]
+    ev += [mido.Message("note_on", channel=1, note=k, velocity=127) for k in (60, 64, 67)]
+    ev += [mido.Message("note_on", channel=2, note=40, velocity=30)]
+    ev += [mido.Message("note_off", channel=1, note=k, time=240 if k == 60 else 0) for k in (60, 64, 67)]
+    ev += [mido.Message("note_off", channel=2, note=40),
+           mido.Message("note_on", channel=3, note=72, velocity=100, time=120),
+           mido.Message("note_off", channel=3, note=72, time=120)]
+    p = _song(tmp_path, ev)
+    s = _fake()
+    s.rel_g = np.linspace(1.0, 0.0, 101)
+    bass, new = s.base_note - 20 + 1, s.base_note + 12 + 1
+    for protect, victim_is_bass in ((0, True), (2, False)):
+        cfg = {"rows_per_unit": 2, "speed": 3, "quantize": 0.0, "oscillators": 8,
+               "unit_ticks": 30, "phase_ticks": 0, "steal_protect": protect}
+        grid, _, rep = nm.convert_song(p, [s], {9: 0}, {}, cfg, dict(cfg))
+        assert rep.tracks_used == 4 and rep.stolen == 1
+        played = [{c[0] for c in cells.values() if c[0] and c[1]} for cells in grid.cells]
+        assert any({bass, new} <= notes for notes in played) == victim_is_bass
+        assert rep.stolen_parts == [1 if victim_is_bass else 3]
+
+
 def test_tempo_commands_stay_on_the_ideal_grid():
     ideal, speed, rows, tol = 97.56, 3, 2000, 0.002
     ch = nm.tempo_commands(ideal, speed, rows, lambda r: True, tol)

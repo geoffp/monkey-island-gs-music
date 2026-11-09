@@ -366,7 +366,7 @@ There were about 3,500 such ghosts per build. Examples: MI152 ≈ 600, MI160 ≈
 
 **One cost:** per-song MI167 was exactly at its page limit, so the rest's page halved its Strings loop (16384 → 8192 B, about one beat long; it passes the tremolo gate).
 
-**Still open (theory 2):** steals, i.e. a releasing note cut for a new one, are abrupt on the DOC. NTP halts oscillators outright, with no declick ramp, where desktop players ramp over a few milliseconds. MI160 has about 620–780 of them.
+**Still open (theory 2):** steals, i.e. a releasing note cut for a new one, are abrupt on the DOC. NTP halts oscillators outright, with no declick ramp, where desktop players ramp over a few milliseconds. MI160 had about 620–780 of them; since 2026-11-08 most fall on a release that has already reached 0 (see "Track allocation", step 4).
 
 ## Track allocation (`convert_song`; current rules, 2026-11-07)
 NTP has no voice allocation: each MOD track owns its oscillators for the whole song (`determine_osc_per_track`). So `convert_song` assigns every note to a track itself, once, in onset order.
@@ -396,7 +396,17 @@ A track is *free* at row r when it isn't busy and its cell there is empty.
    | shared total | 105 → **11** → 22 | 726 → 729 → 706 |
 
    12 of 16 songs are byte-identical to before. MI167 82 → 0, MI151 4 → 0, MI150 1 → 0, MI160 16 → 9–11.
-4. **Steal:** a track of the same type that is only releasing (note-off passed). Take the one whose note-off came first, delete its remaining release rows, and play the new note there (`steal` in the build log). Steals are abrupt on the DOC, which has no declick (open item).
+4. **Steal:** a track of the same type that is only releasing (note-off passed). Take a silent one first, then one from a large part (below), then the **quietest** at this row (its latest `Cxx`), then the one nearest the end of its release, then the earliest note-off. Delete its remaining release rows and play the new note there. Steals are abrupt on the DOC, which has no declick (open item).
+   - *Changed 2026-11-08* from "the earliest note-off". Measured, that cut audible tails even when another candidate had already ramped to 0 and held only its final silence row (true in 71–82 % of steals in MI151, MI152, MI160). Volume of the stolen release at the cut, shared MI160: median 9 → **0**, p90 25 → **3**, max 55 → **23**; 90 % of cuts are now ≤ 2 of 64. Pattern size unchanged.
+   - The build log's `steal` counts only audible cuts (volume > 0); `st.vol` is the loudest cut in the song.
+   - **Spare small parts** (`steal_protect = 2`, 2026-11-08): among audible releases, prefer one whose part (MIDI channel) has more than 2 notes active (held or releasing, the victim included). A chord loses one voice of many; a bass line or a solo/duet keeps its tail. Order: silent release → part > `steal_protect` → quietest → nearest its end → earliest note-off. Shared MI160, audible cuts:
+
+     | | parts of 1–2 notes | Acou Bass | Panpipes | Fantasy | Elec Organ | Marimba | p90 / max cut volume |
+     |---|---|---|---|---|---|---|---|
+     | quietest only (0) | 89 | 47 | 39 | 11 | 120 | 21 | 11 / 23 |
+     | **spare ≤ 2 (2)** | **0** | 11 | 22 | 0 | 138 | 46 | 17 / 27 |
+
+     The cost moves to chord voices, cut slightly louder. The 11 bass cuts left are a fast line whose overlapping tails make 3+ active notes. Counting only *held* notes (plus the victim) was worse (Acou Bass 16, 78 cuts left on small parts): chord voices release together, so a releasing chord stops counting as large exactly when its tails are the ones to take.
 5. **Drop** the note. The build log lists drops per sound (`MInnn dropped (no oscillator): ...`).
 
 **What a note writes on its track:**
@@ -408,4 +418,4 @@ A track is *free* at row r when it isn't busy and its cell there is empty.
 - **Minimum:** at least 2 tracks.
 - **Control commands:** speed and tempo go in row 0, and `B00` in the last row.
 
-**What the numbers mean:** `trk` and `osc` in the build log are the tracks and oscillators used. Overload remains where demand really exceeds 31: MI160 peaks at 44 oscillators, over budget for 9.6 % of the song, measured with notes ringing to note-off plus release. That's where its ~630–780 steals and 9–11 dropped Claves come from. Loop-only (1-oscillator) organ samples would cut that to 2.3 %; that's a proposal, not built.
+**What the numbers mean:** `trk` and `osc` in the build log are the tracks and oscillators used. Overload remains where demand really exceeds 31: MI160 peaks at 44 oscillators, over budget for 9.6 % of the song, measured with notes ringing to note-off plus release. That's where its steals and 9–11 dropped Claves come from. Loop-only (1-oscillator) organ samples would cut that to 2.3 %; that's a proposal, not built.

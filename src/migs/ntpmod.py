@@ -752,6 +752,8 @@ class Report:
     tracks_used: int = 0
     oscillators: int = 0
     stolen: int = 0
+    stolen_levels: list = field(default_factory=list)   # MOD volume each stolen release had at the cut
+    stolen_parts: list = field(default_factory=list)    # notes active in the stolen note's part (channel)
     rows: int = 0
     patterns: int = 0
     tempo: int = 0
@@ -886,13 +888,28 @@ def convert_song(path: Path, samples, programs, drums, cfg: dict, song_cfg: dict
     trk_off: list[int] = []         # note-off row of the current melodic note (-1: drum)
     trk_oneshot_end: list[float] = []
     trk_kind: list[str] = []
+    trk_chan: list[int] = []        # MIDI channel of the current note
     osc_used = 0
     err_sum = 0.0
+
+    def level_at(tr: int, r: int) -> int:
+        """MOD volume track `tr` plays at row r: its latest Cxx (or a delayed note's default)."""
+        cells = grid.cells[tr]
+        for rr in range(r, -1, -1):
+            c = cells.get(rr)
+            if c is None:
+                continue
+            if c[2] == 0xC:
+                return c[3]
+            if c[0] and c[1]:
+                return samples[c[1] - 1].default_volume
+        return 0
 
     def new_track(kind: str) -> int:
         nonlocal osc_used
         grid.cells.append({})
-        for lst, val in ((trk_inst, 0), (trk_busy, -1), (trk_off, -1), (trk_oneshot_end, -1.0), (trk_kind, kind)):
+        for lst, val in ((trk_inst, 0), (trk_busy, -1), (trk_off, -1), (trk_oneshot_end, -1.0), (trk_kind, kind),
+                         (trk_chan, -1)):
             lst.append(val)
         osc_used += 1 if kind == "drum" else 2
         return len(grid.cells) - 1
@@ -978,10 +995,21 @@ def convert_song(path: Path, samples, programs, drums, cfg: dict, song_cfg: dict
                 rep.dropped += 1
                 rep.dropped_by[s.name] = rep.dropped_by.get(s.name, 0) + 1
                 continue
-            tr = min(releasing, key=lambda t: trk_off[t])
+            # A release already at volume 0 (only its final silence row left) costs nothing. Then
+            # prefer a part playing more than `steal_protect` notes (a chord loses one voice of
+            # many; a bass line or a solo/duet keeps its tail); then the quietest release, then
+            # the one nearest its end. The earliest note-off cut audible tails instead.
+            def part_size(t: int) -> int:
+                return sum(1 for u in tracks if trk_chan[u] == trk_chan[t] and trk_busy[u] >= r)
+            protect = song_cfg.get("steal_protect", cfg.get("steal_protect", 0))
+            tr = min(releasing, key=lambda t: (level_at(t, r) > 0, part_size(t) <= protect,
+                                               level_at(t, r), trk_busy[t], trk_off[t]))
+            rep.stolen_parts.append(part_size(tr))
+            cut = level_at(tr, r)
+            rep.stolen_levels.append(cut)
             for row in [x for x in grid.cells[tr] if x >= r]:
                 del grid.cells[tr][row]
-            rep.stolen += 1
+            rep.stolen += cut > 0                    # level 0: only the release's final silence row
         same = trk_inst[tr] == si + 1
         vf = 64 * amp(s, n) / ref                    # unrounded, for the envelope rows
         v = vol_for(s, n)
@@ -1005,6 +1033,7 @@ def convert_song(path: Path, samples, programs, drums, cfg: dict, song_cfg: dict
                 rep.vel_default += 1
             cell[2], cell[3] = 0xE, 0xD0 | d
         trk_inst[tr] = si + 1
+        trk_chan[tr] = n.channel
         last = r
         trk_off[tr] = -1
         if not s.loop_len:
@@ -1285,12 +1314,12 @@ def main(argv: list[str] | None = None) -> int:
         (args.out_dir / f"MI{sid}.mod").write_bytes(mod_file(f"MI1 {sid}", samples, grid, patterns, tables))
         reports.append((sid, rep))
     print(f"{'song':<6} {'tempo':>5} {'spd':>3} {'row ms':>6} {'pat':>3} {'trk':>3} {'osc':>3} {'notes':>5} "
-          f"{'drop':>4} {'steal':>5} {'tchg':>4} {'delay':>5} {'v:cell':>6} {'v:prev':>6} {'v:dflt':>6} {'err ms':>6} {'halt':>5}")
+          f"{'drop':>4} {'steal':>5} {'tchg':>4} {'delay':>5} {'v:cell':>6} {'v:prev':>6} {'v:dflt':>6} {'err ms':>6} {'halt':>5} {'st.vol':>6}")
     for sid, rep in reports:
         print(f"{sid:<6} {rep.tempo:5d} {rep.speed:3d} {rep.row_ms:6.1f} {rep.patterns:3d} {rep.tracks_used:3d} "
               f"{rep.oscillators:3d} {rep.notes:5d} {rep.dropped:4d} {rep.stolen:5d} {rep.tempo_changes:4d} {rep.delayed:5d} "
               f"{rep.vel_in_cell:6d} {rep.vel_preceding:6d} "
-              f"{rep.vel_default:6d} {rep.timing_err_ms:6.1f} {rep.halted:5d}")
+              f"{rep.vel_default:6d} {rep.timing_err_ms:6.1f} {rep.halted:5d} {max(rep.stolen_levels, default=0):6d}")
     for sid, rep in reports:
         if rep.dropped_by:
             print(f"MI{sid} dropped (no oscillator): " + ", ".join(f"{k} {v}" for k, v in sorted(rep.dropped_by.items(), key=lambda kv: -kv[1])))
