@@ -419,3 +419,23 @@ A track is *free* at row r when it isn't busy and its cell there is empty.
 - **Control commands:** speed and tempo go in row 0, and `B00` in the last row.
 
 **What the numbers mean:** `trk` and `osc` in the build log are the tracks and oscillators used. Overload remains where demand really exceeds 31: MI160 peaks at 44 oscillators, over budget for 9.6 % of the song, measured with notes ringing to note-off plus release. That's where its steals and 9–11 dropped Claves come from. Loop-only (1-oscillator) organ samples would cut that to 2.3 %; that's a proposal, not built.
+
+### Loop-only sounds (trial `per-song-lo` / `shared-lo`, 2026-11-08)
+`loop_only` (sound names, per mode) drops a sound's attack header, so it needs **1 oscillator** instead of 2. Ninjaforce's converter gives a looped MOD sample 1 oscillator when its loop starts at 0 and its length is a power of two (`modinstrument::get_instrument_type`, `ntpinstrument::get_osc_count`, `ntpconverter_lib.php:49`, `:337`). Such notes go on the 1-oscillator (drum) tracks; the envelope rows follow the contour from the onset. Loops are planned with the attack in place and the attack is removed afterwards, so the loop is byte-identical to the base mode and only the attack differs. The freed attack pages stay free (shared 237 → 233 pages).
+
+**What the attack contributes,** measured against Munt over the first 300 ms (10 ms frames; tone distance = log-spectral distance after level-normalising each frame, 0–8 kHz; the 0–100 ms figure for attack + loop is the baseline):
+
+| sound | rise to −3 dB | tone 0–100 ms, attack + loop → loop-only | 100–300 ms |
+|---|---|---|---|
+| Elec Organ | 10 ms | 6.6 → 8.8 dB | 8.1 → 8.1 |
+| Trombone | 20 ms | 6.3 → 8.7 | 6.3 → 6.3 |
+| Sax | 30 ms | 7.5 → 9.3 | 7.1 → 7.1 |
+| Pipe Organ | 40 ms | 7.0 → 9.7 | 6.8 → 7.0 |
+| Chorale | 80 ms | 2.1 → 13.6 | 11.0 → 10.9 |
+| Panpipes | 30 ms | 0.9 → 26.6 | 15.2 → 16.9 |
+
+Panpipes, Chorale and Strings (190 ms swell) are out. Elec Organ also starts 5.4 dB above its sustain for about 50 ms, which a loop-only note loses.
+
+**Elec Organ loop-only, all songs:** drops 11 → 1 (shared) and 13 → 1 (per-song); audible steals 262 → 195 and 368 → 198; MI160 drops 9–11 → 0; loudest cut 27 → 30.
+
+**Listening (user, 2026-11-08):** the change is clearly audible, much more so in the shared version (its 512 B averaged loop has none of the per-song raw loop's movement, so the missing attack stands out). Kept as a trial; undecided.

@@ -97,6 +97,8 @@ class ModSample:
             return 1 << max(8, math.ceil(math.log2(n)))
         def with_stoppers(n):
             return n if n in (256, 512, 1024, 2048, 4096, 8192, 16384, 32768) else n + STOPPER
+        if self.loop_len and not self.loop_start:                # loop-only: 1 oscillator
+            return [block(with_stoppers(self.loop_len))]
         if self.loop_len:
             return [block(with_stoppers(self.loop_start)), block(with_stoppers(self.loop_len))]
         return [block(with_stoppers(len(self.data)))]
@@ -453,7 +455,7 @@ def plan_loops(samples: list[ModSample], usage: dict[int, float], last_page: int
         for i, s in enumerate(samples):
             b = s.ntp_blocks()
             if i in sz:
-                b = [b[0], sz[i]]
+                b = [sz[i]] if not s.loop_start else [b[0], sz[i]]
             blocks += b
         try:
             mb.allocate([mb.Wave(f"b{j}", bytes(b)) for j, b in enumerate(blocks)], 0, last_page)
@@ -528,7 +530,8 @@ def build_samples(spec: dict, cfg: dict, key_ranges: dict[int, tuple[int, int]],
         win = 0.25
         if steady:
             win = max(cfg.get("env_smooth_steady_s", 0.8), loop_bytes / rate if loop_bytes > cfg["loop_bytes"] else 0.0)
-        g = np.exp(smooth(np.log(np.maximum(env, 1e-6)), int(min(win, 1.5) * SR)))[t] / e_loop
+        contour = np.exp(smooth(np.log(np.maximum(env, 1e-6)), int(min(win, 1.5) * SR)))
+        g = contour[t] / e_loop
         # the loop continues the attack's tail at gain 1; ease to the contour over 150 ms
         # (geometric: linear in dB) instead of jumping to it at the first loop row
         w = np.clip((t - att_end) / (cfg.get("handover_s", 0.15) * SR), 0.0, 1.0)
@@ -582,6 +585,20 @@ def build_samples(spec: dict, cfg: dict, key_ranges: dict[int, tuple[int, int]],
                           seconds=nb / r1, tune_cents=0.0, level=peak)
             s.rate, s.max_loop = r1, 0
             rate = r1
+        # Loop-only (trial, `loop_only` = sound names): drop the attack header, so the sound needs
+        # 1 oscillator instead of 2 (NTP's converter: a loop starting at 0 with a power-of-two
+        # length). The note starts in the loop; the envelope rows follow the contour from the
+        # onset. The loop is the one the attack + loop build planned, so only the attack differs.
+        lonly = shot is None and m["name"] in cfg.get("loop_only", ())
+        if lonly:
+            lp = s.data[s.loop_start:] * s.level
+            pk = float(np.max(np.abs(lp))) or 1.0
+            t0 = np.arange(a, off, int(0.01 * SR))
+            s2 = ModSample(m["name"], lp / pk, loop_start=0, loop_len=len(lp), finetune=ft, base_note=n0,
+                           key0=m["key"], kind="melodic", env_t=(t0 - a) / SR, env_g=contour[t0] / e_loop,
+                           rel_g=s.rel_g, tune_cents=err, level=pk)
+            s2.steady, s2.rate, s2.cycles, s2.max_loop, s2.raw_ok = s.steady, s.rate, s.cycles, s.max_loop, s.raw_ok
+            s = s2
         s.vel_v, s.vel_g = velocity_response(lambda v: _render(smf2wav, roms, cache, program=m["program"],
                                                                  key=m["key"], hold=0.5, velocity=v))
         s.key_v, s.key_g = key_response(lambda kk: _render(smf2wav, roms, cache, program=m["program"],
@@ -601,7 +618,7 @@ def build_samples(spec: dict, cfg: dict, key_ranges: dict[int, tuple[int, int]],
             log(f"  {m['name']:<12} loop {loop_bytes:5d} B{' raw' if loop_bytes > cfg['loop_bytes'] else '    '} "
                 f"k={k:3d} rate {rate:7.0f} Hz note {n0:2d} ft {ft:+d} "
                 f"err {err:+5.1f} cents, swell x{g_max:.2f}, keys {lo}-{hi}, "
-                f"tremolo {loop_tremolo_db(loop, k):.1f} dB @ {rate / loop_bytes:.1f} Hz")
+                f"tremolo {loop_tremolo_db(loop, k):.1f} dB @ {rate / loop_bytes:.1f} Hz{', loop-only' if lonly else ''}")
 
     for d in spec["drum"]:
         x = _render(smf2wav, roms, cache, program=None, key=d["key"], hold=0.5)
@@ -976,7 +993,8 @@ def convert_song(path: Path, samples, programs, drums, cfg: dict, song_cfg: dict
         # Melodic one-shots (Xylophone) use melodic tracks like looped sounds: measured, putting
         # them on 1-oscillator drum tracks starved the percussion (MI160: 16 -> 31-77 dropped
         # notes). Their gain is a track that frees when the sample ends: MI162 8 -> 0 dropped.
-        kind = "drum" if s.kind == "drum" else "melodic"
+        # loop-only sounds need 1 oscillator: they share the 1-oscillator (drum) tracks
+        kind = "drum" if s.kind == "drum" or (s.loop_len and not s.loop_start) else "melodic"
         # choose a track (docs/ninjatrackerplus.md "Track allocation")
         tracks = range(len(grid.cells))
         free = lambda k: [tr for tr in tracks if trk_kind[tr] == k and trk_busy[tr] < r and grid.free(tr, r)]
@@ -1216,14 +1234,14 @@ def sample_set(spec: dict, cfg: dict, songs: list[tuple[list, dict]], last_page:
     # one-shot never takes more than its attack + loop and what it saves stays free (reserve)
     # instead of growing some other loop into a short raw loop.
     one_shots = cfg.get("one_shots", True)
-    samples, programs, drums = build(song_spec, {**cfg, "one_shots": False})
+    samples, programs, drums = build(song_spec, {**cfg, "one_shots": False, "loop_only": ()})
     usage: dict[int, float] = {}
     for prog, n in usage_notes:
         si = sample_for(programs, prog, n.key)
         if si is not None:
             usage[si] = usage.get(si, 0.0) + (n.off - n.t)
     sizes = plan_loops(samples, usage, last_page, cfg.get("max_loop_bytes", 16384))
-    if one_shots or any(sizes[i] != samples[i].loop_len for i in sizes):
+    if one_shots or cfg.get("loop_only") or any(sizes[i] != samples[i].loop_len for i in sizes):
         by_name = {samples[i].name: sz for i, sz in sizes.items()}
         song_spec = {**song_spec, "melodic": [{**m, "ntp_loop_bytes": by_name.get(m["name"], cfg["loop_bytes"])}
                                               for m in song_spec["melodic"]]}

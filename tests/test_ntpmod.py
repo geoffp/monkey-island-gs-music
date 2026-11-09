@@ -214,6 +214,25 @@ def test_steals_spare_small_parts(tmp_path):
         assert rep.stolen_parts == [1 if victim_is_bass else 3]
 
 
+def test_loop_only_sounds_take_one_oscillator(tmp_path):
+    import mido
+    # two overlapping notes, 2 oscillators: attack + loop fits one note, loop-only fits both
+    ev = [mido.Message("program_change", channel=1, program=9),
+          mido.Message("note_on", channel=1, note=60, velocity=100),
+          mido.Message("note_on", channel=1, note=64, velocity=100, time=60),
+          mido.Message("note_off", channel=1, note=60, time=120),
+          mido.Message("note_off", channel=1, note=64, time=0)]
+    p = _song(tmp_path, ev)
+    lo = nm.ModSample("lo", np.zeros(512), loop_start=0, loop_len=512, base_note=30, key0=60,
+                      env_t=np.array([0.0, 1.0]), env_g=np.array([1.0, 0.5]), rel_g=np.array([1.0, 0.0]))
+    assert lo.ntp_blocks() == [512]
+    cfg = {"rows_per_unit": 2, "speed": 3, "quantize": 0.0, "oscillators": 2, "unit_ticks": 30, "phase_ticks": 0}
+    _, _, rep = nm.convert_song(p, [_fake()], {9: 0}, {}, cfg, dict(cfg))
+    assert rep.dropped == 1
+    _, _, rep = nm.convert_song(p, [lo], {9: 0}, {}, cfg, dict(cfg))
+    assert rep.dropped == 0 and rep.track_kinds == ["drum", "drum"] and rep.oscillators == 2
+
+
 def test_tempo_commands_stay_on_the_ideal_grid():
     ideal, speed, rows, tol = 97.56, 3, 2000, 0.002
     ch = nm.tempo_commands(ideal, speed, rows, lambda r: True, tol)
