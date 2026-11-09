@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from migs import midisynth as ms
 from migs.midisynth import END_OF_SEQ, SEQ_HEADER_SIZE, Bank, Instrument, SeqItem, Sequence
 
 STOCK = Path(__file__).resolve().parents[1] / "vendor" / "synthlab"
@@ -111,3 +112,14 @@ def test_bank_and_wave_writers_round_trip():
     assert len(wraw) == 67840
     wb = WaveBank.from_bytes(wraw)
     assert wb.waves == {0x10: ("Sine", 0)} and wb.ram == bytes(ram)
+
+
+def test_build_silences_generator_2_and_items_reject_three_data_bytes():
+    env = ms.envelope()
+    wl = ms.wavelist(127, 0, (0x10, 3, 200, 4, 0, 0), (0x20, 3, 150, 4, 0, 0))
+    inst = ms.Instrument.build("Test", (env, [wl]))
+    gen2 = inst.raw[144:]
+    assert gen2[16 + 6] == 0 and gen2[16 + 12] == 0          # both oscillator volumes off
+    assert gen2[16:16 + 6] == wl[:6] and gen2[16 + 7:16 + 12] == wl[7:12]
+    with pytest.raises(ValueError):
+        ms.SeqItem(0, 0, 0x90, bytes(3)).pack()
