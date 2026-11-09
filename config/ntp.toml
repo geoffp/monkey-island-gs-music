@@ -26,12 +26,27 @@ raw_loop_slow_hz = 2.0  # a raw loop size is used only if it repeats at most thi
 raw_loop_max_tremolo_db = 1.0  # 1.1 Hz), or is as clean as the averaged loop: cycle levels within
 raw_loop_max_buzz_db = -50.0   # this range and loop-rate content below this. Else it adds a tremolo
                         # or buzz (shared Elec Organ 1024 B: 6.3 dB at 15 Hz; Trombone 1024 B: -39 dB)
+raw_loop_tune_cents = 1.0  # raw loops take the highest rate tuned within this (0: the closest tuning, which
+                        # landed anywhere in the window: Panpipes 16384 B at 14.9 kHz, Elec Organ 8192 B at
+                        # 9.2 kHz; the attack shares the rate). Not clean there: the highest that repeats
+                        # at most raw_loop_slow_hz
+raw_loop_max_rate_drop = 0.1  # a raw loop's rate at most this far below the short loop's (Sax 8192 B at
+                        # 16.3 kHz scored 1.4 dB worse than 512 B at 18.9 kHz; Elec Organ's 8192 B wobble
+                        # loop at 15.7 kHz is 6 % below)
 reserve_pages = 16      # DOC pages kept free for game sound effects (4 KB)
 sustain_s = 0.4         # where the loop's cycles are taken (s after onset): the steady sustain,
                         # not the attack's end (organs build their fundamental after ~0.12 s)
 min_rate = 9000         # sample-rate window for melodic samples (Hz)
 max_rate = 22000
 release_max = 0.3       # seconds of release ramp after note-off
+pitch_plan = false       # choose each sound's sampled key(s), key zones and short-loop rate from
+                        # the notes its songs play (pitchplan, measured with docsim against Munt);
+                        # off: config/mt32bank.toml's fixed key. Trial modes *-pitch turn it on
+pitch_move_gain_db = 0.5  # a single sample moves off the configured key only if this lowers the error
+                        # (the measure covers the first 0.6 s, not the loop the move changes)
+pitch_max_zones = 3     # samples (key zones) one sound may get, each an attack + loop and a MOD slot
+pitch_zone_gain_db = 1.0  # an extra zone must lower its sound's mean error by this much; zones take
+                        # DOC RAM before loop growth
 env_max_rise_db = 1.5   # a held note's per-row Cxx rises at most this much (at least one step);
                         # the DOC applies volume instantly, so beating contours (French Horn) pumped
                         # in jumps. Falls are not limited (real decays). 0 = off. docs/ninjatrackerplus.md
@@ -70,6 +85,15 @@ ntp_attack_bytes = { "Elec Organ" = 1016, "Sax" = 1016, "Acou Bass" = 1016, "Vib
 # [modes.shared-avg]
 # base = "shared"
 # loop_construction = "averaged"
+
+# Sampled keys, zones and rates chosen from the notes played (pitch_plan; 2026-11-09)
+[modes.per-song-pitch]
+base = "per-song"
+pitch_plan = true
+
+[modes.shared-pitch]
+base = "shared"
+pitch_plan = true
 
 # Per-song overrides, e.g.:
 # [songs.160]

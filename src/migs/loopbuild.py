@@ -183,12 +183,9 @@ def loop_power(x: np.ndarray, lo: float, hi: float, period: float, k: int, out: 
     return cycle_at_rate(harmonic_cycle(x, lo, hi, period, phase_at=at), k, out)
 
 
-def zero_start_exact(loop: np.ndarray, c: int, iters: int = 8) -> np.ndarray:
-    """Rotate a periodic loop so a rising zero crossing of its *band-limited* waveform lands
-    on index 0. ntpsamples.zero_start puts the linear-interpolation crossing there and then forces
-    loop[0] = 0; on steep or short cycles the band-limited value there isn't 0 (Strings at 32
-    samples/cycle: -0.012, i.e. 1 LSB), so one sample per pass was wrong: a loop-rate buzz.
-    Newton steps on the Fourier series find the true crossing; the forced 0 is then exact."""
+def exact_crossing(loop: np.ndarray, p0: float, iters: int = 8) -> tuple[float, float]:
+    """(position, slope per sample) of the band-limited waveform's zero crossing nearest p0
+    (samples, fractional): Newton steps on the loop's Fourier series."""
     n = len(loop)
     X = np.fft.rfft(loop)
     f = np.fft.rfftfreq(n, 1 / n)
@@ -200,8 +197,7 @@ def zero_start_exact(loop: np.ndarray, c: int, iters: int = 8) -> np.ndarray:
     def val(p):
         e = X * np.exp(2j * np.pi * f * p / n)
         return float(np.sum(wgt * e.real)) / n, float(np.sum(wgt * (e * 2j * np.pi * f / n).real)) / n
-    y0, y1 = loop[(c - 1) % n], loop[c]
-    p = (c - 1) + (-y0 / (y1 - y0) if y1 != y0 else 1.0)
+    p, d = p0, 0.0
     for _ in range(iters):
         v, d = val(p)
         if d == 0:
@@ -210,10 +206,40 @@ def zero_start_exact(loop: np.ndarray, c: int, iters: int = 8) -> np.ndarray:
         p -= float(np.clip(step, -0.5, 0.5))
         if abs(step) < 1e-9:
             break
-    out = np.fft.irfft(X * np.exp(2j * np.pi * f * p / n), n)
+    return p, d
+
+
+def rising_crossings(loop: np.ndarray, below: float, over: int = 8) -> list[tuple[float, float]]:
+    """(position, slope) of the band-limited waveform's rising zero crossings before `below`
+    (samples). Found on the `over`-times oversampled waveform: a crossing between two samples
+    of the same sign (a shallow dip below zero) is a real crossing too."""
+    n = len(loop)
+    up = resample(loop, n * over)
+    j = np.nonzero((np.roll(up, 1) < 0) & (up >= 0))[0]
+    out = [exact_crossing(loop, (int(i) - 1 + (-up[i - 1] / (up[i] - up[i - 1]))) / over) for i in j
+           if i / over < below]
+    return [(p % n, d) for p, d in out if d > 0]
+
+
+def rotate_to(loop: np.ndarray, p: float) -> np.ndarray:
+    """The periodic loop rotated so position p (a zero crossing) lands on index 0, set to 0."""
+    n = len(loop)
+    f = np.fft.rfftfreq(n, 1 / n)
+    out = np.fft.irfft(np.fft.rfft(loop) * np.exp(2j * np.pi * f * p / n), n)
     out[0] = 0.0
     return out
 
+
+def zero_start_exact(loop: np.ndarray, c: int, iters: int = 8) -> np.ndarray:
+    """Rotate a periodic loop so a rising zero crossing of its *band-limited* waveform lands
+    on index 0. ntpsamples.zero_start puts the linear-interpolation crossing there and then forces
+    loop[0] = 0; on steep or short cycles the band-limited value there isn't 0 (Strings at 32
+    samples/cycle: -0.012, i.e. 1 LSB), so one sample per pass was wrong: a loop-rate buzz.
+    Newton steps on the Fourier series find the true crossing; the forced 0 is then exact."""
+    n = len(loop)
+    y0, y1 = loop[(c - 1) % n], loop[c]
+    p0 = (c - 1) + (-y0 / (y1 - y0) if y1 != y0 else 1.0)
+    return rotate_to(loop, exact_crossing(loop, p0, iters)[0])
 
 def join_aligned(x: np.ndarray, a: int, period: float, rate: float, k: int, attack_bytes: int,
                  loop: np.ndarray, xfade_cycles: float = 4.0, steps: int = 64) -> tuple[np.ndarray, np.ndarray]:
@@ -225,9 +251,19 @@ def join_aligned(x: np.ndarray, a: int, period: float, rate: float, k: int, atta
     L = len(loop)
     n = min(attack_bytes // 4, max(4, int(round(xfade_cycles * L / k))))
     src_len = attack_bytes / rate * SR                      # source samples the attack covers
-    idx = np.nonzero((np.roll(loop, 1) < 0) & (loop >= 0))[0]
-    c = int(idx[0]) if len(idx) else int(np.argmin(np.abs(loop)))
-    loop = zero_start_exact(loop, c)
+    # The gentlest rising crossing (band-limited slope) in the first cycle: the DOC hands over
+    # from the attack oscillator to the loop's with a sub-sample slip (it reads the attack's
+    # 0 stopper byte, the loop starts at phase 0), and the slip costs the waveform's slope
+    # there. The first crossing was often the steepest: shared-pitch Pipe Organ stepped 74
+    # (its largest step) where a crossing of a quarter that slope was on offer, and clicked
+    # on every note in KEGS. Only the first cycle: a raw loop's level moves (wobble), and the
+    # loop is level-matched to the attack around its start.
+    cross = rising_crossings(loop, max(1.0, L / k))
+    if cross:
+        loop = rotate_to(loop, min(cross, key=lambda c: c[1])[0])
+    else:
+        idx = np.nonzero((np.roll(loop, 1) < 0) & (loop >= 0))[0]
+        loop = zero_start_exact(loop, int(idx[0]) if len(idx) else int(np.argmin(np.abs(loop))))
     ext = loop[np.arange(-n, 0) % L]                        # the loop's continuation before index 0
     tpos = np.arange(-n, 0) * (SR / rate)                   # those points, in source samples
 

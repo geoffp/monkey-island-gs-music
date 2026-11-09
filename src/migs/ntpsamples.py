@@ -31,6 +31,7 @@ PAL = 7093789.2 / 2                       # Amiga PAL clock / 2: rate = PAL / pe
 STOPPER = 8                               # bytes NTP appends to a non-power-of-two block
 NOTES = 72                                # NTP/ProTracker 6-octave table
 BLOCK_SIZES = tuple(256 << i for i in range(8))   # 256 B .. 32 KB
+MAX_SAMPLES = 31                          # a MOD's sample slots
 
 
 # ---------------------------------------------------------------------------
@@ -100,11 +101,15 @@ def ntp_block(n: int) -> int:
 
 
 def best_tuning(freq: float, tables, min_rate, max_rate, loop_bytes, key0, key_lo, key_hi,
-                whole_cycles: bool = False) -> tuple[float, int, float, int, int]:
+                whole_cycles: bool = False, high_within_cents: float | None = None
+                ) -> tuple[float, int, float, int, int]:
     """(err_cents, k, rate, base_note, finetune): `loop_bytes` = k periods at `rate`, played
     by note base_note with finetune so that period gives exactly that rate. `whole_cycles`:
     only k that divide loop_bytes (every cycle the same whole number of samples, so the k
-    cycles stay identical after 8-bit rounding: no loop-rate buzz)."""
+    cycles stay identical after 8-bit rounding: no loop-rate buzz). `high_within_cents`: the
+    highest rate tuned within this many cents (else the closest tuning). A long loop has
+    hundreds of k, and the closest of them is anywhere in the window: Panpipes 16384 B at
+    14903 Hz, Elec Organ 8192 B at 9165 Hz, where the rate costs the attack too."""
     ks = np.arange(max(1, math.ceil(loop_bytes * freq / max_rate)), math.floor(loop_bytes * freq / min_rate) + 1)
     if whole_cycles:
         ks = ks[loop_bytes % ks == 0]
@@ -117,6 +122,12 @@ def best_tuning(freq: float, tables, min_rate, max_rate, loop_bytes, key0, key_l
     rates = loop_bytes * freq / ks                                        # (k,)
     err = 1200 * np.log2((PAL / per)[None, :, :] / rates[:, None, None])  # (k, finetune, note)
     a = np.where(valid[None, None, :], np.abs(err), np.inf)
+    if high_within_cents is not None:
+        tuned = np.nonzero(a.min(axis=(1, 2)) <= high_within_cents)[0]
+        if len(tuned):                                                # ks ascend: rates descend
+            ki = int(tuned[0])
+            fi, ni = np.unravel_index(int(np.argmin(a[ki])), a[ki].shape)
+            return float(err[ki, fi, ni]), int(ks[ki]), float(rates[ki]), int(ni), fts[fi]
     # first minimum in (k, finetune, note) scan order, as the original nested loops chose
     ki, fi, ni = np.unravel_index(int(np.argmin(a)), a.shape)
     return float(err[ki, fi, ni]), int(ks[ki]), float(rates[ki]), int(ni), fts[fi]
@@ -229,6 +240,12 @@ def attack_and_loop(x: np.ndarray, a: int, period: float, rate: float, k: int, a
         at -= 0.01 * SR
     at = max(at, att_end)
     loop = (raw_loop if raw else periodic_loop)(x, at, period, k, loop_bytes)
+    if raw:
+        # the attack moves into phase with the loop (E'+'s join): it ends at whatever phase
+        # attack_bytes / rate gives, and a half-cycle-off tail crossfaded in anti-phase
+        # (Panpipes 16384 B at 21770 Hz: every rising crossing correlated -0.97, a 13 dB dip)
+        attack, loop = loopbuild.join_aligned(x, a, period, rate, k, attack_bytes, loop, xfade_cycles)
+        return attack, loop, att_end, at
     margin = int(4 * period)
     hi = min(len(x), int(round(att_end)) + margin)
     seg = x[a:hi]
@@ -374,13 +391,18 @@ def sustain_contour(env: np.ndarray, held: int, win_s: float) -> np.ndarray:
 def is_steady(env: np.ndarray, a: int, off: int, sustain_s: float, max_drop_db: float = 6.0) -> bool:
     """True if the sound holds its level from the sustain start to note-off (organs, strings,
     winds). Decaying sounds (marimba, bass, vibes) keep the short averaged loop: a raw
-    multi-cycle loop would bake the decay in and pump on every pass."""
-    lv = np.exp(smooth(np.log(np.maximum(env, 1e-6)), int(0.25 * SR)))
+    multi-cycle loop would bake the decay in and pump on every pass.
+
+    Judged by the level's trend (least-squares line through the dB envelope), not its range:
+    the MT-32 organ's rotary wobble swings +-10 dB at every key, so a range test passed or
+    failed by where the wobble fell (Elec Organ steady at keys 60-64, not at 40-58). Measured
+    trend drops: decaying sounds 10-50 dB, steady ones within +-5 dB, at every key +-12."""
     i0, i1 = a + int(sustain_s * SR), off - int(0.15 * SR)
-    if i1 <= i0:
+    if i1 - i0 < 2:
         return False
-    seg = lv[i0:i1]
-    return 20 * math.log10(float(seg.max()) / max(float(seg.min()), 1e-9)) <= max_drop_db
+    y = 20 * np.log10(np.maximum(env[i0:i1], 1e-9))
+    t = np.arange(len(y)) / SR
+    return -float(np.polyfit(t, y, 1)[0]) * (t[-1] - t[0]) <= max_drop_db
 
 
 def _floor_envelope(x: np.ndarray, a: int, off: int) -> np.ndarray:
@@ -499,18 +521,59 @@ class _Source:
         return SR / self.period
 
 
+def rate_window(m: dict, cfg: dict, loop_bytes: int) -> tuple[float, float]:
+    """(min, max) sample rate for a melodic sound: the config's window, or for a short loop +-3 %
+    around the rate the pitch plan chose for it (`ntp_rate`, pitchplan). Raw loops keep the
+    config's window: the planned rate is a short loop's, and a raw loop's length in seconds
+    (and so whether it passes raw_loop_ok) depends on its own rate."""
+    if "ntp_rate" in m and loop_bytes <= cfg["loop_bytes"]:
+        return m["ntp_rate"] * 0.97, m["ntp_rate"] * 1.03
+    return cfg["min_rate"], cfg["max_rate"]
+
+
 def _tune_loop(m: dict, src: _Source, cfg: dict, tables, steady: bool, sustain_s: float, eprime: bool
                ) -> tuple[int, tuple[float, int, float, int, int]]:
     """(loop bytes, best_tuning result): a steady sound's planned loop (`ntp_loop_bytes`),
     halved until it fits in the recording between the sustain start and note-off."""
     loop_bytes = m.get("ntp_loop_bytes", cfg["loop_bytes"]) if steady else cfg["loop_bytes"]
-    while True:
-        tuning = best_tuning(src.freq, tables, cfg["min_rate"], cfg["max_rate"], loop_bytes, m["key"], *src.keys,
-                             whole_cycles=eprime and loop_bytes <= cfg["loop_bytes"])
-        rate = tuning[2]
-        if loop_bytes <= cfg["loop_bytes"] or src.a + (sustain_s + loop_bytes / rate + 0.05) * SR <= src.off:
+    att_bytes = m.get("ntp_attack_bytes", cfg["attack_bytes"])
+    while loop_bytes > cfg["loop_bytes"]:
+        tuning = _raw_tuning(m, src, cfg, tables, loop_bytes, att_bytes, sustain_s)
+        if tuning is not None:
             return loop_bytes, tuning
         loop_bytes //= 2
+    return loop_bytes, best_tuning(src.freq, tables, *rate_window(m, cfg, loop_bytes), loop_bytes, m["key"],
+                                   *src.keys, whole_cycles=eprime)
+
+
+def _raw_tuning(m: dict, src: _Source, cfg: dict, tables, z: int, att_bytes: int, sustain_s: float
+                ) -> tuple[float, int, float, int, int] | None:
+    """best_tuning for a raw loop of z bytes, or None if none fits the recording and passes
+    raw_loop_ok. The rate is the highest tuned within `raw_loop_tune_cents` (the rate is the
+    attack's too); if the loop isn't clean there, the highest so tuned at which it repeats
+    slowly enough (`raw_loop_slow_hz`) to read as the sound's own movement, and never more
+    than `raw_loop_max_rate_drop` below the short loop's rate. Panpipes 16384 B:
+    14903 -> 20621 Hz, -24.8 -> -27.6 dB (docs/ninjatrackerplus.md "Raw-loop rate")."""
+    lo, hi = rate_window(m, cfg, z)
+    # nor much below the short loop's rate: the measure prefers the short loop's higher rate
+    # to a raw loop's movement (Sax 512 B at 18891 Hz -21.7 dB, 8192 B at 16338 Hz -20.3 dB)
+    short = best_tuning(src.freq, tables, *rate_window(m, cfg, cfg["loop_bytes"]), cfg["loop_bytes"], m["key"],
+                        *src.keys, whole_cycles=loop_construction(cfg) == "eprime")[2]
+    lo = max(lo, short * (1 - cfg.get("raw_loop_max_rate_drop", 0.1)))
+    tol = cfg.get("raw_loop_tune_cents", 1.0) or None
+    tops = [hi] if tol is None else [hi, min(hi, z * cfg.get("raw_loop_slow_hz", 2.0))]
+    for top in dict.fromkeys(tops):
+        if top < lo:
+            continue
+        t = best_tuning(src.freq, tables, lo, top, z, m["key"], *src.keys, high_within_cents=tol)
+        _, k, r, _, _ = t
+        if src.a + (sustain_s + z / r + 0.05) * SR > src.off:
+            continue
+        _, loop, _, _ = attack_and_loop(src.x, src.a, src.period, r, k, att_bytes, z, sustain_s,
+                                        cfg.get("attack_xfade_cycles", 4.0), raw=True)
+        if raw_loop_ok(loop, k, r, cfg):
+            return t
+    return None
 
 
 def _row_envelope(src: _Source, att_end: float, e_loop: float, steady: bool, loop_bytes: int, rate: float,
@@ -543,12 +606,8 @@ def _raw_loop_sizes(m: dict, src: _Source, cfg: dict, tables, att_bytes: int, su
     ok = []
     z = cfg["loop_bytes"] * 2
     while z <= min(cfg.get("max_loop_bytes", 16384), max_loop):
-        _, kz, rz, _, _ = best_tuning(src.freq, tables, cfg["min_rate"], cfg["max_rate"], z, m["key"], *src.keys)
-        if src.a + (sustain_s + z / rz + 0.05) * SR <= src.off:
-            _, lz, _, _ = attack_and_loop(src.x, src.a, src.period, rz, kz, att_bytes, z, sustain_s,
-                                          cfg.get("attack_xfade_cycles", 4.0), raw=True)
-            if raw_loop_ok(lz, kz, rz, cfg):
-                ok.append(z)
+        if _raw_tuning(m, src, cfg, tables, z, att_bytes, sustain_s) is not None:
+            ok.append(z)
         z *= 2
     return tuple(ok)
 
@@ -588,7 +647,9 @@ def build_melodic(m: dict, cfg: dict, keys: tuple[int, int], munt: Munt, tables,
                   finetune=ft, base_note=n0, key0=m["key"], kind="melodic",
                   env_t=(t - a) / SR, env_g=g, rel_g=rel_g, tune_cents=err, level=peak)
     s.steady, s.rate, s.cycles = steady, rate, k
-    s.max_loop = 1 << int(math.log2(max(1.0, ((src.off - a) / SR - sustain_s - 0.05) * rate)))
+    # at the window's top rate (raw loops tune high; _raw_tuning checks each size's fit)
+    top = max(rate, rate_window(m, cfg, 2 * cfg["loop_bytes"])[1])
+    s.max_loop = 1 << int(math.log2(max(1.0, ((src.off - a) / SR - sustain_s - 0.05) * top)))
     s.max_loop = s.max_loop if steady else cfg["loop_bytes"]
     if steady:
         s.raw_ok = _raw_loop_sizes(m, src, cfg, tables, att_bytes, sustain_s, s.max_loop)
@@ -603,8 +664,9 @@ def build_melodic(m: dict, cfg: dict, keys: tuple[int, int], munt: Munt, tables,
     # oscillator and plays exactly in tune.
     if not steady and cfg.get("one_shots", True):
         t_floor = floor_time(x, a, src.off, cfg.get("one_shot_floor_lsb", 1.5))
-        shot = one_shot_tuning(t_floor, rate, sum(s.ntp_blocks()) // 256, tables, m["key"], *src.keys,
-                               cfg["min_rate"], cfg.get("one_shot_max_rate_drop", 0.1))
+        # the pitch plan's one-shot rate (ntp_shot_rate) if it has one, else the looped rate
+        shot = one_shot_tuning(t_floor, m.get("ntp_shot_rate", rate), sum(s.ntp_blocks()) // 256, tables,
+                               m["key"], *src.keys, cfg["min_rate"], cfg.get("one_shot_max_rate_drop", 0.1))
         if shot is not None:
             r1, nb, n0, ft = shot
             data = resample(_faded(x[a:a + int(round(nb / r1 * SR))], 20), nb)
@@ -695,8 +757,8 @@ def build_samples(spec: dict, cfg: dict, key_ranges: dict[int, tuple[int, int]],
         log(line)
     if cfg.get("halt_released_loops", True):
         samples.append(rest_sample())
-    if len(samples) > 31:
-        raise ValueError(f"{len(samples)} samples > 31 (MOD limit)")
+    if len(samples) > MAX_SAMPLES:
+        raise ValueError(f"{len(samples)} samples > {MAX_SAMPLES} (MOD limit)")
     return samples, programs, drums
 
 

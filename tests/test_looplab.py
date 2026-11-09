@@ -131,6 +131,20 @@ def test_aligned_join_keeps_level_and_zero_start():
     assert smp.loop_buzz_db(ql, k) == -200.0
 
 
+
+def test_aligned_join_starts_the_loop_at_its_gentlest_rising_crossing():
+    """The DOC's swap to the loop oscillator slips by a fraction of a sample; at a steep
+    crossing that is a click every note. A fundamental with a strong, phase-shifted 3rd
+    harmonic has three rising crossings per cycle at very different slopes."""
+    f0, t = 220.0, np.arange(int(2.0 * SR)) / SR
+    x = np.concatenate([np.zeros(500), 0.3 * np.sin(2 * np.pi * f0 * t) + 0.5 * np.sin(6 * np.pi * f0 * t + 2.0)])
+    period, k, L = SR / f0, 16, 512
+    loop = lb.loop_power(x, 600 + 4000, 600 + 20000, period, k, L)
+    _, lp = lb.join_aligned(x, 500, period, L * f0 / k, k, 1016, loop)
+    c = L // k                                                         # samples per cycle
+    rising = [lp[i] - lp[i - 1] for i in range(1, c + 1) if lp[i - 1] < 0 <= lp[i]]
+    assert len(rising) >= 2 and lp[1] - lp[-1] <= 2 * min(rising) + 1e-9
+
 def test_searched_raw_loop_beats_a_fixed_start_on_a_detuned_tone():
     f0 = 200.0
     x = tone(f0, 2.0, detune_hz=2.5)

@@ -130,6 +130,34 @@ def test_vectorized_tuning_search_matches_the_scan():
         assert a[1:] == b[1:] and abs(a[0] - b[0]) < 1e-9
 
 
+
+def test_long_loops_take_the_highest_rate_that_is_in_tune():
+    """A 16384 B loop has hundreds of cycle counts; the closest tuning lands anywhere in the
+    window, the in-tune one with the fewest cycles is the highest rate."""
+    tables = {ft: [int(1712 * 2 ** (-(n + ft / 8) / 12)) for n in range(72)] for ft in range(-8, 8)}
+    closest = smp.best_tuning(523.25, tables, 9000, 22000, 16384, 72, 72, 81)
+    high = smp.best_tuning(523.25, tables, 9000, 22000, 16384, 72, 72, 81, high_within_cents=1.0)
+    assert abs(high[0]) <= 1.0 and high[2] > 20000 > closest[2]
+    nothing = smp.best_tuning(523.25, tables, 9000, 22000, 16384, 72, 72, 81, high_within_cents=0.0)
+    assert nothing == closest                                    # none that close: the closest
+
+
+@pytest.mark.parametrize("rate", [14903.0, 18000.0, 21770.0])
+def test_raw_loop_joins_its_attack_in_phase(rate):
+    """The attack ends wherever attack_bytes / rate falls in the cycle; it moves into phase
+    with the loop instead of crossfading half a cycle off (a level dip every note)."""
+    SR = smp.SR
+    f0, t = 523.25, np.arange(int(2.0 * SR)) / SR
+    tone = sum(np.sin(2 * np.pi * h * f0 * t + h) / h for h in (1, 2, 3))
+    x = np.concatenate([np.zeros(2000), tone * 0.5])
+    per = SR / f0
+    k = round(16384 * f0 / rate)
+    att, loop, _, _ = smp.attack_and_loop(x, 2000, per, 16384 * f0 / k, k, 2040, 16384, raw=True)
+    c = 16384 / k                                                     # samples per cycle
+    seg = np.concatenate([att[-int(8 * c):], loop[:int(4 * c)]])
+    lv = [np.sqrt(np.mean(seg[int(i * c):int((i + 1) * c)] ** 2)) for i in range(11)]   # one cycle each
+    assert 20 * np.log10(min(lv) / max(lv)) > -0.5
+
 def test_floor_time_finds_the_8bit_floor():
     x = np.concatenate([np.zeros(100), decaying_tone(660, 2.0, 150.0)])     # 150 dB/s: -38.5 dB at ~0.26 s
     t = smp.floor_time(x, 100, len(x))
