@@ -33,11 +33,10 @@ from scipy.signal import resample, resample_poly
 
 from . import audio, ntpmod, ntpsamples as smp
 from .audio import interp_at
-from .loopbuild import (Settle, Sound, Tracks, analyse, cycle_at_rate,  # noqa: F401  (the lab's toolkit)
-                        harmonic_cycle, harmonic_tracks, join_aligned, loop_power,
-                        modulation_period, settle, zero_start_exact)
+from .loopbuild import (Settle, Sound, Tracks, analyse, cycle_at_rate, harmonic_tracks, join_aligned,
+                        loop_power, zero_start_exact)
 from .munt import SR, Munt
-from .ntpsamples import loop_buzz_db, loop_tremolo_db  # noqa: F401  (metrics the build gates loops with)
+from .ntpsamples import loop_buzz_db, loop_tremolo_db   # the metrics the build gates loops with
 from .ntpsong import read_notes
 
 DOC_RATE = 894886 / 34              # DOC output rate with 32 oscillators enabled (doc_tuning rounds it)
