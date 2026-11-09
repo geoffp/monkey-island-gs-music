@@ -14,7 +14,7 @@ Pipeline:
 
    Keep both renditions working. Test the MT-32 one with Munt (`just mt32-wav`, user-supplied ROMs in `original files/mt-32 roms/`) and the GM one with FluidSynth + GeneralUser GS (`just gm-wav`).
 3. **Convert** (`src/migs/` → `build/seq/`): SMF → MIDI Synth sequence ($D5/aux 1), with channels mapped to instrument slots.
-4. **Tracker alternative** (`src/migs/ntpmod.py`, `config/ntp.toml` → `build/ntp/`): MT-32 SMF → ProTracker MOD within NinjaTrackerPlus limits (31 oscillators, 64 KB DOC RAM, no streaming) → `.NTP` via Ninjaforce's PHP converter (`just ntp`). The MOD is the primary artefact: preview it on the desktop (`just ntpmod`) before going to the IIGS. Sample construction research (attack detection, loop candidates, metrics): `just looplab` → `build/looplab/`, findings in `docs/loop-detection.md`.
+4. **Tracker alternative** (`src/migs/ntpmod.py` build CLI: samples in `ntpsamples.py`, arrangement in `ntpsong.py`, MOD writer in `modfile.py`; `config/ntp.toml` → `build/ntp/`): MT-32 SMF → ProTracker MOD within NinjaTrackerPlus limits (31 oscillators, 64 KB DOC RAM, no streaming) → `.NTP` via Ninjaforce's PHP converter (`just ntp`). The MOD is the primary artefact: preview it on the desktop (`just ntpmod`) before going to the IIGS. Sample construction research (attack detection, loop candidates, metrics): `just looplab` → `build/looplab/`, findings in `docs/loop-detection.md`.
 
 ## Key facts (verified against the data; details in docs/)
 - Game data lives in `original files/The Secret of Monkey Island (Floppy DOS VGA)/`. ScummVM md5 `15e03ffbfeddb9c2aebc13dcb2a4a8f4` = monkey VGA, EN, DOS. **Read-only. Never commit it** (it is gitignored; `original files/README.md` lists what goes there).

@@ -2,7 +2,7 @@
 import numpy as np
 
 from migs import looplab as ll
-from migs import ntpmod as nm
+from migs import ntpsamples as smp
 
 SR = ll.SR
 
@@ -65,7 +65,7 @@ def test_whole_cycles_survive_8bit_rounding_but_fractional_ones_buzz():
 def test_exact_zero_start_keeps_every_cycle_identical():
     loop = ll.cycle_at_rate(cycle(1024, amps=(1.0, 0.8, 0.6, 0.5)), 16, 512)
     c = int(np.nonzero((np.roll(loop, 1) < 0) & (loop >= 0))[0][0])
-    rough = nm.zero_start(loop, c)                                # linear crossing, forced 0
+    rough = smp.zero_start(loop, c)                                # linear crossing, forced 0
     exact = ll.zero_start_exact(loop, c)
     assert exact[0] == 0.0
     assert np.max(np.abs(exact[::32])) < 1e-9                     # every cycle starts at 0
@@ -74,7 +74,7 @@ def test_exact_zero_start_keeps_every_cycle_identical():
 
 
 def test_whole_cycle_tuning_divides_the_loop():
-    tables = {0: [int(round(nm.PAL / (8363 * 2 ** ((n - 24) / 12)))) for n in range(nm.NOTES)]}
+    tables = {0: [int(round(smp.PAL / (8363 * 2 ** ((n - 24) / 12)))) for n in range(smp.NOTES)]}
     err, k, rate, n0, ft = ll.tune(392.0, tables, 6000, 26000, 512, 67, 60, 72, whole_cycles=True)
     assert 512 % k == 0 and 6000 <= rate <= 26000
 

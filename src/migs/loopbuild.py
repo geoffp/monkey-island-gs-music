@@ -87,7 +87,7 @@ class Settle:
     steady: bool            # the beat-averaged level holds (slope above `decay` dB/s after `sus_from`)
     decay_db_s: float       # level slope in the sustain (dB/s)
     dead_s: float | None    # level 40 dB below its peak, or None (the build's one-shot rule is
-                            # ntpmod.floor_time / one_shot_tuning, reported by `main`)
+                            # ntpsamples.floor_time / one_shot_tuning, reported by `main`)
     level_db: np.ndarray    # beat-averaged level (dB), on Tracks.t
     weights: np.ndarray     # harmonic power shares in the sustain (sum 1)
 
@@ -185,7 +185,7 @@ def loop_power(x: np.ndarray, lo: float, hi: float, period: float, k: int, out: 
 
 def zero_start_exact(loop: np.ndarray, c: int, iters: int = 8) -> np.ndarray:
     """Rotate a periodic loop so a rising zero crossing of its *band-limited* waveform lands
-    on index 0. ntpmod.zero_start puts the linear-interpolation crossing there and then forces
+    on index 0. ntpsamples.zero_start puts the linear-interpolation crossing there and then forces
     loop[0] = 0; on steep or short cycles the band-limited value there isn't 0 (Strings at 32
     samples/cycle: -0.012, i.e. 1 LSB), so one sample per pass was wrong: a loop-rate buzz.
     Newton steps on the Fourier series find the true crossing; the forced 0 is then exact."""

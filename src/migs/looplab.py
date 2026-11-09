@@ -26,19 +26,19 @@ import tomllib
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from types import SimpleNamespace
 
 import numpy as np
 from scipy.io import wavfile
 from scipy.signal import resample, resample_poly
 
-from . import audio, ntpmod as nm
+from . import audio, ntpmod, ntpsamples as smp
 from .audio import interp_at
 from .loopbuild import (Settle, Sound, Tracks, analyse, cycle_at_rate,  # noqa: F401  (the lab's toolkit)
                         harmonic_cycle, harmonic_tracks, join_aligned, loop_power,
                         modulation_period, settle, zero_start_exact)
-from .munt import SR
-from .ntpmod import loop_buzz_db, loop_tremolo_db  # noqa: F401  (metrics the build gates loops with)
+from .munt import SR, Munt
+from .ntpsamples import loop_buzz_db, loop_tremolo_db  # noqa: F401  (metrics the build gates loops with)
+from .ntpsong import read_notes
 
 DOC_RATE = 894886 / 34              # DOC output rate with 32 oscillators enabled (doc_tuning rounds it)
 ATTACK_SIZES = (504, 1016, 2040, 4088)             # + 8 stopper bytes = one 512 B..4 KB block
@@ -46,23 +46,23 @@ ATTACK_SIZES = (504, 1016, 2040, 4088)             # + 8 stopper bytes = one 512
 
 def tune(freq: float, tables: dict, min_rate: float, max_rate: float, loop_bytes: int, key0: int,
          key_lo: int, key_hi: int, whole_cycles: bool = False) -> tuple[float, int, float, int, int]:
-    """The build's tuning (ntpmod): (err_cents, k, rate, base_note, finetune) for k periods
+    """The build's tuning (ntpsamples.best_tuning): (err_cents, k, rate, base_note, finetune) for k periods
     in `loop_bytes`. `whole_cycles`: only k that divide loop_bytes, so the k cycles stay
     identical after 8-bit rounding."""
-    return nm._best_tuning(freq, tables, min_rate, max_rate, loop_bytes, key0, key_lo, key_hi, whole_cycles)
+    return smp.best_tuning(freq, tables, min_rate, max_rate, loop_bytes, key0, key_lo, key_hi, whole_cycles)
 
 
 # ---------------------------------------------------------------------------
 # Loop builders: (x, sustain span [lo, hi) in source samples, period, k, out bytes) -> loop
 
 def loop_snapshot(x, lo, hi, period, k, out, at=None):
-    """A: today's averaged-cycle loop (ntpmod.periodic_loop), taken at `at`."""
-    return nm.periodic_loop(x, lo if at is None else at, period, k, out)
+    """A: today's averaged-cycle loop (ntpsamples.periodic_loop), taken at `at`."""
+    return smp.periodic_loop(x, lo if at is None else at, period, k, out)
 
 
 def loop_raw(x, lo, hi, period, k, out, at=None):
-    """B: today's raw loop with a fixed 25 % linear crossfade (ntpmod.raw_loop), at `at`."""
-    return nm.raw_loop(x, lo if at is None else at, period, k, out)
+    """B: today's raw loop with a fixed 25 % linear crossfade (ntpsamples.raw_loop), at `at`."""
+    return smp.raw_loop(x, lo if at is None else at, period, k, out)
 
 
 def seam_score(x: np.ndarray, start: float, span: float, period: float, w_periods: float = 2.0) -> float:
@@ -112,7 +112,7 @@ def loop_snapshot_whole(x, lo, hi, period, k, out, at=None, cycles=4):
 
 
 # ---------------------------------------------------------------------------
-# Joining an attack to a loop (as ntpmod.attack_and_loop, for any loop)
+# Joining an attack to a loop (as ntpsamples.attack_and_loop, for any loop)
 
 def join(x: np.ndarray, a: int, period: float, rate: float, k: int, attack_bytes: int, loop: np.ndarray,
          xfade_cycles: float = 4.0, level_match: bool = True, exact_zero: bool = False
@@ -120,7 +120,7 @@ def join(x: np.ndarray, a: int, period: float, rate: float, k: int, attack_bytes
     """The source's first `attack_bytes` at `rate`, crossfaded over its last few loop cycles
     into the loop, which is rotated to the rising zero crossing that continues the attack's
     tail best (`exact_zero`: on the band-limited waveform, loopbuild.zero_start_exact)."""
-    zero_start = zero_start_exact if exact_zero else nm.zero_start
+    zero_start = zero_start_exact if exact_zero else smp.zero_start
     L = len(loop)
     att_end = a + attack_bytes / rate * SR
     hi = min(len(x), int(round(att_end)) + int(4 * period))
@@ -339,7 +339,7 @@ class Trial:
 
 
 def _fixed_loop_point(snd: Sound, att_end: float, sustain_s: float) -> float:
-    """Where ntpmod.attack_and_loop takes the loop: `sustain_s` after the onset, moved back
+    """Where ntpsamples.attack_and_loop takes the loop: `sustain_s` after the onset, moved back
     in 10 ms steps (not before the attack's end) while the level there is under 20 % of the peak."""
     env = audio.rms_envelope(snd.x)
     top = float(np.max(env[snd.a:])) or 1.0
@@ -525,14 +525,14 @@ def report(mode: str, det: list, res: list[Trial], sizing: list, shot_note: dict
     return "\n".join(lines) + "\n"
 
 
-def _one_shot_note(m: dict, s: nm.ModSample, render, tables: dict, cfg: dict, hold: float,
+def _one_shot_note(m: dict, s: smp.ModSample, render, tables: dict, cfg: dict, hold: float,
                    keys: tuple[int, int]) -> str:
-    """What the build's one-shot rule (ntpmod.floor_time + one_shot_tuning) decides for a
+    """What the build's one-shot rule (ntpsamples.floor_time + one_shot_tuning) decides for a
     decaying sound."""
     x = render(m["program"], m["key"], hold)
     a = audio.onset(x)
-    t_floor = nm.floor_time(x, a, a + int(hold * SR), cfg.get("one_shot_floor_lsb", 1.5))
-    shot = nm.one_shot_tuning(t_floor, s.rate, sum(s.ntp_blocks()) // 256, tables, m["key"], *keys,
+    t_floor = smp.floor_time(x, a, a + int(hold * SR), cfg.get("one_shot_floor_lsb", 1.5))
+    shot = smp.one_shot_tuning(t_floor, s.rate, sum(s.ntp_blocks()) // 256, tables, m["key"], *keys,
                               cfg["min_rate"], cfg.get("one_shot_max_rate_drop", 0.1))
     return (f"one-shot: {shot[1]} B @ {shot[0]:.0f} Hz ({t_floor * 1000:.0f} ms to the 8-bit floor)"
             if shot else f"looped: 8-bit floor at {t_floor:.2f} s")
@@ -555,18 +555,16 @@ def main(argv: list[str] | None = None) -> int:
 
     conf = tomllib.loads(args.config.read_text())
     cfg = {**conf["defaults"], **conf.get("modes", {}).get(args.samples, {})}
-    spec = nm.ntp_spec(tomllib.loads(args.spec.read_text()), conf, args.samples)
-    over = cfg.get("ntp_attack_bytes", {})
-    spec = {**spec, "melodic": [{**m, "ntp_attack_bytes": over[m["name"]]} if m["name"] in over else m
-                                for m in spec["melodic"]]}
-    tables = nm.period_tables(args.make_tables)
-    paths = SimpleNamespace(smf2wav=args.smf2wav, roms=args.roms, cache=args.cache)
-    songs = [nm.read_notes(p)[:2] for p in args.inputs]
+    spec = ntpmod.ntp_spec(tomllib.loads(args.spec.read_text()), conf, args.samples)
+    spec = ntpmod.with_attack_bytes(spec, cfg)
+    tables = smp.period_tables(args.make_tables)
+    munt = Munt(args.smf2wav, args.roms, args.cache)
+    songs = [read_notes(p)[:2] for p in args.inputs]
     # every melodic sound looped (the build's one-shot decision is reported separately)
-    samples, _, _ = nm.sample_set(spec, {**cfg, "one_shots": False}, songs, 255 - cfg.get("reserve_pages", 16),
-                                  tables, paths)
+    samples, _, _ = ntpmod.sample_set(spec, {**cfg, "one_shots": False}, songs, 255 - cfg.get("reserve_pages", 16),
+                                      tables, munt)
     built = {s.name: s for s in samples if s.kind == "melodic"}
-    render = lambda prog, key, hold: nm._render(args.smf2wav, args.roms, args.cache, program=prog, key=key, hold=hold)
+    render = lambda prog, key, hold: smp.cached_render(munt, prog, key, hold)
     out = args.out_dir
     (out / "wav").mkdir(parents=True, exist_ok=True)
     (out / "plots").mkdir(parents=True, exist_ok=True)

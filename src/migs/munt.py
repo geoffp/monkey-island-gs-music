@@ -14,6 +14,7 @@ from __future__ import annotations
 import os
 import subprocess
 from pathlib import Path
+from typing import NamedTuple
 
 import mido
 import numpy as np
@@ -69,3 +70,15 @@ def render(smf2wav: Path, roms: Path, cache: Path, *, program: int | None, key: 
         raise ValueError(f"{wav}: expected {SR} Hz, got {rate}")
     x = data.astype(np.float64)
     return (x.mean(axis=1) if x.ndim == 2 else x) / 32768.0
+
+
+class Munt(NamedTuple):
+    """Where Munt and its inputs live (hashable, so renders can be cached per setup)."""
+    smf2wav: Path
+    roms: Path
+    cache: Path
+
+    def render(self, *, program: int | None, key: int, hold: float, velocity: int = 100,
+               volume: int = 100) -> np.ndarray:
+        return render(self.smf2wav, self.roms, self.cache, program=program, key=key, hold=hold,
+                      velocity=velocity, volume=volume)

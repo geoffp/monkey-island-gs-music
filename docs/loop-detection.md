@@ -120,7 +120,7 @@ How E′+ is built:
   - **Taiko:** it doesn't qualify. It reaches the 8-bit floor only at 1.62 s.
 
 ## One-shots (in the build since 2026-11-07)
-A looped sound that is already below 8-bit resolution when its loop starts only loops quantisation noise. Xylophone's loop was 2.6 LSB RMS. The rule (`ntpmod.floor_time`, `ntpmod.one_shot_tuning`, config `one_shots`, `one_shot_floor_lsb`, `one_shot_max_rate_drop`) is deterministic, from the same Munt render the sample is cut from.
+A looped sound that is already below 8-bit resolution when its loop starts only loops quantisation noise. Xylophone's loop was 2.6 LSB RMS. The rule (`ntpsamples.floor_time`, `ntpsamples.one_shot_tuning`, config `one_shots`, `one_shot_floor_lsb`, `one_shot_max_rate_drop`) is deterministic, from the same Munt render the sample is cut from.
 
 A melodic sound becomes a one-shot when all of these hold:
 1. **It decays.** It isn't `is_steady`.
@@ -157,7 +157,7 @@ The one-shot then plays at an **exact** period-table rate: with no loop to fit, 
 Found alongside: a melodic one-shot's end time now scales with its key (`s.seconds × 2^(−(key − key0)/12)`). It used the key0 length, so lower notes freed their track while still sounding (Xylophone: per-song MI160 steals 260 → 257).
 
 ## Short raw loops add a tremolo (2026-11-07)
-A raw loop shorter than the sound's own wobble replays a slice of it at the loop rate. In shared Elec Organ (1024 B) that was a 6.3 dB tremolo at 15 Hz. The build now measures every raw loop size (`ntpmod.raw_loop_ok`: it must repeat at ≤ 2 Hz, or have ≤ 1 dB of level range and ≤ −50 dB of loop-rate content) and fails if any loop doesn't pass. `report.md` has a tremolo column. Details are in `docs/ninjatrackerplus.md`, "Tremolo from short raw loops".
+A raw loop shorter than the sound's own wobble replays a slice of it at the loop rate. In shared Elec Organ (1024 B) that was a 6.3 dB tremolo at 15 Hz. The build now measures every raw loop size (`ntpsamples.raw_loop_ok`: it must repeat at ≤ 2 Hz, or have ≤ 1 dB of level range and ≤ −50 dB of loop-rate content) and fails if any loop doesn't pass. `report.md` has a tremolo column. Details are in `docs/ninjatrackerplus.md`, "Tremolo from short raw loops".
 
 ## Recommendation
 **For the 512 B loops** (all shared sounds, and short per-song loops), build E′+:

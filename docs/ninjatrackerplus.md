@@ -95,7 +95,7 @@ So the songs were played to a beat, but the outliers (50–150 ms: drift, grace 
 - An optional hard quantize drops the `EDx` delays.
 - Pattern RAM matters for a game. MI160 on a 31 ms grid ≈ 47 patterns × 15 tracks × 64 × 4 B ≈ 180 KB; on its unit grid ≈ 9 patterns ≈ 35 KB.
 
-## Our MOD-first pipeline (`src/migs/ntpmod.py`, `just ntpmod` → `just ntp`)
+## Our MOD-first pipeline (`src/migs/ntpmod.py` with `ntpsamples.py`, `ntpsong.py`, `modfile.py`; `just ntpmod` → `just ntp`)
 The MOD is the primary artefact: it renders on the desktop (ffmpeg's libopenmpt → `build/ntp/wav/`), and Ninjaforce's converter (`php-cli`, `STREAM_FORBIDDEN`) turns it into `.NTP`. Settings live in `config/ntp.toml`; sounds come from `config/mt32bank.toml` (the same 14 melodic and 14 drum sounds as MI1.BNK).
 
 - **Samples:**
@@ -260,7 +260,7 @@ Goal: a game loads the instruments once and leaves them in DOC RAM, then loads o
 |---|---|
 | `smooth()`: `np.convolve` with 250 ms (8000-tap) windows, O(n·w); 36 of 56 s in shared mode | cumulative-sum moving average, O(n), the same window as `np.convolve(..., "same")` (max deviation ~1e-12) |
 | velocity/key responses re-measured from the same WAVs for every song (3177 `rms_envelope` calls, 3000 WAV reads) | in-process `_render` cache (read-only arrays) plus `_peak` memo. `mt32bank` is untouched, so the MIDI Synth bank can't change |
-| `_best_tuning`: Python triple loop (k × finetune × note) | NumPy over (k, finetune, note). `argmin` picks the first minimum in the same scan order, so the same tuning is chosen (tested against the loop) |
+| `best_tuning` (then `_best_tuning`): Python triple loop (k × finetune × note) | NumPy over (k, finetune, note). `argmin` picks the first minimum in the same scan order, so the same tuning is chosen (tested against the loop) |
 | MIDI parsing and grid detection repeated per pass | `read_notes` cached by path + mtime, `detect_grid` by onsets |
 | recipes serial | modes build concurrently; ffmpeg previews and PHP conversions run on all cores (`xargs -P $(nproc)`) |
 
@@ -330,8 +330,8 @@ E′+ was first built as trial variants, `per-song-e` and `shared-e` (`[modes.<n
 - The variants were dropped, and the new `per-song` / `shared` are byte-identical to the old `-e` builds (64 MOD/NTP checksums).
 - The original averaged-cycle loops stay selectable with `loop_construction = "averaged"`. A variant using them, `base = "shared"` + `"averaged"`, reproduces the old `shared` byte for byte.
 - The code is in `src/migs/loopbuild.py`, moved from the research harness `looplab`.
-- **What changes:** only the short (512 B) loops, which are built as E′+ (`ntpmod.eprime_attack_and_loop`, using `loopbuild`):
-  - whole samples per cycle (`_best_tuning(whole_cycles=True)`);
+- **What changes:** only the short (512 B) loops, which are built as E′+ (`ntpsamples.eprime_attack_and_loop`, using `loopbuild`):
+  - whole samples per cycle (`ntpsamples.best_tuning(whole_cycles=True)`);
   - a power-averaged harmonic cycle over the sustain detected by `looplab.settle`;
   - an exact band-limited zero crossing at the loop start;
   - an attack aligned in phase with the loop.
