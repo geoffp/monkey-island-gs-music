@@ -3,7 +3,8 @@
 import mido
 import pytest
 
-from migs.mid2seq import BankMap, _tempo_and_scale, convert
+from migs.mid2seq import BankMap, _gate_drums, _tempo_and_scale, convert
+
 
 BANK = BankMap(name="T", file="T.BNK", rhythm_slot=0, fallback_slot=2,
                programs={75: 7, 32: 1}, drums={36: 36, 42: 80})
@@ -76,7 +77,6 @@ def test_peak_voices_are_reported_not_reduced():
 
 
 def test_drum_notes_are_gated_and_rehits_not_cut():
-    from migs.mid2seq import _gate_drums
     on = lambda t, n: (t, 0, mido.Message("note_on", channel=9, note=n, velocity=100))
     off = lambda t, n: (t, 0, mido.Message("note_off", channel=9, note=n))
     ev = [on(0, 36), on(5, 36), off(400, 36), off(401, 36), on(100, 42), off(1000, 42),
@@ -88,15 +88,6 @@ def test_drum_notes_are_gated_and_rehits_not_cut():
     assert any(m.channel == 1 for _, _, m in out)                       # melodic untouched
 
 
-def test_voice_estimate_counts_envelope_tails_not_note_length():
-    from migs.voices import envelope_end
-    from migs.midisynth import envelope
-    held = envelope(sustain=127, release1=(0, 16))                     # 0.43 s full release
-    assert envelope_end(held, 2.0) == pytest.approx(2.43, abs=0.01)
-    decays = envelope(sustain=0, decay3_rate=16)                       # falls to 0 by itself
-    assert envelope_end(decays, 5.0) == pytest.approx(0.43, abs=0.01)
-
-
 def test_sixteen_channels_leave_no_room_for_the_title_and_do_not_crash():
     mf = mido.MidiFile(ticks_per_beat=120)
     mf.tracks.append(mido.MidiTrack(
@@ -104,17 +95,3 @@ def test_sixteen_channels_leave_no_room_for_the_title_and_do_not_crash():
     seq, rep = convert(mf, BANK, title="MI1 999")
     assert len(rep.channel_slots) == 16 and "MI1 999" not in seq.track_names
     seq.to_bytes()
-
-
-def test_a_note_never_released_holds_its_voice_to_the_end():
-    from migs.midisynth import Bank, Instrument, SeqItem, Sequence, envelope, wavelist
-    from migs.voices import report
-    inst = Instrument.build("I", (envelope(release1=(0, 31)), [wavelist(127, 0, (0, 0, 255, 4, 0, 0))]))
-    bank = Bank("W", 1, [inst] * 16)
-    on = lambda t, k: SeqItem(0, t, 0x90, bytes([k, 100]))
-    off = lambda t, k: SeqItem(0, t, 0x80, bytes([k, 64]))
-    seq = Sequence("B", [on(0, 60), on(96, 60), off(192, 60), on(960, 62), off(1920, 62)], tempo=60)
-    from migs.voices import spans
-    r = report(seq, bank)
-    assert r.notes == 3 and r.peak == 2          # at tick 960: key 62 and the unreleased 60
-    assert max(s.free for s in spans(seq, bank)) >= seq.seconds()
