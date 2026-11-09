@@ -95,3 +95,12 @@ def test_voice_estimate_counts_envelope_tails_not_note_length():
     assert envelope_end(held, 2.0) == pytest.approx(2.43, abs=0.01)
     decays = envelope(sustain=0, decay3_rate=16)                       # falls to 0 by itself
     assert envelope_end(decays, 5.0) == pytest.approx(0.43, abs=0.01)
+
+
+def test_sixteen_channels_leave_no_room_for_the_title_and_do_not_crash():
+    mf = mido.MidiFile(ticks_per_beat=120)
+    mf.tracks.append(mido.MidiTrack(
+        [mido.Message("note_on", channel=c, note=60, velocity=80, time=0) for c in range(16)]))
+    seq, rep = convert(mf, BANK, title="MI1 999")
+    assert len(rep.channel_slots) == 16 and "MI1 999" not in seq.track_names
+    seq.to_bytes()
