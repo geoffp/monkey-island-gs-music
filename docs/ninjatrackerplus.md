@@ -110,6 +110,8 @@ The MOD is the primary artefact: it renders on the desktop (ffmpeg's libopenmpt 
     - kick, toms, congas, bongos, timbale, claves 5.9 kHz.
 
     Pitched pairs are offset by whole notes.
+
+    **Length (2026-11-08, `drum_floor_lsb = 1.5`):** a drum ends at the 8-bit floor (`drum_end`): where its decay first falls below 1.5 LSB RMS (−38.5 dB re peak, the `one_shot_floor_lsb` melodic one-shots use), after its last point above twice that. Before, it ran to its −46 dB point, and most of that tail was below what 8 bits carry (seen by the user in a tracker; measured on the stored MI160 samples): bongo 80 %, mute conga 65 %, conga 43 %, snare 39 %, claves 34 %, rim 29 %. The kick and snare stop abruptly in the MT-32 render (kick 7 → 1 LSB, snare 11 → 1.5 LSB within 128 bytes), then carry ~1 KB of junk around 1–2 LSB with bursts above the floor. The user heard it on the snare. A plain last-crossing rule (`floor_time`) keeps that junk (snare 2477 B), hence the 2× rule. Stored lengths (B): kick 2038 → 788, snare 4086 → 1506, bongo 1014 → 218, mute conga 1014 → 358, conga 2038 → 1150, rim 1014 → 766, claves 502 → 330. The hats, cabasa, toms, timbale, agogo and quijada are unchanged: they still have energy at their byte limit.
   - **Memory:** sized and packed by NTP's rules (stopper bytes, loop split, power-of-two blocks, largest at page 0), giving **242 of 256 DOC pages** for 28 samples.
 - **Timing:** rows sit on each song's detected grid unit / `rows_per_unit` (default 32nds), speed 3, MOD tempo per song (48–136). `EDx` keeps micro-timing (`quantize = 0`). The measured mean error is 4.6–12 ms.
   - **Tempo dithering** (`tempo_commands`): MOD tempos are integers, so a single tempo misses the ideal row length by up to 0.65%. Notes are placed on the ideal grid, and `Fxx` commands switch between the two neighbouring integer tempos whenever the playback clock drifts more than `tempo_tolerance_ms` (default 2 ms) from it. They go in any free effect cell. This takes 1–106 commands per song.
@@ -372,7 +374,7 @@ There were about 3,500 such ghosts per build. Examples: MI152 ≈ 600, MI160 ≈
 What each option buys and costs, as measured. Sizes are totals over all 16 songs. Pattern data is 256 B per track per 64-row pattern, so allocation options change it through the track count; sample options change the sample data. Where a cost hasn't been measured, the entry says so.
 
 **Sample sets**
-- **`samples = "per-song"` vs `"shared"`.** *Per-song:* each `.NTP` carries only its own sounds, and free DOC RAM grows steady sounds into long raw loops (better sustains; per-song Elec Organ's 8192 B loop holds its rotary wobble). *Shared:* one bank for every song, byte-identical in each file, so a game can keep it resident; every sound gets a 512 B loop, and four attacks are shortened to fit (below). *Size:* per-song 1142 KB of `.NTP`, shared 1480 KB, because every shared file carries the whole ~60 KB bank; with a resident bank a game loads only header + patterns per song (shared patterns 516 KB). *Polyphony:* about the same (shared drops 2, audible steals 180; per-song 3, 280).
+- **`samples = "per-song"` vs `"shared"`.** *Per-song:* each `.NTP` carries only its own sounds, and free DOC RAM grows steady sounds into long raw loops (better sustains; per-song Elec Organ's 8192 B loop holds its rotary wobble). *Shared:* one bank for every song, byte-identical in each file, so a game can keep it resident; every sound gets a 512 B loop, and four attacks are shortened to fit (below). *Size:* per-song 1101 KB of `.NTP`, shared 1376 KB, because every shared file carries the whole ~54 KB bank; with a resident bank a game loads only header + patterns per song (shared patterns 516 KB). *Polyphony:* about the same (shared drops 2, audible steals 180; per-song 3, 280).
 - **`ntp_attack_bytes` (shared: Elec Organ, Sax, Acou Bass, Vibes at 1016 B).** Keeps the 16-page sound-effect reserve in the shared bank (−16 pages), at the least measured cost: log-spectral distance vs Munt over the first 0.6 s changes −0.28…+0.06 dB.
 - **`reserve_pages = 16`.** 4 KB of DOC kept for game sound effects; it limits loop growth (per-song) and forces the shortened shared attacks.
 
@@ -380,7 +382,8 @@ What each option buys and costs, as measured. Sizes are totals over all 16 songs
 - **`one_shots`** (default on). A decaying sound that fades into 8-bit noise within its attack + loop budget is stored whole: only Xylophone qualifies. *Gains:* exactly in tune (was −1.0 cents), no loop of quantisation noise, 1 oscillator, frees its track when the sample ends (MI162 drops 8 → 0). *Cost:* none measured; shared bank 240 → 238 pages.
 - **`loop_only`** (trial `per-song-lo` / `shared-lo`, Elec Organ). *Gains:* 1 oscillator instead of 2: drops 11 → 1, audible steals 262 → 195, and with the track plan and one-shot routing 184 → 39 (shared). *Costs:* the attack is lost. Over the first 100 ms the tone is about 2 dB further from Munt, and the first 0.2–0.3 s is quieter: the 5.4 dB onset peak and the gain-1 handover are gone. **Listening: clearly audible and significantly quieter, much more so in shared.** *Size:* patterns +29…+30 KB (more 1-oscillator tracks), samples −16…−20 KB (no attack headers), `.NTP` +10…+13 KB; DOC −4 pages (shared 237 → 233). Undecided.
 - **Song-sized one-shots** (rejected 2026-11-08): +100 KB of samples (+9 %) for no polyphony gain and little audible difference; see `docs/loop-detection.md`.
-- **`halt_released_loops`** (default on). Ends each release with a silent one-shot that stops the loop. *Gains:* no ghost of the previous note before a delayed note. *Cost:* one 256 B rest sample per set; per-song MI167 was at its page limit, so its Strings loop halved (16384 → 8192 B).
+- **`drum_floor_lsb = 1.5`** (default since 2026-11-08; 0 = the old −46 dB length). Drums end at the 8-bit floor, with junk near the floor after the decay cut too (above). *Gains:* the kick, snare, bongo and mute conga drop to smaller DOC blocks: shared bank 237 → 220 pages (shared-lo 233 → 216); `.NTP` shared 1480 → 1376 KB (−7 %), per-song 1142 → 1101 KB. Per-song free DOC RAM goes to loop growth: MI167, the one song at its page limit, gets its Strings 16384 B raw loop back (was halved to 8192). The shared bank's freed pages are unused so far. A shorter drum also frees its track sooner. *Polyphony:* unchanged (drops and steals identical in all four variants). *Cost:* the last few dB of each tail (below 8-bit resolution); not yet listened to.
+- **`halt_released_loops`** (default on). Ends each release with a silent one-shot that stops the loop. *Gains:* no ghost of the previous note before a delayed note. *Cost:* one 256 B rest sample per set; per-song MI167 was at its page limit, so its Strings loop halved (16384 → 8192 B) until the drum trim freed pages.
 
 **Allocation** (`convert_song`, "Track allocation" below)
 - **Quietest-release steals** (always on). *Gains:* MI160 audible steals 612 → 244 (shared), cut volume median 9 → 0, p90 25 → 3. *Costs:* none; same tracks, same size.
@@ -409,10 +412,10 @@ What each option buys and costs, as measured. Sizes are totals over all 16 songs
 
 | variant | `.NTP` total | patterns | samples + header | largest |
 |---|---|---|---|---|
-| per-song | 1142 KB | 516 KB | 626 KB | MI160 136 KB |
-| shared | 1480 KB | 516 KB | 964 KB | MI160 141 KB |
-| per-song-lo | 1152 KB | 546 KB | 606 KB | MI160 143 KB |
-| shared-lo | 1493 KB | 545 KB | 948 KB | MI160 149 KB |
+| per-song | 1101 KB | 516 KB | 585 KB | MI160 132 KB |
+| shared | 1376 KB | 516 KB | 860 KB | MI160 134 KB |
+| per-song-lo | 1113 KB | 546 KB | 567 KB | MI160 139 KB |
+| shared-lo | 1386 KB | 545 KB | 841 KB | MI160 142 KB |
 
 ## Track allocation (`convert_song`; current rules, 2026-11-07)
 NTP has no voice allocation: each MOD track owns its oscillators for the whole song (`determine_osc_per_track`). So `convert_song` assigns every note to a track itself, once, in onset order.

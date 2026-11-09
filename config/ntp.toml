@@ -51,6 +51,8 @@ one_shot_max_rate_drop = 0.1  # take become one-shots (1 oscillator, exact tunin
                         # below the looped rate. docs/loop-detection.md "One-shots"
 drum_min_rate = 6000    # one-shot rate window (Hz); within it the rate follows each drum's
 drum_max_rate = 26000   # bandwidth, trading length for it (hats, shakers need ~26 kHz)
+drum_floor_lsb = 1.5    # drums end at the 8-bit floor (drum_end: junk near the floor after
+                        # the decay is cut too); 0 = the old -46 dB length
 
 # Per-mode overrides of [defaults]. The shared set (every sound for every song) needs 254 of
 # 256 pages with 512 B loops; to keep the 16-page sound-effect reserve, the four sounds whose

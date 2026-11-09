@@ -491,6 +491,23 @@ def test_floor_time_finds_the_8bit_floor():
     assert nm.floor_time(slow, 100, len(slow)) > 1.9
 
 
+def test_drum_end_cuts_junk_after_the_decay():
+    # a snare-like hit: a clean 0.1 s decay to ~-20 dB that stops abruptly, then 0.4 s of junk
+    # hovering around the 8-bit floor (1.5 LSB = -38.5 dB) with bursts just above it
+    sr = nm.mb.SR
+    rng = np.random.default_rng(1)
+    n = int(0.1 * sr)
+    hit = rng.standard_normal(n) * np.exp(-np.arange(n) / (0.04 * sr))
+    junk = rng.standard_normal(int(0.4 * sr)) * (1.2 / 127) * np.max(np.abs(hit))   # 1.2 LSB RMS
+    junk[int(0.2 * sr):int(0.22 * sr)] *= 1.6                     # a 1.9 LSB burst: above the floor
+    x = np.concatenate([np.zeros(100), hit, junk])
+    assert nm.floor_time(x, 100, len(x)) > 0.3                    # last crossing: keeps the junk
+    assert nm.drum_end(x, 100, len(x)) < 0.12                     # ends with the decay
+    # a smooth decay through the floor ends at the floor, as floor_time does
+    y = np.concatenate([np.zeros(100), _decay(660, 2.0, 150.0)])
+    assert abs(nm.drum_end(y, 100, len(y)) - nm.floor_time(y, 100, len(y))) < 0.01
+
+
 def _tables():
     return {ft: [int(round(nm.PAL / (8363 * 2 ** ((n - 24 + ft / 8) / 12)))) for n in range(nm.NOTES)]
             for ft in range(-8, 8)}

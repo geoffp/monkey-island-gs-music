@@ -415,6 +415,22 @@ def floor_time(x: np.ndarray, a: int, off: int, floor_lsb: float = 1.5) -> float
     return (above[-1] + 1) / SR if len(above) else 0.0
 
 
+def drum_end(x: np.ndarray, a: int, off: int, floor_lsb: float = 1.5, junk: float = 2.0) -> float:
+    """Seconds after the onset where a drum's decay first falls below `floor_lsb` (as in
+    floor_time) after its last point above `junk` x the floor. Late low-level junk that
+    hovers around the floor (the MT-32 snare has ~1 KB of it at 1-1.7 LSB after a clean
+    decay) doesn't hold the end back, as it would with floor_time's last crossing."""
+    SR = mb.SR
+    seg = x[a:off]
+    pk = float(np.max(np.abs(seg))) or 1.0
+    env = np.sqrt(np.maximum(smooth(seg * seg, int(0.02 * SR)), 0.0)) / pk
+    loud = np.nonzero(env > junk * floor_lsb / 127)[0]
+    if not len(loud):
+        return floor_time(x, a, off, floor_lsb)
+    below = np.nonzero(env[loud[-1]:] <= floor_lsb / 127)[0]
+    return (loud[-1] + (below[0] if len(below) else len(env) - loud[-1])) / SR
+
+
 def one_shot_tuning(t_floor: float, rate: float, budget_pages: int, tables, key0: int, key_lo: int,
                     key_hi: int, min_rate: float, max_drop: float = 0.1) -> tuple[float, int, int, int] | None:
     """Can a decaying sound be a one-shot instead of attack + loop? It can when the whole sound,
@@ -626,6 +642,13 @@ def build_samples(spec: dict, cfg: dict, key_ranges: dict[int, tuple[int, int]],
         env = mb.rms_envelope(x, 0.005)
         tail = np.nonzero(env[a:] > 0.005 * np.max(env))[0]
         dur = (tail[-1] + 1) / SR if len(tail) else 0.1
+        # End at the 8-bit floor, as melodic one-shots do: the -46 dB tail above was mostly
+        # silence once stored (bongo 80%, mute conga 65%, snare 39% under 1.5 LSB) and held
+        # the drum's track busy for it. Junk hovering near the floor after the decay is cut
+        # too (drum_end). A floor of 0 keeps the old length.
+        floor = cfg.get("drum_floor_lsb", cfg.get("one_shot_floor_lsb", 1.5))
+        if floor:
+            dur = min(dur, max(drum_end(x, a, a + int(dur * SR), floor), 0.01))
         want = drum_rate(x[a: a + int(dur * SR)], d["bytes"] - STOPPER,
                          cfg.get("drum_min_rate", 6000), cfg.get("drum_max_rate", 26000))
         # pick the note whose ft-0 period gives a rate close to `want`, leaving room for offsets
