@@ -389,6 +389,18 @@ What each option buys and costs, as measured. Sizes are totals over all 16 songs
 - **`melodic_one_shots = "any"`** (default). One-shots may use 1-oscillator tracks. *Gains:* MI160 shared drops 9 → 0, steals 244 → 167; loop-only 81 → 39. *Costs:* MI160 +1 track (+4.5 KB patterns); its loudest cut 27 → 29. Under first come (without the plan) it was worse: drops 16 → 31–77.
 - **`drum_borrow = "last"`.** Drums open a 1-oscillator track while the budget allows, then borrow a free melodic one. Measured before the plan: "first" tied up melodic tracks (MI152 drops 1 → 14). The plan now tries both and keeps "first" where it loses nothing and saves tracks (5–9 songs per variant).
 
+**Velocity of delayed notes**
+- **`delay_snap_db = 4.0`** (default since 2026-11-08; remove it to keep every delay). A note needing an `EDx` micro-delay can't carry its velocity `Cxx` in the same cell, so it starts at the sample's default volume until the next row (median 1.6 dB off; shared: 1246 notes > 3 dB, 321 > 6 dB, worst 16.7 dB). When that start would be more than `delay_snap_db` off and the preceding cell can't carry the velocity, the note moves to the nearest row (one tick at speed 3, 18–51 ms) with its velocity in-cell. **Guard:** no move that would put the note on the same tick as another onset of its part, so flams, rolls and grace notes keep their spacing (unguarded, 112 moves collapsed onto a neighbour; guarded: 0 collapsed, 0 reordered). Shared sweep:
+
+  | snap above | notes moved | left > 3 dB | left > 6 dB | mean timing error |
+  |---|---|---|---|---|
+  | off | 0 | 1246 | 321 | 7.7 ms |
+  | 6 dB | 262 (2.2 %) | 985 | 62 | 8.1 ms |
+  | **4 dB** | 699 (5.9 %) | 591 | 52 | 8.7 ms |
+  | 3 dB | 1255 (10.5 %) | 189 | 52 | 9.6 ms |
+
+  The 52 left above 6 dB are the guarded flams and rolls. Per-song at 4 dB moves only 237 notes (its default volumes are each song's own median, closer to its notes); timing error 7.67 → 8.07 ms. *Size:* unchanged (shared `.NTP` 1480 → 1479 KB). *Polyphony:* unchanged (shared drops 2 → 1, steals 180 → 181). **Listening (user): an improvement**; made the default.
+
 **Timing grid** (`rows_per_unit`, `speed`, `quantize`; full table in `plans/ntp-quantization.md`)
 - **Current 2 rows per unit, speed 3:** 45.7 % of notes start at the default volume for 1–2 ticks (median 1.6 dB off), timing error 7.7 ms, patterns 527 KB (before the plan).
 - **Finer rows** cure velocity loss (6 rows/unit: 0 %) but cost 2.8× the pattern data. **Row packing** (1 row/unit, speed 6) halves it (295 KB) at the same velocity and timing, but more than doubles steals. **More ticks per row** (2, 6) halves timing error and loses more velocity (67 %). Quantization is on hold.

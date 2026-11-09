@@ -288,6 +288,33 @@ def test_track_plan_prefers_fewer_tracks_at_equal_loss(tmp_path):
     assert rep.tracks_used == 2 and rep.borrow == "first" and nm.allocation_cost(rep) == 0
 
 
+def test_delayed_notes_far_from_the_default_volume_snap_to_a_row(tmp_path):
+    import mido
+    # a quiet note 1 tick after a row (speed 3, 62.5 ms rows): EDx would start it at the
+    # default volume (the song's median), far too loud; snapping moves it back one tick, Cxx in-cell.
+    # The same note one tick after a same-part partner on the row (a flam) must stay delayed.
+    tick = 0.0625 / 3
+    def song(name, flam):
+        ev = [mido.Message("program_change", channel=1, program=9),        # a loud note on a row sets
+              mido.Message("note_on", channel=1, note=67, velocity=127),  # the default volume between
+              mido.Message("note_off", channel=1, note=67, time=60)]      # the two
+        if flam:                                                          # a partner on the row:
+            ev.append(mido.Message("note_on", channel=1, note=64, velocity=100, time=60))  # moving back collapses
+        ev.append(mido.Message("note_on", channel=1, note=60, velocity=20,
+                               time=round((0.5 + tick) * 240) - (120 if flam else 60)))
+        ev += [mido.Message("note_off", channel=1, note=60, time=120),
+               mido.Message("note_off", channel=1, note=64, time=0)]
+        return _song(tmp_path, ev, name)
+    cfg = {"rows_per_unit": 2, "speed": 3, "quantize": 0.0, "oscillators": 31, "unit_ticks": 30, "phase_ticks": 0}
+    for flam, snapped in ((False, 1), (True, 0)):
+        p = song(f"{flam}.mid", flam)
+        _, _, off = nm.convert_song(p, [_fake()], {9: 0}, {}, cfg, dict(cfg))
+        _, _, on = nm.convert_song(p, [_fake()], {9: 0}, {}, cfg, {**cfg, "delay_snap_db": 4.0})
+        assert on.vel_snapped == snapped
+        assert on.vel_default == off.vel_default - snapped
+        assert on.timing_err_ms >= off.timing_err_ms
+
+
 def test_tempo_commands_stay_on_the_ideal_grid():
     ideal, speed, rows, tol = 97.56, 3, 2000, 0.002
     ch = nm.tempo_commands(ideal, speed, rows, lambda r: True, tol)

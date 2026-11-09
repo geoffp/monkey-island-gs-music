@@ -759,6 +759,7 @@ class Report:
     vel_in_cell: int = 0
     vel_preceding: int = 0
     vel_default: int = 0
+    vel_snapped: int = 0       # delayed notes moved to a row so their velocity fits in-cell
     level_ref: float = 1.0      # note loudness that maps to MOD volume 64
     tempo_changes: int = 0
     track_kinds: list = field(default_factory=list)   # "melodic" (2 oscillators) / "drum" (1), in MOD order
@@ -974,6 +975,7 @@ def convert_song(path: Path, samples, programs, drums, cfg: dict, song_cfg: dict
             s.default_volume = int(np.median(by_sample[si])) if si in by_sample else 32
 
     hyst = song_cfg.get("volume_hysteresis", cfg.get("volume_hysteresis", 0.75))
+    onsets = {ch: np.array([m.t for m in notes if m.channel == ch]) for ch in {m.channel for m in notes}}
     for n in notes:
         rep.notes += 1
         if n.channel == RHYTHM:
@@ -1045,6 +1047,27 @@ def convert_song(path: Path, samples, programs, drums, cfg: dict, song_cfg: dict
         vf = 64 * amp(s, n) / ref                    # unrounded, for the envelope rows
         v = vol_for(s, n)
         silent_before = False
+        # A delayed note's EDx takes the effect column, so it starts at the sample's default
+        # volume until the next row unless the preceding cell can carry its velocity (a silent
+        # one-shot track). When that start would be more than `delay_snap_db` off, move the note
+        # to the nearest row instead (at most speed/2 ticks: one tick at speed 3) and put its
+        # velocity in the cell: a little timing for a correct onset level.
+        snap_db = song_cfg.get("delay_snap_db", cfg.get("delay_snap_db"))
+        if d and snap_db is not None:
+            can_prev = (s.kind == "drum" and same and trk_oneshot_end[tr] <= (r - 1) * row_s
+                        and r - 1 > trk_busy[tr] and grid.effect_free(tr, r - 1))
+            off_db = abs(20 * math.log10(max(s.default_volume, 1) / max(v, 1)))
+            move = speed - d if speed - d <= d else -d          # ticks: to the next row or back to this one
+            # don't collapse a flam, roll or grace note onto a neighbour of the same part
+            gaps = (onsets[n.channel] - n.t) / tick_s
+            collapses = bool(np.any((np.abs(gaps) >= 0.5) & (np.abs(gaps - move) < 0.5)))
+            if not can_prev and off_db > snap_db and not collapses:
+                err_sum -= abs((r * speed + d) * tick_s - (n.t + shift))
+                if move > 0:                         # nearer the next row: start there
+                    r += 1
+                d = 0
+                err_sum += abs(r * speed * tick_s - (n.t + shift))
+                rep.vel_snapped += 1
         cell = grid.get(tr, r)
         cell[0] = note_idx + 1
         if d == 0:
@@ -1400,12 +1423,12 @@ def main(argv: list[str] | None = None) -> int:
         (args.out_dir / f"MI{sid}.mod").write_bytes(mod_file(f"MI1 {sid}", samples, grid, patterns, tables))
         reports.append((sid, rep))
     print(f"{'song':<6} {'tempo':>5} {'spd':>3} {'row ms':>6} {'pat':>3} {'trk':>3} {'osc':>3} {'notes':>5} "
-          f"{'drop':>4} {'steal':>5} {'tchg':>4} {'delay':>5} {'v:cell':>6} {'v:prev':>6} {'v:dflt':>6} {'err ms':>6} {'halt':>5} {'st.vol':>6} {'plan':>4}")
+          f"{'drop':>4} {'steal':>5} {'tchg':>4} {'delay':>5} {'v:cell':>6} {'v:prev':>6} {'v:dflt':>6} {'err ms':>6} {'halt':>5} {'st.vol':>6} {'plan':>4} {'snap':>4}")
     for sid, rep in reports:
         print(f"{sid:<6} {rep.tempo:5d} {rep.speed:3d} {rep.row_ms:6.1f} {rep.patterns:3d} {rep.tracks_used:3d} "
               f"{rep.oscillators:3d} {rep.notes:5d} {rep.dropped:4d} {rep.stolen:5d} {rep.tempo_changes:4d} {rep.delayed:5d} "
               f"{rep.vel_in_cell:6d} {rep.vel_preceding:6d} "
-              f"{rep.vel_default:6d} {rep.timing_err_ms:6.1f} {rep.halted:5d} {max(rep.stolen_levels, default=0):6d} {('-' if rep.melodic_cap is None else str(rep.melodic_cap)) + ('f' if rep.borrow == 'first' else ''):>4}")
+              f"{rep.vel_default:6d} {rep.timing_err_ms:6.1f} {rep.halted:5d} {max(rep.stolen_levels, default=0):6d} {('-' if rep.melodic_cap is None else str(rep.melodic_cap)) + ('f' if rep.borrow == 'first' else ''):>4} {rep.vel_snapped:4d}")
     for sid, rep in reports:
         if rep.dropped_by:
             print(f"MI{sid} dropped (no oscillator): " + ", ".join(f"{k} {v}" for k, v in sorted(rep.dropped_by.items(), key=lambda kv: -kv[1])))
