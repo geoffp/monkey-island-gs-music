@@ -269,6 +269,25 @@ def test_melodic_one_shots_may_use_one_oscillator_tracks(tmp_path):
     assert rep.track_kinds[0] == "melodic"
 
 
+def test_track_plan_prefers_fewer_tracks_at_equal_loss(tmp_path):
+    import mido
+    # a 2-note chord, then (after it has fully released) 2 drum hits: opening drum tracks makes
+    # 4 tracks, reusing the idle melodic tracks ("first") keeps 2, with nothing lost either way
+    ev = [mido.Message("program_change", channel=1, program=9)]
+    ev += [mido.Message("note_on", channel=1, note=k, velocity=100) for k in (60, 64)]
+    ev += [mido.Message("note_off", channel=1, note=k, time=120 if k == 60 else 0) for k in (60, 64)]
+    ev += [mido.Message("note_on", channel=9, note=k, velocity=100, time=480 if k == 36 else 0) for k in (36, 38)]
+    p = _song(tmp_path, ev)
+    kick = _fake(kind="drum")
+    kick.loop_len, kick.seconds = 0, 0.1
+    drums = {k: (1, 20, 1.0) for k in (36, 38)}
+    cfg = {"rows_per_unit": 2, "speed": 3, "quantize": 0.0, "oscillators": 31, "unit_ticks": 30, "phase_ticks": 0}
+    _, _, first = nm.convert_song(p, [_fake(), kick], {9: 0}, drums, cfg, dict(cfg))
+    assert first.tracks_used == 4
+    _, _, rep = nm.plan_tracks(p, [_fake(), kick], {9: 0}, drums, cfg, dict(cfg))
+    assert rep.tracks_used == 2 and rep.borrow == "first" and nm.allocation_cost(rep) == 0
+
+
 def test_tempo_commands_stay_on_the_ideal_grid():
     ideal, speed, rows, tol = 97.56, 3, 2000, 0.002
     ch = nm.tempo_commands(ideal, speed, rows, lambda r: True, tol)

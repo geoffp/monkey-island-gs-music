@@ -144,6 +144,18 @@ The one-shot then plays at an **exact** period-table rate: with no loop to fit, 
 - **Rejected:** putting them on 1-oscillator drum tracks. It starved the percussion (MI160: 16 → 31–77 dropped notes), measured with the new per-sound drop line in the build log.
 - **Revisited 2026-11-08, now the default** (`melodic_one_shots = "any"`): with the whole-song track plan bounding the 1-oscillator tracks, one-shots may use either track type (a free 1-oscillator track first). MI160 drops 9 → 0 and audible steals 244 → 167 (shared). See `docs/ninjatrackerplus.md`, "Track allocation".
 
+### Song-sized one-shots: tried and rejected (2026-11-08)
+**Idea:** a song only needs a one-shot to last as long as its own longest note (note + release, in sample time at the note's key). So a decaying looped sound could become a one-shot when that fits in the 2 s recording and in the DOC RAM the planned set leaves free, giving the recorded decay instead of attack + 512 B averaged loop + `Cxx` decay steps, on 1 oscillator.
+
+**Built as trial `per-song-os`:** 7 songs qualified (Acou Bass in MI150, 162, 165; Marimba in MI150, 154, 158; Vibes in MI161; Taiko in MI166). The shared bank can't (8–33 K per sound against 1.5–2.5 K), nor can full songs (MI151, 152, 159, 160, 163) or notes longer than the recording.
+
+**Why rejected:**
+- **No polyphony gain:** the songs it applies to had no drops or audible steals; the songs that need oscillators (MI160, 152, 163) have no free DOC, so it can never apply where it would help.
+- **Little audible difference** (user, listening): the median note is about 0.5 s, so the decay's evolution rarely shows.
+- **Cost:** samples +100 KB (`.NTP` 1142 → 1244 KB, +9 %; 10–25 KB per song), plus code.
+
+Found alongside: a melodic one-shot's end time now scales with its key (`s.seconds × 2^(−(key − key0)/12)`). It used the key0 length, so lower notes freed their track while still sounding (Xylophone: per-song MI160 steals 260 → 257).
+
 ## Short raw loops add a tremolo (2026-11-07)
 A raw loop shorter than the sound's own wobble replays a slice of it at the loop rate. In shared Elec Organ (1024 B) that was a 6.3 dB tremolo at 15 Hz. The build now measures every raw loop size (`ntpmod.raw_loop_ok`: it must repeat at ≤ 2 Hz, or have ≤ 1 dB of level range and ≤ −50 dB of loop-rate content) and fails if any loop doesn't pass. `report.md` has a tremolo column. Details are in `docs/ninjatrackerplus.md`, "Tremolo from short raw loops".
 

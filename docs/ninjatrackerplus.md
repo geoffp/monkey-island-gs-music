@@ -368,6 +368,40 @@ There were about 3,500 such ghosts per build. Examples: MI152 ≈ 600, MI160 ≈
 
 **Still open (theory 2):** steals, i.e. a releasing note cut for a new one, are abrupt on the DOC. NTP halts oscillators outright, with no declick ramp, where desktop players ramp over a few milliseconds. MI160 had about 620–780 of them; since 2026-11-08 most fall on a release that has already reached 0 (see "Track allocation", step 4).
 
+## Build options: tradeoffs (2026-11-08)
+What each option buys and costs, as measured. Sizes are totals over all 16 songs. Pattern data is 256 B per track per 64-row pattern, so allocation options change it through the track count; sample options change the sample data. Where a cost hasn't been measured, the entry says so.
+
+**Sample sets**
+- **`samples = "per-song"` vs `"shared"`.** *Per-song:* each `.NTP` carries only its own sounds, and free DOC RAM grows steady sounds into long raw loops (better sustains; per-song Elec Organ's 8192 B loop holds its rotary wobble). *Shared:* one bank for every song, byte-identical in each file, so a game can keep it resident; every sound gets a 512 B loop, and four attacks are shortened to fit (below). *Size:* per-song 1142 KB of `.NTP`, shared 1480 KB, because every shared file carries the whole ~60 KB bank; with a resident bank a game loads only header + patterns per song (shared patterns 516 KB). *Polyphony:* about the same (shared drops 2, audible steals 180; per-song 3, 280).
+- **`ntp_attack_bytes` (shared: Elec Organ, Sax, Acou Bass, Vibes at 1016 B).** Keeps the 16-page sound-effect reserve in the shared bank (−16 pages), at the least measured cost: log-spectral distance vs Munt over the first 0.6 s changes −0.28…+0.06 dB.
+- **`reserve_pages = 16`.** 4 KB of DOC kept for game sound effects; it limits loop growth (per-song) and forces the shortened shared attacks.
+
+**Sounds**
+- **`one_shots`** (default on). A decaying sound that fades into 8-bit noise within its attack + loop budget is stored whole: only Xylophone qualifies. *Gains:* exactly in tune (was −1.0 cents), no loop of quantisation noise, 1 oscillator, frees its track when the sample ends (MI162 drops 8 → 0). *Cost:* none measured; shared bank 240 → 238 pages.
+- **`loop_only`** (trial `per-song-lo` / `shared-lo`, Elec Organ). *Gains:* 1 oscillator instead of 2: drops 11 → 1, audible steals 262 → 195, and with the track plan and one-shot routing 184 → 39 (shared). *Costs:* the attack is lost. Over the first 100 ms the tone is about 2 dB further from Munt, and the first 0.2–0.3 s is quieter: the 5.4 dB onset peak and the gain-1 handover are gone. **Listening: clearly audible and significantly quieter, much more so in shared.** *Size:* patterns +29…+30 KB (more 1-oscillator tracks), samples −16…−20 KB (no attack headers), `.NTP` +10…+13 KB; DOC −4 pages (shared 237 → 233). Undecided.
+- **Song-sized one-shots** (rejected 2026-11-08): +100 KB of samples (+9 %) for no polyphony gain and little audible difference; see `docs/loop-detection.md`.
+- **`halt_released_loops`** (default on). Ends each release with a silent one-shot that stops the loop. *Gains:* no ghost of the previous note before a delayed note. *Cost:* one 256 B rest sample per set; per-song MI167 was at its page limit, so its Strings loop halved (16384 → 8192 B).
+
+**Allocation** (`convert_song`, "Track allocation" below)
+- **Quietest-release steals** (always on). *Gains:* MI160 audible steals 612 → 244 (shared), cut volume median 9 → 0, p90 25 → 3. *Costs:* none; same tracks, same size.
+- **`steal_protect = 2`.** Steals spare parts with ≤ 2 active notes (bass lines, solos, duets): such cuts in MI160 89 → 0, Acou Bass 47 → 11. *Cost:* chord voices take the cuts, slightly louder (p90 11 → 17, max 23 → 27). Size unchanged. Listening: "a great improvement".
+- **`track_plan`** (default on). Per song, the 2-/1-oscillator split and the borrowing order with the least loss, then the fewest tracks. *Gains:* loop-only MI160 steals 195 → 81 (split); pattern data −2.5…−3.5 % everywhere at equal loss (shared 529 → 516 KB, per-song 527 → 516, loop-only 566 → 546; borrowing order). *Cost:* build time; the cap search alone took the 4-mode build from 52 to 58 s, and the borrowing-order search repeats it (not timed separately).
+- **`melodic_one_shots = "any"`** (default). One-shots may use 1-oscillator tracks. *Gains:* MI160 shared drops 9 → 0, steals 244 → 167; loop-only 81 → 39. *Costs:* MI160 +1 track (+4.5 KB patterns); its loudest cut 27 → 29. Under first come (without the plan) it was worse: drops 16 → 31–77.
+- **`drum_borrow = "last"`.** Drums open a 1-oscillator track while the budget allows, then borrow a free melodic one. Measured before the plan: "first" tied up melodic tracks (MI152 drops 1 → 14). The plan now tries both and keeps "first" where it loses nothing and saves tracks (5–9 songs per variant).
+
+**Timing grid** (`rows_per_unit`, `speed`, `quantize`; full table in `plans/ntp-quantization.md`)
+- **Current 2 rows per unit, speed 3:** 45.7 % of notes start at the default volume for 1–2 ticks (median 1.6 dB off), timing error 7.7 ms, patterns 527 KB (before the plan).
+- **Finer rows** cure velocity loss (6 rows/unit: 0 %) but cost 2.8× the pattern data. **Row packing** (1 row/unit, speed 6) halves it (295 KB) at the same velocity and timing, but more than doubles steals. **More ticks per row** (2, 6) halves timing error and loses more velocity (67 %). Quantization is on hold.
+
+**Current totals:**
+
+| variant | `.NTP` total | patterns | samples + header | largest |
+|---|---|---|---|---|
+| per-song | 1142 KB | 516 KB | 626 KB | MI160 136 KB |
+| shared | 1480 KB | 516 KB | 964 KB | MI160 141 KB |
+| per-song-lo | 1152 KB | 546 KB | 606 KB | MI160 143 KB |
+| shared-lo | 1493 KB | 545 KB | 948 KB | MI160 149 KB |
+
 ## Track allocation (`convert_song`; current rules, 2026-11-07)
 NTP has no voice allocation: each MOD track owns its oscillators for the whole song (`determine_osc_per_track`). So `convert_song` assigns every note to a track itself, once, in onset order.
 
@@ -409,7 +443,7 @@ A track is *free* at row r when it isn't busy and its cell there is empty.
      The cost moves to chord voices, cut slightly louder. The 11 bass cuts left are a fast line whose overlapping tails make 3+ active notes. Counting only *held* notes (plus the victim) was worse (Acou Bass 16, 78 cuts left on small parts): chord voices release together, so a releasing chord stops counting as large exactly when its tails are the ones to take.
 5. **Drop** the note. The build log lists drops per sound (`MInnn dropped (no oscillator): ...`).
 
-**Track plan** (`plan_tracks`, `track_plan = true`, 2026-11-08). A track's type is fixed when it is created, so first come lets a song's early notes fix the 2-/1-oscillator split for the whole song. The planner instead caps the melodic tracks at M (`melodic_tracks`; the 1-oscillator tracks get the remaining `oscillators − 2M`) and picks M by cost = 64 × dropped notes + the summed MOD volume of the audible steals. It walks from the first-come count while the cost falls (the cost has one valley per song, measured over M = 0–15). Ties go to fewer tracks (less pattern data), and first come stays if nothing beats it. Songs with no loss skip the search. Under a cap, a drum that finds no free track may open one of the planned melodic tracks the song hasn't created yet (otherwise caps dropped early drums). The build log's `plan` column is the chosen M (`-`: first come).
+**Track plan** (`plan_tracks`, `track_plan = true`, 2026-11-08). A track's type is fixed when it is created, so first come lets a song's early notes fix the 2-/1-oscillator split for the whole song. The planner instead caps the melodic tracks at M (`melodic_tracks`; the 1-oscillator tracks get the remaining `oscillators − 2M`) and picks M by cost = 64 × dropped notes + the summed MOD volume of the audible steals. It walks from the first-come count while the cost falls (the cost has one valley per song, measured over M = 0–15). Ties go to fewer tracks (less pattern data), and first come stays if nothing beats it. Songs with no loss skip the cap search. The whole search runs for both drum-path borrowing orders (`drum_borrow` "last" and "first"), and the plan keeps the least loss, then the fewest tracks: at equal loss, reusing idle 2-oscillator tracks often needs fewer tracks. Measured over all songs, same loss everywhere: pattern data shared 529 → 516 KB, per-song 527 → 516, loop-only 566 → 546; "first" wins in 5–9 songs per variant. The `plan` column adds `f` when "first" was chosen. Under a cap, a drum that finds no free track may open one of the planned melodic tracks the song hasn't created yet (otherwise caps dropped early drums). The build log's `plan` column is the chosen M (`-`: first come).
 
 | | first come → planned |
 |---|---|

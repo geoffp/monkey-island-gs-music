@@ -44,6 +44,7 @@ Overnight work list, 2026-11-07, in order. Commit after each item.
 - [x] **MI167 drops 82 notes** (all percussion): track-type fragmentation; drums now borrow idle melodic tracks (`drum_borrow`). MI167 0, totals 105 -> 13 (per-song) / 11 (shared).
 - [x] Polyphony: steal the quietest release (2026-11-08; MI160 cut volume median 9 → 0), sparing parts of ≤ 2 active notes (`steal_protect`: bass, solos, duets; MI160 89 → 0 such cuts).
 - [~] Polyphony: loop-only (1-oscillator) Elec Organ: trial variants `per-song-lo` / `shared-lo` (drops 11 → 1, steals 262 → 195). Audible, more so in shared; user undecided (2026-11-08).
+- [x] Per-song song-sized one-shots: tried and rejected (2026-11-08): +100 KB samples, no polyphony gain, little audible difference.
 - [x] Polyphony: whole-song track planner (`plan_tracks`, 2026-11-08). Base modes were already at the best split; loop-only MI160 steals 195 → 81. Melodic one-shots may now use 1-oscillator tracks too: MI160 shared drops 9 → 0, steals 244 → 167.
 - [ ] **Quantization / row packing:** see `plans/ntp-quantization.md` (on hold; its tradeoff table comes first).
 - [ ] **Velocity of delayed notes, at no data cost:** 45.7 % of notes carry `EDx` and start at the sample's default volume until the next row (median 1.6 dB off; 24 % > 3 dB, 6 % > 6 dB; worst MI162, 164, 166). Per note, choose between keeping the delay and moving one tick to a row boundary with in-cell velocity, only when the velocity error is large (≳ 4 dB). Trades one tick (18–51 ms) of timing for the worst onsets. Measure both errors before and after.

@@ -778,6 +778,7 @@ class Report:
     row_ms: float = 0.0
     timing_err_ms: float = 0.0
     melodic_cap: int | None = None   # planned 2-oscillator track cap (plan_tracks); None: first come
+    borrow: str = ""                 # drum-path borrowing order plan_tracks chose ("last" / "first")
 
 
 def tempo_commands(ideal: float, speed: int, rows: int, can_set, tol: float) -> list[tuple[int, int]]:
@@ -1078,7 +1079,8 @@ def convert_song(path: Path, samples, programs, drums, cfg: dict, song_cfg: dict
             # once its sample ends: it holds the track only until then (or its note-off, if
             # earlier), carries its own decay (no envelope rows), and needs a release only when
             # the note-off comes first.
-            oneshot_end = None if s.loop_len else n.t + s.seconds
+            # a lower note plays the sample slower: it lasts longer than at key0
+            oneshot_end = None if s.loop_len else n.t + s.seconds * 2 ** (-(n.key - s.key0) / 12)
             cut = oneshot_end is not None and n.off < oneshot_end
             r_off, _ = place(n.off if oneshot_end is None else min(n.off, oneshot_end))
             r_off = max(r_off, r + 1)
@@ -1169,16 +1171,34 @@ def allocation_cost(rep: "Report") -> int:
 
 
 def plan_tracks(path: Path, samples, programs, drums, cfg: dict, song_cfg: dict, cc7=None):
-    """convert_song with the 2-/1-oscillator track split chosen for the whole song. Tracks are
-    typed when created, so first come lets early notes fix the split (loop-only organ notes
-    opened 11 1-oscillator tracks in MI160 and left 10 melodic). Try capping the melodic
-    tracks at M (1-oscillator tracks get the rest of the budget), walking from the first-come
-    count while the cost falls (it has one valley per song); keep first come if nothing beats
-    it. Ties go to fewer tracks (less pattern data)."""
-    first = convert_song(path, samples, programs, drums, cfg, song_cfg, cc7)
-    if not song_cfg.get("track_plan", cfg.get("track_plan", True)) or allocation_cost(first[2]) == 0:
-        return first
+    """convert_song with the track layout chosen for the whole song: the least polyphony loss
+    (allocation_cost), then the fewest tracks (pattern data is 256 B per track per pattern).
+    Tried for both drum-path borrowing orders ("last": open a 1-oscillator track while the
+    budget allows; "first": reuse an idle 2-oscillator track first, which often needs fewer
+    tracks), each with the melodic-track cap search of _plan_split."""
+    if not song_cfg.get("track_plan", cfg.get("track_plan", True)):
+        return convert_song(path, samples, programs, drums, cfg, song_cfg, cc7)
+    borrow = song_cfg.get("drum_borrow", cfg.get("drum_borrow", "last"))
+    orders = [borrow] if borrow == "never" else [borrow] + [b for b in ("last", "first") if b != borrow]
     key = lambda res: (allocation_cost(res[2]), res[2].tracks_used)
+    best = None
+    for b in orders:
+        res = _plan_split(path, samples, programs, drums, cfg, {**song_cfg, "drum_borrow": b}, cc7, key)
+        res[2].borrow = b
+        if best is None or key(res) < key(best):
+            best = res
+    return best
+
+
+def _plan_split(path, samples, programs, drums, cfg, song_cfg, cc7, key):
+    """The 2-/1-oscillator split for one borrowing order. Tracks are typed when created, so first
+    come lets early notes fix the split (loop-only organ notes opened 11 1-oscillator tracks in
+    MI160 and left 10 melodic). Try capping the melodic tracks at M (1-oscillator tracks get the
+    rest of the budget), walking from the first-come count while the cost falls (it has one
+    valley per song); keep first come if nothing beats it. Songs with no loss keep first come."""
+    first = convert_song(path, samples, programs, drums, cfg, song_cfg, cc7)
+    if allocation_cost(first[2]) == 0:
+        return first
     tried = {}
 
     def at(m: int):
@@ -1385,7 +1405,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{sid:<6} {rep.tempo:5d} {rep.speed:3d} {rep.row_ms:6.1f} {rep.patterns:3d} {rep.tracks_used:3d} "
               f"{rep.oscillators:3d} {rep.notes:5d} {rep.dropped:4d} {rep.stolen:5d} {rep.tempo_changes:4d} {rep.delayed:5d} "
               f"{rep.vel_in_cell:6d} {rep.vel_preceding:6d} "
-              f"{rep.vel_default:6d} {rep.timing_err_ms:6.1f} {rep.halted:5d} {max(rep.stolen_levels, default=0):6d} {'-' if rep.melodic_cap is None else rep.melodic_cap:>4}")
+              f"{rep.vel_default:6d} {rep.timing_err_ms:6.1f} {rep.halted:5d} {max(rep.stolen_levels, default=0):6d} {('-' if rep.melodic_cap is None else str(rep.melodic_cap)) + ('f' if rep.borrow == 'first' else ''):>4}")
     for sid, rep in reports:
         if rep.dropped_by:
             print(f"MI{sid} dropped (no oscillator): " + ", ".join(f"{k} {v}" for k, v in sorted(rep.dropped_by.items(), key=lambda kv: -kv[1])))
