@@ -3,7 +3,7 @@
 import tomllib
 
 from migs import bram
-from migs.emu import write_config
+from migs.emu import Disk, write_config
 from test_bram import REAL
 
 
@@ -29,3 +29,11 @@ def test_rewrite_keeps_gssquared_id_and_saved_bram(tmp_path):
     b = bytes.fromhex(cfg["bram"])
     assert cfg["id"] == "abc-123" and cfg["speed"] == "2.8mhz"
     assert b[0x1E] == 3 and b[0x28] == 5 and bram.is_valid(b)              # kept + patched
+
+
+def test_names_with_quotes_and_control_characters_stay_valid_toml(tmp_path):
+    f = tmp_path / "m.gs2"
+    name = 'MI1 "music"\\\tx'
+    write_config(f, name, "ludicrous", {}, [Disk(7, 1, "A B.PO")], {}, None)
+    cfg = tomllib.loads(f.read_text())
+    assert cfg["name"] == name and "bram" not in cfg
