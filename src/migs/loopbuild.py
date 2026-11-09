@@ -15,13 +15,14 @@ other candidates.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import numpy as np
+from scipy.signal import resample
 
-from . import audio, munt
-
-SR = munt.SR
+from .audio import interp_at, onset, refine_period, smooth
+from .munt import SR
 
 
 @dataclass
@@ -58,22 +59,13 @@ def harmonic_tracks(x: np.ndarray, a: int, period: float, end: int | None = None
     return Tracks((centres - a) / SR, amp, period)
 
 
-def _smooth(y: np.ndarray, n: int) -> np.ndarray:
-    if n <= 1:
-        return y
-    c = np.concatenate([[0.0], np.cumsum(y)])
-    i = np.arange(len(y))
-    lo, hi = np.maximum(i - n // 2, 0), np.minimum(i + (n - 1) // 2, len(y) - 1) + 1
-    return (c[hi] - c[lo]) / (hi - lo)
-
-
 def modulation_period(y: np.ndarray, dt: float, lo: float = 0.06, hi: float = 1.2, min_r: float = 0.3) -> float | None:
     """Period (s) of a periodic wobble in a track (chorus/beating/tremolo): the first strong
     autocorrelation peak of the track minus its slow trend, or None."""
     n = len(y)
     if n * dt < 2 * lo:
         return None
-    d = y - _smooth(y, int(round(min(hi * 1.5, n * dt / 2) / dt)))
+    d = y - smooth(y, int(round(min(hi * 1.5, n * dt / 2) / dt)))
     d = d - d.mean()
     r = np.correlate(d, d, "full")[n - 1:]
     if r[0] <= 0:
@@ -118,7 +110,7 @@ def settle(tr: Tracks, band: float = 1.5, decay: float = -2.0, dead_db: float = 
     L = 10 * np.log10(np.maximum(P, 1e-14))
     mod = modulation_period(L, dt, lo=0.1, hi=2.0)
     n = max(1, int(round(max(0.05, mod or 0.0) / dt)))
-    Ls = 10 * np.log10(np.maximum(_smooth(P, n), 1e-14))
+    Ls = 10 * np.log10(np.maximum(smooth(P, n), 1e-14))
     ip = int(np.argmax(Ls))
     below = np.nonzero(Ls[ip:] < Ls[ip] - dead_db)[0]
     dead = float(tr.t[ip + below[0]]) if len(below) else None
@@ -134,7 +126,7 @@ def settle(tr: Tracks, band: float = 1.5, decay: float = -2.0, dead_db: float = 
     w = w / (w.sum() or 1.0)
     keep = w > 1e-3
     k = max(1, int(round(short_s / dt)))
-    db = 10 * np.log10(np.maximum(np.vstack([_smooth(r, k) for r in e]), 1e-14))
+    db = 10 * np.log10(np.maximum(np.vstack([smooth(r, k) for r in e]), 1e-14))
     if steady:
         lo = db[:, i0:end].min(axis=1) - band
         hi = db[:, i0:end].max(axis=1) + band
@@ -159,27 +151,23 @@ def settle(tr: Tracks, band: float = 1.5, decay: float = -2.0, dead_db: float = 
     return Settle(attack, float(tr.t[ip]), mod, depth, steady, slope, dead, Ls, w)
 
 
-def _at(x: np.ndarray, pos: np.ndarray) -> np.ndarray:
-    return np.interp(pos, np.arange(len(x)), x)
-
-
-def _cycle_at_rate(cyc_fine: np.ndarray, k: int, out: int) -> np.ndarray:
+def cycle_at_rate(cyc_fine: np.ndarray, k: int, out: int) -> np.ndarray:
     """k copies of one cycle in `out` points. With out % k == 0 each copy is the same whole
     number of samples (band-limited once, then tiled), so they stay identical when rounded."""
-    from scipy.signal import resample
     if out % k == 0:
         return np.tile(resample(cyc_fine, out // k), k)
     return resample(np.tile(cyc_fine, k), out)
 
 
-def harmonic_cycle(x, lo, hi, period, fine=1024, phase_at=None, harmonics=None):
+def harmonic_cycle(x: np.ndarray, lo: float, hi: float, period: float, fine: int = 1024,
+                   phase_at: float | None = None, harmonics: int | None = None) -> np.ndarray:
     """One cycle whose harmonic amplitudes are the RMS of each harmonic over [lo, hi)
     (power-averaged: beating partials keep their mean power instead of cancelling) and whose
     phases are those of the period at `phase_at` (default lo)."""
     tr = harmonic_tracks(x, int(lo), period, end=int(hi))
     amp = np.sqrt(np.mean(tr.amp ** 2, axis=1))
     p0 = lo if phase_at is None else phase_at
-    cyc = _at(x, p0 + np.arange(fine) * period / fine)
+    cyc = interp_at(x, p0 + np.arange(fine) * period / fine)
     X = np.fft.rfft(cyc)
     H = len(amp) if harmonics is None else min(harmonics, len(amp))
     Y = np.zeros_like(X)
@@ -188,10 +176,11 @@ def harmonic_cycle(x, lo, hi, period, fine=1024, phase_at=None, harmonics=None):
     return np.fft.irfft(Y, fine)
 
 
-def loop_power(x, lo, hi, period, k, out, at=None):
+def loop_power(x: np.ndarray, lo: float, hi: float, period: float, k: int, out: int,
+               at: float | None = None) -> np.ndarray:
     """E: constructed loop, exactly periodic: one power-averaged harmonic cycle over the
     sustain [lo, hi), phases from `at`, tiled k times (whole samples per cycle when k | out)."""
-    return _cycle_at_rate(harmonic_cycle(x, lo, hi, period, phase_at=at), k, out)
+    return cycle_at_rate(harmonic_cycle(x, lo, hi, period, phase_at=at), k, out)
 
 
 def zero_start_exact(loop: np.ndarray, c: int, iters: int = 8) -> np.ndarray:
@@ -228,11 +217,11 @@ def zero_start_exact(loop: np.ndarray, c: int, iters: int = 8) -> np.ndarray:
 
 def join_aligned(x: np.ndarray, a: int, period: float, rate: float, k: int, attack_bytes: int,
                  loop: np.ndarray, xfade_cycles: float = 4.0, steps: int = 64) -> tuple[np.ndarray, np.ndarray]:
-    """Like `join`, but the loop keeps its exact zero crossing at index 0 and the *attack*
-    moves instead: the attack's source start shifts earlier by 0..1 period (pre-onset
+    """Like looplab.join, but the loop keeps its exact zero crossing at index 0 and the
+    *attack* moves instead: the attack's source start shifts earlier by 0..1 period (pre-onset
     silence) so that the attack ends in phase with the loop's start. The crossfade then joins
-    two aligned waveforms (no partial cancellation, no level dip, no spectral jump)."""
-    from scipy.signal import resample
+    two aligned waveforms (no partial cancellation, no level dip, no spectral jump). The loop
+    is scaled to the attack's tail level; returns (attack, loop)."""
     L = len(loop)
     n = min(attack_bytes // 4, max(4, int(round(xfade_cycles * L / k))))
     src_len = attack_bytes / rate * SR                      # source samples the attack covers
@@ -242,17 +231,15 @@ def join_aligned(x: np.ndarray, a: int, period: float, rate: float, k: int, atta
     ext = loop[np.arange(-n, 0) % L]                        # the loop's continuation before index 0
     tpos = np.arange(-n, 0) * (SR / rate)                   # those points, in source samples
 
-    def tail_at(s0):
-        return _at(x, s0 + src_len + tpos)
-    best_s0, best_r = float(a), -2.0
-    for s0 in a - np.arange(steps + 1) * (period / steps):
-        t = tail_at(s0)
-        r = float(np.dot(t, ext) / ((np.linalg.norm(t) * np.linalg.norm(ext)) or 1.0))
-        if r > best_r:
-            best_r, best_s0 = r, float(s0)
-    m = int(4 * period)
-    pos = best_s0 + np.arange(int(np.ceil(src_len)) + m)
-    seg = _at(x, pos)
+    def match(s0: float) -> float:
+        """Correlation of the attack's tail, starting the attack at source sample s0, with
+        the loop's continuation."""
+        t = interp_at(x, s0 + src_len + tpos)
+        return float(np.dot(t, ext) / ((np.linalg.norm(t) * np.linalg.norm(ext)) or 1.0))
+    # first best wins, scanning from `a` back one period
+    best_s0 = float(max(a - np.arange(steps + 1) * (period / steps), key=match))
+    margin = int(4 * period)                                # so the resampler doesn't ring at the end
+    seg = interp_at(x, best_s0 + np.arange(int(np.ceil(src_len)) + margin))
     attack = resample(seg, int(round(len(seg) * rate / SR)))[:attack_bytes]
     if len(attack) < attack_bytes:
         attack = np.pad(attack, (0, attack_bytes - len(attack)))
@@ -270,7 +257,7 @@ def join_aligned(x: np.ndarray, a: int, period: float, rate: float, k: int, atta
 @dataclass
 class Sound:
     name: str
-    m: dict
+    m: dict                 # its [[melodic]] entry in config/mt32bank.toml
     x: np.ndarray           # long render (analysis + audio)
     a: int
     period: float
@@ -281,11 +268,15 @@ class Sound:
     hi: int
 
 
-def analyse(m: dict, render, hold: float = 6.0, build_hold: float = 2.0) -> Sound:
+def analyse(m: dict, render: Callable[[int, int, float], np.ndarray], hold: float = 6.0,
+            build_hold: float = 2.0) -> Sound:
+    """Analyse a sound from a `hold`-second render (`render(program, key, hold)`): its
+    harmonic tracks, where its attack settles, and the sustain span a loop may come from
+    (within what the build's `build_hold` recording holds)."""
     x = render(m["program"], m["key"], hold)
-    a = audio.onset(x)
+    a = onset(x)
     f0 = 440 * 2 ** ((m["key"] - 69) / 12)
-    period = audio.refine_period(x, a + int(0.25 * SR), f0)
+    period = refine_period(x, a + int(0.25 * SR), f0)
     tr = harmonic_tracks(x, a, period, end=a + int(hold * SR))
     st = settle(tr)
     if st.steady:

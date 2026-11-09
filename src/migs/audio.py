@@ -10,6 +10,25 @@ from scipy.signal import resample
 from .munt import SR
 
 
+def smooth(x: np.ndarray, n: int) -> np.ndarray:
+    """Centered moving average over n samples (edges averaged over what exists): the window of
+    np.convolve(x, ones(n), "same") / the same of ones, i.e. x[i - n//2 .. i + (n-1)//2] clipped,
+    computed in O(len) from a cumulative sum instead of O(len * n) (250 ms windows at 32 kHz
+    made the direct convolution 2/3 of the whole build)."""
+    if n <= 1:
+        return x
+    c = np.concatenate([[0.0], np.cumsum(x, dtype=np.float64)])
+    i = np.arange(len(x))
+    lo = np.maximum(i - n // 2, 0)
+    hi = np.minimum(i + (n - 1) // 2, len(x) - 1) + 1
+    return (c[hi] - c[lo]) / (hi - lo)
+
+
+def interp_at(x: np.ndarray, pos: np.ndarray) -> np.ndarray:
+    """x at fractional sample positions (linear interpolation)."""
+    return np.interp(pos, np.arange(len(x)), x)
+
+
 def rms_envelope(x: np.ndarray, win: float = 0.01) -> np.ndarray:
     """RMS over a centred `win`-second window, per sample."""
     n = max(1, int(win * SR))

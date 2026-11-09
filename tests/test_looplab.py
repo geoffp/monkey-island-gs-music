@@ -55,15 +55,15 @@ def test_seam_flux_is_zero_for_a_periodic_loop_and_positive_for_a_jump():
 
 def test_whole_cycles_survive_8bit_rounding_but_fractional_ones_buzz():
     fine = cycle(1024, amps=(1.0, 0.6, 0.4, 0.3, 0.2))
-    whole = ll._cycle_at_rate(fine, 16, 512)                      # 32 samples per cycle
-    frac = ll._cycle_at_rate(fine, 15, 512)                       # 34.13 samples per cycle
+    whole = ll.cycle_at_rate(fine, 16, 512)                      # 32 samples per cycle
+    frac = ll.cycle_at_rate(fine, 15, 512)                       # 34.13 samples per cycle
     q = lambda y: np.round(y / np.max(np.abs(y)) * 127)
     assert ll.loop_buzz_db(q(whole), 16) == -200.0
     assert ll.loop_buzz_db(q(frac), 15) > -60
 
 
 def test_exact_zero_start_keeps_every_cycle_identical():
-    loop = ll._cycle_at_rate(cycle(1024, amps=(1.0, 0.8, 0.6, 0.5)), 16, 512)
+    loop = ll.cycle_at_rate(cycle(1024, amps=(1.0, 0.8, 0.6, 0.5)), 16, 512)
     c = int(np.nonzero((np.roll(loop, 1) < 0) & (loop >= 0))[0][0])
     rough = nm.zero_start(loop, c)                                # linear crossing, forced 0
     exact = ll.zero_start_exact(loop, c)

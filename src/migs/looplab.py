@@ -23,7 +23,8 @@ import math
 import numpy as np
 
 from . import audio, munt
-from .loopbuild import (Settle, Sound, Tracks, _at, _cycle_at_rate, _smooth, analyse,  # noqa: F401
+from .audio import interp_at
+from .loopbuild import (Settle, Sound, Tracks, analyse, cycle_at_rate,  # noqa: F401
                         harmonic_cycle, harmonic_tracks, join_aligned, loop_power,
                         modulation_period, settle, zero_start_exact)
 
@@ -64,8 +65,8 @@ def seam_score(x: np.ndarray, start: float, span: float, period: float, w_period
     (1 - NCC over `w_periods` periods on either side of the seam, plus a level-mismatch term)."""
     m = max(8, int(w_periods * period))
     t = np.arange(-m, m)
-    p = _at(x, start + t)
-    q = _at(x, start + span + t)
+    p = interp_at(x, start + t)
+    q = interp_at(x, start + span + t)
     ep, eq = float(np.sqrt(np.mean(p ** 2))) or 1e-9, float(np.sqrt(np.mean(q ** 2))) or 1e-9
     ncc = float(np.dot(p, q)) / (len(t) * ep * eq)
     return (1 - ncc) + abs(20 * math.log10(eq / ep)) / 20
@@ -81,10 +82,10 @@ def loop_search(x, lo, hi, period, k, out, at=None, xfade=0.1, step_periods=0.25
     best = min(starts, key=lambda s0: seam_score(x, s0, span, period))
     M = out * 4
     st = span / M
-    body = _at(x, best + np.arange(M) * st)
+    body = interp_at(x, best + np.arange(M) * st)
     nx = int(M * xfade)
     if nx > 1:
-        pre = _at(x, best - (nx - np.arange(nx)) * st)
+        pre = interp_at(x, best - (nx - np.arange(nx)) * st)
         tail = body[-nx:]
         r = float(np.dot(pre, tail) / ((np.linalg.norm(pre) * np.linalg.norm(tail)) or 1.0))
         u = np.linspace(0, 1, nx + 2)[1:-1]
@@ -100,9 +101,9 @@ def loop_snapshot_whole(x, lo, hi, period, k, out, at=None, cycles=4):
     """A': today's averaged snapshot cycle, but band-limited once and tiled (k | out)."""
     fine = 1024
     s0 = lo if at is None else at
-    cyc = np.mean([_at(x, s0 + period * (c + np.arange(fine) / fine)) for c in range(cycles)], axis=0)
-    loop = _cycle_at_rate(cyc, k, out)
-    src = _at(x, s0 + np.arange(fine * cycles) * (period / fine))
+    cyc = np.mean([interp_at(x, s0 + period * (c + np.arange(fine) / fine)) for c in range(cycles)], axis=0)
+    loop = cycle_at_rate(cyc, k, out)
+    src = interp_at(x, s0 + np.arange(fine * cycles) * (period / fine))
     e_src, e_loop = float(np.sqrt(np.mean(src ** 2))), float(np.sqrt(np.mean(loop ** 2)))
     return loop * (e_src / e_loop) if e_loop > 0 else loop
 
