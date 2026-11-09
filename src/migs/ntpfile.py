@@ -2,11 +2,13 @@
 """NinjaTrackerPlus .NTP files: split into sections, and check that a set of songs shares one
 resident instrument bank.
 
-Layout (vendor/ntp/src/file_format.txt, version 2), in file order:
-  header      "nfc!", version, #tracks, #instruments, #patterns, order length, Pascal song name
-  tracks      3 bytes per track: output channel, stream-buffer page, oscillator byte
-  instruments 14 bytes + Pascal name each: type, length (3), repeat (3), repeat length (3),
-              volume, finetune, DOC page, DOC wave size/resolution
+Layout (vendor/ntp/src/file_format.txt, versions 0-2), in file order:
+  header      "nfc!", version, #tracks, #instruments, #patterns, order length,
+              [v2] Pascal song name
+  tracks      per track: output channel, [v1+] stream-buffer page, [v2] oscillator byte
+  instruments per instrument: type, length (v0: 2 bytes, v1+: 3), [v1+] repeat (3) and
+              repeat length (3), volume, finetune, DOC page, DOC wave size/resolution,
+              [v2] Pascal name
   order       pattern numbers
   patterns    64 rows x tracks x 4 bytes
   samples     DOC-ready bytes, instrument order
@@ -22,6 +24,9 @@ import argparse
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+
+MAGIC = b"nfc!"
+ROWS, CELL = 64, 4                  # pattern rows; bytes per cell
 
 
 @dataclass
@@ -43,33 +48,53 @@ class NTP:
         return self.header + self.track_bytes + self.order + self.pattern_bytes
 
 
+class _Reader:
+    """A cursor over the file that fails clearly when a section runs past the end."""
+
+    def __init__(self, data: bytes):
+        self.data, self.pos = data, 0
+
+    def take(self, n: int, what: str) -> bytes:
+        if self.pos + n > len(self.data):
+            raise ValueError(f"truncated {what} at offset {self.pos}")
+        self.pos += n
+        return self.data[self.pos - n:self.pos]
+
+    def pascal(self, what: str) -> bytes:
+        """A Pascal string, its length byte included."""
+        n = self.take(1, what)[0]
+        return bytes([n]) + self.take(n, what)
+
+
 def parse(d: bytes) -> NTP:
-    if d[:4] != b"nfc!":
+    if d[:4] != MAGIC:
         raise ValueError("not an NTP file (no 'nfc!')")
-    ver, ntr, nins, npat, nord = d[4], d[5], d[6], d[7], d[8]
-    p = 9
+    r = _Reader(d)
+    r.take(9, "header")
+    ver, ntr, nins, npat, nord = d[4:9]
+    if ver > 2:
+        raise ValueError(f"unknown NTP version {ver}")
     if ver >= 2:
-        p += 1 + d[p]
-    header = d[:p]
-    tb = d[p:p + ntr * (3 if ver >= 2 else 2)]
-    p += len(tb)
-    i0, ins = p, []
-    for _ in range(nins):
-        q = p
-        p += 14 if ver >= 1 else 8
+        r.pascal("song name")
+    header = d[:r.pos]
+    track_bytes = r.take(ntr * (1 + ver), "track data")      # +1 byte per version
+    length_size = 3 if ver >= 1 else 2
+    fixed = 1 + length_size + (6 if ver >= 1 else 0) + 4     # type, length, [repeat], 4 bytes
+    start, instruments, lengths = r.pos, [], []
+    for i in range(nins):
+        rec = r.take(fixed, f"instrument {i + 1}")
         if ver >= 2:
-            p += 1 + d[p]
-        ins.append(d[q:p])
-    ib = d[i0:p]
-    order = d[p:p + nord]
-    p += nord
-    pb = d[p:p + 4 * ntr * 64 * npat]
-    p += len(pb)
-    lengths = [int.from_bytes(r[1:4], "little") for r in ins] if ver >= 1 else [int.from_bytes(r[1:3], "little") for r in ins]
-    samples = d[p:]
+            rec += r.pascal(f"instrument {i + 1} name")
+        instruments.append(rec)
+        lengths.append(int.from_bytes(rec[1:1 + length_size], "little"))
+    instrument_bytes = d[start:r.pos]
+    order = r.take(nord, "pattern order")
+    pattern_bytes = r.take(CELL * ntr * ROWS * npat, "pattern data")
+    samples = d[r.pos:]
     if len(samples) != sum(lengths):
         raise ValueError(f"sample data is {len(samples)} bytes, instruments say {sum(lengths)}")
-    return NTP(ver, ntr, ins, npat, header, tb, ib, order, pb, samples)
+    return NTP(ver, ntr, instruments, npat, header, track_bytes, instrument_bytes, order,
+               pattern_bytes, samples)
 
 
 def check_shared(files: list[Path]) -> list[str]:
@@ -81,7 +106,8 @@ def check_shared(files: list[Path]) -> list[str]:
     for f in files[1:]:
         x = parse(f.read_bytes())
         if x.instrument_bytes != ref.instrument_bytes:
-            n = sum(a != b for a, b in zip(x.instruments, ref.instruments)) + abs(len(x.instruments) - len(ref.instruments))
+            n = (sum(a != b for a, b in zip(x.instruments, ref.instruments))
+                 + abs(len(x.instruments) - len(ref.instruments)))
             problems.append(f"{f.name}: {n} instrument records differ from {files[0].name}")
         if x.samples != ref.samples:
             problems.append(f"{f.name}: sample data differs from {files[0].name}")

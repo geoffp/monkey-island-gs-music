@@ -39,3 +39,17 @@ def test_shared_bank_check(tmp_path):
     assert ntpfile.check_shared([a, b]) == []
     c.write_bytes(_ntp(b"song c", 41, 3))           # a per-song default volume breaks the bank
     assert any("instrument" in p for p in ntpfile.check_shared([a, c]))
+
+
+@pytest.mark.parametrize("ver", [0, 1])
+def test_older_versions_have_shorter_track_and_instrument_records(ver):
+    # v0: 1-byte tracks, 7-byte instruments (2-byte length, no repeat); v1: 2 and 14 bytes
+    tracks, samples = 2, b"\x80" * 10
+    d = b"nfc!" + bytes([ver, tracks, 1, 1, 1])
+    d += bytes(tracks * (1 + ver))
+    ln = len(samples).to_bytes(2 if ver == 0 else 3, "little")
+    d += bytes([0]) + ln + (b"" if ver == 0 else bytes(6)) + bytes([40, 0, 0, 0x09])
+    d += bytes([0]) + bytes(4 * tracks * 64) + samples
+    x = ntpfile.parse(d)
+    assert len(x.track_bytes) == tracks * (1 + ver)
+    assert len(x.instruments[0]) == (7 if ver == 0 else 14) and x.samples == samples
