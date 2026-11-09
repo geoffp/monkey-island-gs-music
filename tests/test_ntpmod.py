@@ -233,6 +233,42 @@ def test_loop_only_sounds_take_one_oscillator(tmp_path):
     assert rep.dropped == 0 and rep.track_kinds == ["drum", "drum"] and rep.oscillators == 2
 
 
+def test_track_plan_keeps_early_one_oscillator_notes_from_fixing_the_split(tmp_path):
+    import mido
+    # 3 drum hits open 3 1-oscillator tracks first; a later 3-note chord then finds room for
+    # one 2-oscillator track (budget 6). Planned: 3 melodic tracks, which the drums open and borrow.
+    ev = [mido.Message("program_change", channel=1, program=9)]
+    ev += [mido.Message("note_on", channel=9, note=k, velocity=100) for k in (36, 38, 42)]
+    ev += [mido.Message("note_on", channel=1, note=k, velocity=100, time=240 if k == 60 else 0) for k in (60, 64, 67)]
+    ev += [mido.Message("note_off", channel=1, note=k, time=120 if k == 60 else 0) for k in (60, 64, 67)]
+    p = _song(tmp_path, ev)
+    kick = _fake(kind="drum")
+    kick.loop_len, kick.seconds = 0, 0.1
+    drums = {k: (1, 20, 1.0) for k in (36, 38, 42)}
+    cfg = {"rows_per_unit": 2, "speed": 3, "quantize": 0.0, "oscillators": 6, "unit_ticks": 30, "phase_ticks": 0}
+    _, _, first = nm.convert_song(p, [_fake(), kick], {9: 0}, drums, cfg, dict(cfg))
+    assert first.dropped == 2 and first.melodic_cap is None
+    _, _, rep = nm.plan_tracks(p, [_fake(), kick], {9: 0}, drums, cfg, dict(cfg))
+    assert rep.dropped == 0 and rep.melodic_cap == 3 and rep.track_kinds == ["melodic"] * 3
+    _, _, off = nm.plan_tracks(p, [_fake(), kick], {9: 0}, drums, cfg, {**cfg, "track_plan": False})
+    assert off.dropped == 2
+
+
+def test_melodic_one_shots_may_use_one_oscillator_tracks(tmp_path):
+    import mido
+    ev = [mido.Message("program_change", channel=1, program=9),
+          mido.Message("note_on", channel=1, note=60, velocity=100),
+          mido.Message("note_off", channel=1, note=60, time=120)]
+    p = _song(tmp_path, ev)
+    shot = _fake()
+    shot.loop_start, shot.loop_len, shot.seconds = 0, 0, 0.3
+    cfg = {"rows_per_unit": 2, "speed": 3, "quantize": 0.0, "oscillators": 31, "unit_ticks": 30, "phase_ticks": 0}
+    _, _, rep = nm.convert_song(p, [shot], {9: 0}, {}, cfg, dict(cfg))
+    assert rep.track_kinds[0] == "drum" and rep.oscillators == 1
+    _, _, rep = nm.convert_song(p, [shot], {9: 0}, {}, cfg, {**cfg, "melodic_one_shots": "melodic"})
+    assert rep.track_kinds[0] == "melodic"
+
+
 def test_tempo_commands_stay_on_the_ideal_grid():
     ideal, speed, rows, tol = 97.56, 3, 2000, 0.002
     ch = nm.tempo_commands(ideal, speed, rows, lambda r: True, tol)

@@ -36,6 +36,9 @@ drum_borrow = "last"    # drums use an idle melodic track when no drum track is 
                         # is full ("first": before opening a new drum track; "never")
 steal_protect = 2        # steals prefer parts (channels) with more notes active than this: spare
                         # bass lines and solos/duets, take a chord voice (0: quietest release only)
+melodic_one_shots = "any"  # one-shots (Xylophone) may use 1- or 2-oscillator tracks ("melodic": 2 only)
+track_plan = true       # choose each song's 2-/1-oscillator track split for the least polyphony loss
+                        # (plan_tracks) instead of letting the first notes fix it
 halt_released_loops = true  # end each release with a silent one-shot that stops the loop: NTP
                         # applies a delayed (EDx) cell's instrument volume at tick 0, which made
                         # the old loop audible until the note (docs/ninjatrackerplus.md "Ghosts")

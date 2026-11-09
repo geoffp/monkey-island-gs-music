@@ -375,7 +375,7 @@ NTP has no voice allocation: each MOD track owns its oscillators for the whole s
 - **melodic** (2 oscillators): plays looped samples (attack header + loop, in swap mode);
 - **drum** (1 oscillator): plays one-shots only.
 
-Tracks are created on demand while the oscillators used stay within `oscillators` (31: the DOC's 32 minus NTP's timer). Melodic one-shots (Xylophone) are given melodic tracks too, like looped sounds. Putting them on drum tracks starved the percussion (MI160: 16 → 31–77 dropped notes).
+Tracks are created on demand while the oscillators used stay within `oscillators` (31: the DOC's 32 minus NTP's timer). Melodic one-shots (Xylophone) and loop-only sounds need 1 oscillator. With `melodic_one_shots = "any"` (default since 2026-11-08), one-shots take the drum path below: a free 1-oscillator track first, else a free melodic one. Under first come that starved the percussion (MI160: 16 → 31–77 dropped notes), because Xylophone hits fixed tracks as 1-oscillator; the track plan now bounds them (MI160 shared: drops 9 → 0, audible steals 244 → 167, 17 → 18 tracks). `"melodic"` keeps them on 2-oscillator tracks.
 
 **Busy.** A track is *busy* through the last row it needs:
 - **looped notes:** the note row, the envelope `Cxx` rows up to note-off, and the release ramp (`release_max`, 0.3 s) down to volume 0;
@@ -409,6 +409,15 @@ A track is *free* at row r when it isn't busy and its cell there is empty.
      The cost moves to chord voices, cut slightly louder. The 11 bass cuts left are a fast line whose overlapping tails make 3+ active notes. Counting only *held* notes (plus the victim) was worse (Acou Bass 16, 78 cuts left on small parts): chord voices release together, so a releasing chord stops counting as large exactly when its tails are the ones to take.
 5. **Drop** the note. The build log lists drops per sound (`MInnn dropped (no oscillator): ...`).
 
+**Track plan** (`plan_tracks`, `track_plan = true`, 2026-11-08). A track's type is fixed when it is created, so first come lets a song's early notes fix the 2-/1-oscillator split for the whole song. The planner instead caps the melodic tracks at M (`melodic_tracks`; the 1-oscillator tracks get the remaining `oscillators − 2M`) and picks M by cost = 64 × dropped notes + the summed MOD volume of the audible steals. It walks from the first-come count while the cost falls (the cost has one valley per song, measured over M = 0–15). Ties go to fewer tracks (less pattern data), and first come stays if nothing beats it. Songs with no loss skip the search. Under a cap, a drum that finds no free track may open one of the planned melodic tracks the song hasn't created yet (otherwise caps dropped early drums). The build log's `plan` column is the chosen M (`-`: first come).
+
+| | first come → planned |
+|---|---|
+| shared / per-song | first come was already optimal: 14 melodic + 3 drum tracks in MI160, MI152 and MI151 (every other split costs more). MI168 3 → 2 steals; MI166 the same result on one track fewer. The other 14 songs are byte-identical. |
+| shared-lo, MI160 | loop-only organ notes had opened 11 1-oscillator tracks and left 10 melodic: audible steals 195 → **81**, loudest cut 30 → 27 (M = 12) |
+| per-song-lo | MI160 196 → **105**; MI152 2 → 0 |
+| + one-shots on either track type | MI160: shared 244 → **167** steals, 9 → **0** drops (M = 13); per-song 344 → 260, 11 → 1; shared-lo 81 → **39**; per-song-lo 105 → 59 |
+
 **What a note writes on its track:**
 - **Note cell:** note, instrument and `Cxx` velocity. If the note needs a micro-delay, `EDx` takes the effect column instead; velocity handling for those is described in the pipeline section.
 - **Looped notes:** envelope `Cxx` rows, then a release ramp. Where it reaches 0, `C00` plus the silent `rest` one-shot, which stops the loop's oscillators. Otherwise NTP would bring the loop back on the next delayed note (see "Ghosts").
@@ -438,4 +447,13 @@ Panpipes, Chorale and Strings (190 ms swell) are out. Elec Organ also starts 5.4
 
 **Elec Organ loop-only, all songs:** drops 11 → 1 (shared) and 13 → 1 (per-song); audible steals 262 → 195 and 368 → 198; MI160 drops 9–11 → 0; loudest cut 27 → 30.
 
-**Listening (user, 2026-11-08):** the change is clearly audible, much more so in the shared version (its 512 B averaged loop has none of the per-song raw loop's movement, so the missing attack stands out). Kept as a trial; undecided.
+**Listening (user, 2026-11-08):** the change is clearly audible, much more so in the shared version (its 512 B averaged loop has none of the per-song raw loop's movement, so the missing attack stands out). It also sounds **significantly quieter**. Kept as a trial; undecided.
+
+**Why quieter (measured, shared Elec Organ):** the loop-only envelope is right (the contour is a steady −4 dB re the loop from the onset; the 0.8 s smoothing isn't pulled down by pre-onset silence). What's lost is the normal note's louder onset:
+
+| | 0–60 ms | 60–300 ms | after 0.3 s |
+|---|---|---|---|
+| attack + loop | raw attack, with its +5.4 dB onset peak | loop at gain 1, easing to the contour (−4 dB) over `handover_s` (150 ms) | −4…−5 dB |
+| loop-only | first row (85 ms) at 0 dB, then −4 dB | −4 dB | same |
+
+Onsets dominate perceived loudness. Possible fix if the trial is kept: copy the normal onset shape, i.e. hold gain 1 through the equivalent handover and lift the first row toward the attack's peak (MOD volume has headroom below 64).

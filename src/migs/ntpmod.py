@@ -777,6 +777,7 @@ class Report:
     speed: int = 0
     row_ms: float = 0.0
     timing_err_ms: float = 0.0
+    melodic_cap: int | None = None   # planned 2-oscillator track cap (plan_tracks); None: first come
 
 
 def tempo_commands(ideal: float, speed: int, rows: int, can_set, tol: float) -> list[tuple[int, int]]:
@@ -899,6 +900,8 @@ def convert_song(path: Path, samples, programs, drums, cfg: dict, song_cfg: dict
     # Tracks are created on demand within NTP's oscillator budget: one-shot (drum) tracks
     # need 1 oscillator, looped melodic tracks 2 (loop header + loop); 31 are usable.
     budget = song_cfg.get("oscillators", cfg.get("oscillators", 31))
+    mel_cap = song_cfg.get("melodic_tracks")         # None: first come; else 2-osc tracks <= this,
+                                                     # 1-osc tracks <= budget - 2 x this
     grid = Grid(0)
     trk_inst: list[int] = []        # current sample (1-based) per track
     trk_busy: list[int] = []        # last row with cells for the current note
@@ -990,23 +993,32 @@ def convert_song(path: Path, samples, programs, drums, cfg: dict, song_cfg: dict
         s = samples[si]
         r, d = place(n.t)
         err_sum += abs((r * speed + d) * tick_s - (n.t + shift))
-        # Melodic one-shots (Xylophone) use melodic tracks like looped sounds: measured, putting
-        # them on 1-oscillator drum tracks starved the percussion (MI160: 16 -> 31-77 dropped
-        # notes). Their gain is a track that frees when the sample ends: MI162 8 -> 0 dropped.
-        # loop-only sounds need 1 oscillator: they share the 1-oscillator (drum) tracks
-        kind = "drum" if s.kind == "drum" or (s.loop_len and not s.loop_start) else "melodic"
+        # Melodic one-shots (Xylophone) free their track when the sample ends (MI162 8 -> 0
+        # dropped). `melodic_one_shots = "any"` (default) sends them down the drum path: a free
+        # 1-oscillator track first, else a free 2-oscillator one, and the track plan bounds how
+        # many 1-oscillator tracks there are. Under first come that starved the percussion
+        # (MI160: 16 -> 31-77 dropped), so "melodic" (2-oscillator tracks only) remains.
+        # Loop-only sounds need 1 oscillator: they share the 1-oscillator (drum) tracks.
+        flex = not s.loop_len and song_cfg.get("melodic_one_shots", cfg.get("melodic_one_shots", "any")) == "any"
+        kind = "drum" if s.kind == "drum" or (s.loop_len and not s.loop_start) or flex else "melodic"
         # choose a track (docs/ninjatrackerplus.md "Track allocation")
         tracks = range(len(grid.cells))
         free = lambda k: [tr for tr in tracks if trk_kind[tr] == k and trk_busy[tr] < r and grid.free(tr, r)]
         cands = free(kind)
         borrow = song_cfg.get("drum_borrow", cfg.get("drum_borrow", "last"))
         fits_new = osc_used + (1 if kind == "drum" else 2) <= budget
+        if fits_new and mel_cap is not None:         # planned split (plan_tracks)
+            n_mel = trk_kind.count("melodic")
+            fits_new = n_mel < mel_cap if kind == "melodic" else len(trk_kind) - n_mel < budget - 2 * mel_cap
         if not cands and kind == "drum" and (borrow == "first" or (borrow == "last" and not fits_new)):
             cands = free("melodic")                  # a 2-oscillator track can play a one-shot
         if cands:
             tr = min(cands, key=lambda t: (trk_inst[t] != si + 1, t))
         elif fits_new:
             tr = new_track(kind)
+        elif (kind == "drum" and mel_cap is not None and borrow != "never"
+              and trk_kind.count("melodic") < mel_cap and osc_used + 2 <= budget):
+            tr = new_track("melodic")                # a planned melodic track, opened early by a drum
         else:
             releasing = [t for t in tracks if trk_kind[t] == kind and 0 <= trk_off[t] <= r]
             if not releasing:
@@ -1148,6 +1160,42 @@ def convert_song(path: Path, samples, programs, drums, cfg: dict, song_cfg: dict
         c = grid.get(tr, last_row)
         c[2], c[3] = 0xB, 0                     # loop to the start (like the game's FF)
     return grid, patterns, rep
+
+
+def allocation_cost(rep: "Report") -> int:
+    """Polyphony loss of a conversion: a dropped note counts as a full-volume (64) cut, plus
+    the MOD volume each audible steal cut."""
+    return 64 * rep.dropped + sum(v for v in rep.stolen_levels if v > 0)
+
+
+def plan_tracks(path: Path, samples, programs, drums, cfg: dict, song_cfg: dict, cc7=None):
+    """convert_song with the 2-/1-oscillator track split chosen for the whole song. Tracks are
+    typed when created, so first come lets early notes fix the split (loop-only organ notes
+    opened 11 1-oscillator tracks in MI160 and left 10 melodic). Try capping the melodic
+    tracks at M (1-oscillator tracks get the rest of the budget), walking from the first-come
+    count while the cost falls (it has one valley per song); keep first come if nothing beats
+    it. Ties go to fewer tracks (less pattern data)."""
+    first = convert_song(path, samples, programs, drums, cfg, song_cfg, cc7)
+    if not song_cfg.get("track_plan", cfg.get("track_plan", True)) or allocation_cost(first[2]) == 0:
+        return first
+    key = lambda res: (allocation_cost(res[2]), res[2].tracks_used)
+    tried = {}
+
+    def at(m: int):
+        if m not in tried:
+            tried[m] = convert_song(path, samples, programs, drums, cfg, {**song_cfg, "melodic_tracks": m}, cc7)
+            tried[m][2].melodic_cap = m
+        return tried[m]
+
+    budget = song_cfg.get("oscillators", cfg.get("oscillators", 31))
+    m0 = first[2].track_kinds.count("melodic")
+    best = min((at(m0),) + tuple(at(m) for m in (m0 - 1, m0 + 1) if 0 <= m <= budget // 2), key=key)
+    step = 1 if best[2].melodic_cap > m0 else -1 if best[2].melodic_cap < m0 else 0
+    m = best[2].melodic_cap
+    while step and 0 <= m + step <= budget // 2 and key(at(m + step)) < key(best):
+        m += step
+        best = at(m)
+    return best if key(best) < key(first) else first
 
 
 def mod_file(title: str, samples: list[ModSample], grid: Grid, patterns: int, tables) -> bytes:
@@ -1326,18 +1374,18 @@ def main(argv: list[str] | None = None) -> int:
         if not shared:
             print(f"MI{sid}: {len(samples)} samples, DOC {ntp_doc_pages(samples, last_page)}/256 pages "
                   f"(reserve {255 - last_page}); loops {loop_summary(samples, cfg)}")
-        grid, patterns, rep = convert_song(p, samples, programs, drums, cfg, song_cfg, cc7)
+        grid, patterns, rep = plan_tracks(p, samples, programs, drums, cfg, song_cfg, cc7)
         if ntp_oscillators([2 if k == "melodic" else 1 for k in rep.track_kinds]) is None:
             raise SystemExit(f"MI{sid}: NTP's converter can't assign oscillators to these tracks")
         (args.out_dir / f"MI{sid}.mod").write_bytes(mod_file(f"MI1 {sid}", samples, grid, patterns, tables))
         reports.append((sid, rep))
     print(f"{'song':<6} {'tempo':>5} {'spd':>3} {'row ms':>6} {'pat':>3} {'trk':>3} {'osc':>3} {'notes':>5} "
-          f"{'drop':>4} {'steal':>5} {'tchg':>4} {'delay':>5} {'v:cell':>6} {'v:prev':>6} {'v:dflt':>6} {'err ms':>6} {'halt':>5} {'st.vol':>6}")
+          f"{'drop':>4} {'steal':>5} {'tchg':>4} {'delay':>5} {'v:cell':>6} {'v:prev':>6} {'v:dflt':>6} {'err ms':>6} {'halt':>5} {'st.vol':>6} {'plan':>4}")
     for sid, rep in reports:
         print(f"{sid:<6} {rep.tempo:5d} {rep.speed:3d} {rep.row_ms:6.1f} {rep.patterns:3d} {rep.tracks_used:3d} "
               f"{rep.oscillators:3d} {rep.notes:5d} {rep.dropped:4d} {rep.stolen:5d} {rep.tempo_changes:4d} {rep.delayed:5d} "
               f"{rep.vel_in_cell:6d} {rep.vel_preceding:6d} "
-              f"{rep.vel_default:6d} {rep.timing_err_ms:6.1f} {rep.halted:5d} {max(rep.stolen_levels, default=0):6d}")
+              f"{rep.vel_default:6d} {rep.timing_err_ms:6.1f} {rep.halted:5d} {max(rep.stolen_levels, default=0):6d} {'-' if rep.melodic_cap is None else rep.melodic_cap:>4}")
     for sid, rep in reports:
         if rep.dropped_by:
             print(f"MI{sid} dropped (no oscillator): " + ", ".join(f"{k} {v}" for k, v in sorted(rep.dropped_by.items(), key=lambda kv: -kv[1])))
