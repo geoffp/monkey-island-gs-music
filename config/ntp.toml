@@ -32,6 +32,10 @@ sustain_s = 0.4         # where the loop's cycles are taken (s after onset): the
 min_rate = 9000         # sample-rate window for melodic samples (Hz)
 max_rate = 22000
 release_max = 0.3       # seconds of release ramp after note-off
+env_max_rise_db = 1.5   # a held note's per-row Cxx rises at most this much (at least one step);
+                        # the DOC applies volume instantly, so beating contours (French Horn) pumped
+                        # in jumps. Falls are not limited (real decays). 0 = off. docs/ninjatrackerplus.md
+                        # "Smoother sustains" step 5
 drum_borrow = "last"    # drums use an idle melodic track when no drum track is free and the budget
                         # is full ("first": before opening a new drum track; "never")
 steal_protect = 2        # steals prefer parts (channels) with more notes active than this: spare

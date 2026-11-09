@@ -67,7 +67,8 @@ def test_channel_volume_and_swell_set_levels(tmp_path):
     cc7 = (np.array([0.0, 64, 100, 127]), np.array([0.0, 0.35, 1.0, 1.8]))
     s = fake_sample()
     s.env_g = np.array([1.0, 2.0])                 # swells to twice its attack level
-    cfg = {"rows_per_unit": 2, "speed": 3, "quantize": 0.0, "oscillators": 31}
+    # the row step limit would make the rows lag the swell; levels are the targets
+    cfg = {"rows_per_unit": 2, "speed": 3, "quantize": 0.0, "oscillators": 31, "env_max_rise_db": 0}
     grid, _, _ = sg.convert_song(p, [s], {9: 0}, {}, cfg, dict(cfg), cc7)
     vols = []
     for cells in grid.cells:
@@ -78,6 +79,38 @@ def test_channel_volume_and_swell_set_levels(tmp_path):
     (a0, a_max), (b0, b_max) = sorted(vols, reverse=True)
     assert a_max == 64 and a0 == pytest.approx(32, abs=2)     # loudest moment (the swell) = 64
     assert b0 == pytest.approx(a0 * 0.35, abs=1.5)              # CC7 64 vs 100 per the curve
+
+
+def test_envelope_rows_rise_at_most_env_max_rise_db(tmp_path):
+    """The DOC applies a volume at once: a beating contour (French Horn: 29 26 20 23 33 34 25)
+    stepped up to 3.6 dB a row. Sustain rows rise at most env_max_rise_db (at least one step);
+    falls follow the contour, so real decays keep their speed."""
+    import mido
+    ev = [mido.Message("program_change", channel=1, program=9),
+          mido.Message("note_on", channel=1, note=60, velocity=100, time=0),
+          mido.Message("note_off", channel=1, note=60, time=480)]
+    p = midi_song(tmp_path, ev)
+    s = fake_sample()
+    t = np.linspace(0.1, 2.0, 191)
+    s.env_t, s.env_g = t, 10 ** (6 * np.sin(2 * np.pi * t / 0.6) / 20)      # +-6 dB beating, 0.6 s
+
+    def held_volumes(limit):
+        cfg = {"rows_per_unit": 2, "speed": 3, "quantize": 0.0, "oscillators": 31, "env_max_rise_db": limit}
+        grid, _, rep = sg.convert_song(p, [s], {9: 0}, {}, cfg, dict(cfg))
+        cells = next(c for c in grid.cells if any(v[0] for v in c.values()))
+        r_on = min(r for r, c in cells.items() if c[0])
+        r_off = r_on + round(2.0 / (rep.row_ms / 1000))
+        return [c[3] for r, c in sorted(cells.items()) if c[2] == 0xC and r_on < r <= r_off + 1]
+
+    def rises(v):
+        return [(20 * np.log10(b / a), b - a) for a, b in zip(v[1:], v[2:]) if a and b]  # after the first row
+
+    assert max(d for d, _ in rises(held_volumes(0))) > 2.5   # unlimited: the beating steps
+    v = held_volumes(1.5)
+    assert all(d <= 1.5 + 1e-9 or step == 1 for d, step in rises(v))
+    assert min(d for d, _ in rises(v)) < -1.5                # falls are not limited
+    assert max(v) == max(held_volumes(0))                    # at 29 ms rows a 0.6 s swing is still followed:
+    #                                                          the limit removes jumps, not slow movement
 
 
 def test_steals_take_the_quietest_release(tmp_path):

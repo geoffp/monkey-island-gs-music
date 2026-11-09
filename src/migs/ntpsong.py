@@ -399,11 +399,17 @@ class _Arranger:
                 and r - 1 > t.busy and self.grid.effect_free(tr, r - 1))
 
     def write_envelope(self, tr: int, s: ModSample, n: Note, r: int, vf: float, timing: _Timing,
-                       hyst: float) -> int:
+                       hyst: float, max_rise_db: float = 0.0) -> int:
         """Envelope rows until note-off, then the release; returns the last row written. A
         melodic one-shot (no loop) is silent once its sample ends: it holds the track only until
         then (or its note-off, if earlier), carries its own decay (no envelope rows), and needs
-        a release only when the note-off comes first."""
+        a release only when the note-off comes first.
+
+        `max_rise_db` (> 0) limits how far a sustain row rises above the previous one (at least
+        one volume step): the DOC applies a volume at once, with no ramp, so a beating contour
+        (French Horn: 20 23 33 34 25) pumps in audible jumps on the IIGS. Falls are not limited:
+        that would slow real decays (Marimba, Vibes) and hold their tracks longer. The first row
+        (the delayed-note correction) and the release are not limited either."""
         row_s = timing.row_s
         # a lower note plays the sample slower: it lasts longer than at key0, and its attack
         # hands over to the loop later
@@ -415,6 +421,7 @@ class _Arranger:
         self.tracks[tr].off = r_off
         t_loop = s.env_t[0] * slower
         last, prev = r, None
+        k = 10 ** (max_rise_db / 20) if max_rise_db > 0 else None
         for rr in range(r + 1, r_off if oneshot_end is None else r + 1):
             target = vf * env_at(s, (rr - r) * row_s, row_s, t_loop)
             # hysteresis: a slowly moving target near x.5 made the volume flicker between
@@ -423,11 +430,15 @@ class _Arranger:
                 last = rr
                 continue
             vv = max(0, min(64, round(target)))
+            if k is not None and prev is not None:          # rise limit (see docstring)
+                vv = min(vv, max(math.floor(prev * k + 1e-9), prev + 1))
             if vv != prev and self.grid.effect_free(tr, rr):
                 self.grid.set_effect(tr, rr, FX_VOLUME, vv)
                 prev = vv
             last = rr
         v_off = vf * env_at(s, (r_off - r) * row_s, row_s, t_loop)
+        if k is not None and prev is not None:
+            v_off = min(v_off, prev)        # release from the (limited) level that plays, never a jump up
         steps = max(1, int(round(len(s.rel_g) * 0.01 / row_s)))
         for i in range(steps + 1 if oneshot_end is None or cut else 0):
             rr = r_off + i
@@ -538,6 +549,7 @@ def convert_song(path: Path, samples: list[ModSample], programs: dict, drums: di
             s.default_volume = int(np.median(by_sample[si])) if si in by_sample else 32
 
     hyst = arr.opt("volume_hysteresis", 0.75)
+    max_rise_db = arr.opt("env_max_rise_db", 1.5)
     snap_db = arr.opt("delay_snap_db")
     flexible = arr.opt("melodic_one_shots", "any") == "any"
     onsets = {ch: np.array([m.t for m in notes if m.channel == ch]) for ch in {m.channel for m in notes}}
@@ -621,7 +633,7 @@ def convert_song(path: Path, samples: list[ModSample], programs: dict, drums: di
                 arr.grid.set_effect(tr, r + 1, FX_VOLUME, v)
                 last = r + 1
         else:
-            last = arr.write_envelope(tr, s, n, r, vf, timing, hyst)
+            last = arr.write_envelope(tr, s, n, r, vf, timing, hyst, max_rise_db)
         track.busy = last
 
     rep.timing_err_ms = 1000 * err_sum / max(1, rep.notes - rep.dropped)
