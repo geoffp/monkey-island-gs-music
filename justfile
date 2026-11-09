@@ -107,6 +107,12 @@ fetch-mcp:
     grep "$asset" SHA256SUMS | sha256sum -c -
     mv "$asset" gs2-mcp && chmod 755 gs2-mcp && rm SHA256SUMS
 
+# Run gs2-mcp over stdio (.mcp.json launches this, so it needs no absolute paths).
+# No dependencies: stdout is the MCP channel and must carry nothing else.
+[no-exit-message]
+mcp:
+    @GS2_BIN="{{justfile_directory()}}/{{gs2}}" exec "{{justfile_directory()}}/{{vendor}}/bin/gs2-mcp"
+
 # CiderPress II CLI (ProDOS disk images, ShrinkIt archives)
 fetch-cp2:
     #!/usr/bin/env bash

@@ -2,11 +2,8 @@
   "mcpServers": {
     "gs2-debug": {
       "type": "stdio",
-      "command": "${HOME}/src/monkey-island-gs/vendor/bin/gs2-mcp",
-      "args": [],
-      "env": {
-        "GS2_BIN": "${HOME}/src/monkey-island-gs/vendor/gssquared/GSSquared-x86_64.AppImage"
-      }
+      "command": "just",
+      "args": ["mcp"]
     }
   }
 }
