@@ -1,14 +1,9 @@
 """IIgs battery RAM checksum and patching."""
 
-from pathlib import Path
-
 import pytest
 
+from bram_fixtures import REAL
 from migs.bram import SLOT_INTERNAL, STARTUP_SLOT, checksum, is_valid, patch, with_checksum
-
-# config/emu/default-bram.hex: a BRAM image saved by GSSquared after a real IIgs session.
-REAL = bytes.fromhex("".join(
-    (Path(__file__).resolve().parents[1] / "config" / "emu" / "default-bram.hex").read_text().split()))
 
 
 def test_checksum_matches_bram_saved_by_a_real_rom_session():

@@ -2,9 +2,9 @@
 
 import tomllib
 
+from bram_fixtures import REAL
 from migs import bram
 from migs.emu import Disk, write_config
-from test_bram import REAL
 
 
 def test_new_config_is_valid_toml_with_seeded_patched_bram(tmp_path):
