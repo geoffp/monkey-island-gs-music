@@ -1,9 +1,11 @@
 """MIDI output: faithful MT-32 timing and the General MIDI conversion rules."""
 
+import tomllib
+
 import mido
 
 from migs import mt32, ro
-from migs.extract_music import Song, build_midi
+from migs.extract_music import Song, build_midi, patch_notes
 
 
 def make_song(data: bytes) -> Song:
@@ -91,8 +93,6 @@ def test_midi_files_survive_a_save_load_round_trip(tmp_path):
 
 
 def test_patch_notes_are_valid_toml_with_channel_statistics():
-    import tomllib
-    from migs.extract_music import patch_notes
     notes = tomllib.loads(patch_notes(make_song(DATA)))
     assert notes["song"]["loops"] is True and notes["song"]["max_polyphony"] == 3
     by_ch = {c["channel"]: c for c in notes["channel"]}
