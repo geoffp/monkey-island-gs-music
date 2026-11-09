@@ -286,7 +286,7 @@ def loop_construction(cfg: dict) -> str:
 
 
 def eprime_attack_and_loop(m: dict, x: np.ndarray, a: int, period: float, rate: float, k: int,
-                           attack_bytes: int, loop_bytes: int, hold: float, render
+                           attack_bytes: int, loop_bytes: int, hold: float, render, notes: int = 1
                            ) -> tuple[np.ndarray, np.ndarray, float, float]:
     """E'+ (loop_construction = "eprime", the default; docs/loop-detection.md, code in loopbuild):
     - one cycle with each harmonic at its RMS level over the sustain (power-averaged: beating
@@ -301,7 +301,7 @@ def eprime_attack_and_loop(m: dict, x: np.ndarray, a: int, period: float, rate: 
     att_end = a + attack_bytes / rate * SR
     lo = max(snd.lo, att_end)
     hi = max(snd.hi, lo + k * period + 8 * period)
-    loop = loopbuild.loop_power(snd.x, lo, hi, period, k, loop_bytes, at=att_end)
+    loop = loopbuild.loop_power(snd.x, lo, hi, period, k, loop_bytes, at=att_end, notes=notes)
     attack, loop = loopbuild.join_aligned(x, a, period, rate, k, attack_bytes, loop)
     return attack, loop, att_end, lo
 
@@ -513,8 +513,9 @@ class _Source:
     a: int                  # onset sample
     off: int                # note-off sample (onset + hold: smf2wav drops the leading silence)
     env: np.ndarray         # 10 ms RMS envelope
-    period: float           # samples
+    period: float           # samples: the loop's cycle, `notes` note periods
     keys: tuple[int, int]   # lowest and highest key it plays (incl. the sampled key)
+    notes: int = 1          # note periods per cycle (2: a sub-octave partial, loop_notes)
 
     @property
     def freq(self) -> float:
@@ -612,15 +613,28 @@ def _raw_loop_sizes(m: dict, src: _Source, cfg: dict, tables, att_bytes: int, su
     return tuple(ok)
 
 
+def loop_notes(x: np.ndarray, a: int, off: int, period: float, sustain_s: float, cfg: dict) -> int:
+    """Note periods a loop cycle spans: 2 when the sustain has a sub-octave partial
+    (loopbuild.sub_octave at least `sub_octave_min_share`, while the note's own harmonics hold
+    most of the power: not an inharmonic sound like Taiko), else 1."""
+    lo, hi = a + int(sustain_s * SR), off - int(0.1 * SR)
+    if hi - lo < 16 * period:
+        return 1
+    share = loopbuild.sub_octave(x, lo, hi, period)
+    return 2 if cfg.get("sub_octave_min_share", 0.02) <= share < 0.5 else 1
+
+
 def build_melodic(m: dict, cfg: dict, keys: tuple[int, int], munt: Munt, tables, hold: float
                   ) -> tuple[ModSample, str]:
     """A melodic sample (attack + loop, or a one-shot) and its build-log line."""
     x = cached_render(munt, m["program"], m["key"], hold)
     a = audio.onset(x)
     f0 = 440 * 2 ** ((m["key"] - 69) / 12)
-    src = _Source(x, a, a + int(hold * SR), audio.rms_envelope(x),
-                  audio.refine_period(x, a + int(0.25 * SR), f0), (min(keys[0], m["key"]), max(keys[1], m["key"])))
     sustain_s = cfg.get("sustain_s", 0.4)
+    period = audio.refine_period(x, a + int(0.25 * SR), f0)
+    notes = loop_notes(x, a, a + int(hold * SR), period, sustain_s, cfg)
+    src = _Source(x, a, a + int(hold * SR), audio.rms_envelope(x), period * notes,
+                  (min(keys[0], m["key"]), max(keys[1], m["key"])), notes)
     steady = is_steady(src.env, a, src.off, sustain_s)
     # short loops: "eprime" (default) = E'+ (docs/loop-detection.md); "averaged" = the
     # original averaged cycle (attack_and_loop), fractional samples per cycle
@@ -631,7 +645,7 @@ def build_melodic(m: dict, cfg: dict, keys: tuple[int, int], munt: Munt, tables,
     if eprime and loop_bytes <= cfg["loop_bytes"]:
         attack, loop, att_end, _ = eprime_attack_and_loop(
             m, x, a, src.period, rate, k, att_bytes, loop_bytes, hold,
-            lambda p, kk, h: cached_render(munt, p, kk, h))
+            lambda p, kk, h: cached_render(munt, p, kk, h), src.notes)
     else:
         attack, loop, att_end, _ = attack_and_loop(x, a, src.period, rate, k, att_bytes, loop_bytes, sustain_s,
                                                    cfg.get("attack_xfade_cycles", 4.0),
@@ -655,7 +669,7 @@ def build_melodic(m: dict, cfg: dict, keys: tuple[int, int], munt: Munt, tables,
         s.raw_ok = _raw_loop_sizes(m, src, cfg, tables, att_bytes, sustain_s, s.max_loop)
     lo, hi = keys
     line = (f"  {m['name']:<12} loop {loop_bytes:5d} B{' raw' if loop_bytes > cfg['loop_bytes'] else '    '} "
-            f"k={k:3d} rate {rate:7.0f} Hz note {n0:2d} ft {ft:+d} "
+            f"k={k:3d}{' x2 (sub-octave)' if src.notes == 2 else ''} rate {rate:7.0f} Hz note {n0:2d} ft {ft:+d} "
             f"err {err:+5.1f} cents, swell x{g_max:.2f}, keys {lo}-{hi}, "
             f"tremolo {loop_tremolo_db(loop, k):.1f} dB @ {rate / loop_bytes:.1f} Hz")
     # One-shot instead? A decaying sound that falls below the 8-bit floor while its attack

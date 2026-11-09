@@ -159,6 +159,39 @@ Found alongside: a melodic one-shot's end time now scales with its key (`s.secon
 ## Short raw loops add a tremolo (2026-11-07)
 A raw loop shorter than the sound's own wobble replays a slice of it at the loop rate. In shared Elec Organ (1024 B) that was a 6.3 dB tremolo at 15 Hz. The build now measures every raw loop size (`ntpsamples.raw_loop_ok`: it must repeat at ≤ 2 Hz, or have ≤ 1 dB of level range and ≤ −50 dB of loop-rate content) and fails if any loop doesn't pass. `report.md` has a tremolo column. Details are in `docs/ninjatrackerplus.md`, "Tremolo from short raw loops".
 
+## Sub-octave partials: a loop cycle can be two note periods (2026-11-09)
+**User report:** MI153's "Pipe Organ 88" sample: "the attack seems to be an octave below the loop".
+
+**What the MT-32 plays.** Pipe Org 2 has a steady partial an octave below the note, with its odd harmonics, at every key. In Munt, key 88 has peaks at 667 (−12 dB), 1328 (0), 2002 (−8), 2657, 4003 and 5338 Hz: a 667 Hz series with the note's own 1328 Hz as its 2nd harmonic. The MT-32 is about 12 cents sharp there, which is why bands fixed at the nominal key frequency missed it.
+
+**Measure.** `loopbuild.sub_octave`: harmonic tracks at twice the refined note period over the sustain; the share of power in their odd harmonics.
+- Pipe Org 2, by key: 36: 0.189, 40: 0.123, 44: 0.106, 48–60: 0.09–0.10, 64–91: 0.076–0.090.
+- Every other looped MI1 sound, at its sampled key: ≤ 0.0001.
+- Xylophone: 0.049, but it is a one-shot. Taiko: 0.997, but it is inharmonic (the note's own harmonics hold almost nothing, so neither period describes it).
+
+**The bug.** E′+ builds its loop from one averaged cycle of the note's period, which can't hold anything an octave below. The attack, taken as recorded, kept it.
+- In the MOD, Pipe Organ 88's loop had 16 samples per cycle and 0.00 sub-octave power; its attack had up to 0.05.
+- The handover went from the 16′+8′ sound to the 8′ alone: heard as the loop jumping an octave up.
+
+**Rule (`ntpsamples.loop_notes`, `sub_octave_min_share = 0.02`).** When the sustain's sub-octave share is at least 2% (and below 0.5, so inharmonic sounds are excluded), the loop's cycle is two note periods.
+- `_Source.period` is then the true period. `best_tuning` picks the same rates, since k simply counts true periods.
+- `loop_power` / `harmonic_cycle` take twice as many harmonics (`notes = 2`) to keep the same bandwidth.
+- `join_aligned` searches one true period, which also aligns the sub-octave's phase.
+- Raw loops hold k true periods too, so their seam no longer flips the sub-octave's phase when k was odd.
+
+**After** (MI153; share of sub-octave power in the 512 B loops):
+
+| Sample | Loop | MT-32 |
+|---|---|---|
+| Pipe Organ 88 (32 samples per cycle, was 16) | 0.091 | 0.090 (key 88) |
+| Lo 43 | 0.113 | 0.106 (key 44) |
+| Lo2 36 | 0.109 | 0.189 (key 36) |
+| Lo2 38 | 0.114 | |
+| shared Pipe Organ | 0.085 | |
+| shared Pipe Organ Lo | 0.102 | |
+
+Every other build number is unchanged in both modes, except one delayed note in shared MI153 that now snaps to its row.
+
 ## Recommendation
 **For the 512 B loops** (all shared sounds, and short per-song loops), build E′+:
 1. whole samples per cycle;

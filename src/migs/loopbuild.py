@@ -160,11 +160,13 @@ def cycle_at_rate(cyc_fine: np.ndarray, k: int, out: int) -> np.ndarray:
 
 
 def harmonic_cycle(x: np.ndarray, lo: float, hi: float, period: float, fine: int = 1024,
-                   phase_at: float | None = None, harmonics: int | None = None) -> np.ndarray:
+                   phase_at: float | None = None, harmonics: int | None = None, notes: int = 1) -> np.ndarray:
     """One cycle whose harmonic amplitudes are the RMS of each harmonic over [lo, hi)
     (power-averaged: beating partials keep their mean power instead of cancelling) and whose
-    phases are those of the period at `phase_at` (default lo)."""
-    tr = harmonic_tracks(x, int(lo), period, end=int(hi))
+    phases are those of the period at `phase_at` (default lo). `notes`: note periods the
+    cycle spans (2 for a sound with a sub-octave partial, `sub_octave`): as many harmonics
+    of the cycle, so the same bandwidth is kept."""
+    tr = harmonic_tracks(x, int(lo), period, end=int(hi), harmonics=32 * notes, points=64 * notes)
     amp = np.sqrt(np.mean(tr.amp ** 2, axis=1))
     p0 = lo if phase_at is None else phase_at
     cyc = interp_at(x, p0 + np.arange(fine) * period / fine)
@@ -177,10 +179,22 @@ def harmonic_cycle(x: np.ndarray, lo: float, hi: float, period: float, fine: int
 
 
 def loop_power(x: np.ndarray, lo: float, hi: float, period: float, k: int, out: int,
-               at: float | None = None) -> np.ndarray:
+               at: float | None = None, notes: int = 1) -> np.ndarray:
     """E: constructed loop, exactly periodic: one power-averaged harmonic cycle over the
-    sustain [lo, hi), phases from `at`, tiled k times (whole samples per cycle when k | out)."""
-    return cycle_at_rate(harmonic_cycle(x, lo, hi, period, phase_at=at), k, out)
+    sustain [lo, hi), phases from `at`, tiled k times (whole samples per cycle when k | out).
+    `period` spans `notes` note periods (harmonic_cycle)."""
+    return cycle_at_rate(harmonic_cycle(x, lo, hi, period, phase_at=at, notes=notes), k, out)
+
+
+def sub_octave(x: np.ndarray, lo: float, hi: float, period: float) -> float:
+    """Share of the power over [lo, hi) in the series an octave below the note (odd harmonics
+    of twice its period). The MT-32 Pipe Org 2 has a steady partial there at every key
+    (8-19 %: key 88 has peaks at 667, 1328, 2002, 2657, 4003 Hz); a loop of single note
+    periods drops it, and the attack, taken as recorded, keeps it: the attack sounded an
+    octave below the loop. Every other looped MI1 sound is under 0.01 %."""
+    tr = harmonic_tracks(x, int(lo), 2 * period, end=int(hi), harmonics=64, points=128)
+    pw = np.mean(tr.amp ** 2, axis=1)
+    return float(pw[0::2].sum() / (pw.sum() or 1.0))
 
 
 def exact_crossing(loop: np.ndarray, p0: float, iters: int = 8) -> tuple[float, float]:

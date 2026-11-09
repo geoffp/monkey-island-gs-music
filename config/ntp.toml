@@ -33,6 +33,9 @@ raw_loop_tune_cents = 1.0  # raw loops take the highest rate tuned within this (
 raw_loop_max_rate_drop = 0.1  # a raw loop's rate at most this far below the short loop's (Sax 8192 B at
                         # 16.3 kHz scored 1.4 dB worse than 512 B at 18.9 kHz; Elec Organ's 8192 B wobble
                         # loop at 15.7 kHz is 6 % below)
+sub_octave_min_share = 0.02  # a loop cycle spans two note periods when the sustain has at least this
+                        # share of its power an octave below the note (Pipe Org 2: 8-19 % at every
+                        # key; a one-period loop dropped it and sounded an octave above its attack)
 reserve_pages = 16      # DOC pages kept free for game sound effects (4 KB)
 sustain_s = 0.4         # where the loop's cycles are taken (s after onset): the steady sustain,
                         # not the attack's end (organs build their fundamental after ~0.12 s)

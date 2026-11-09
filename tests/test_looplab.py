@@ -155,3 +155,35 @@ def test_searched_raw_loop_beats_a_fixed_start_on_a_detuned_tone():
     starts = np.arange(0.2 * SR, 1.5 * SR, period / 4)
     best = min(ll.seam_score(x, s0, span, period) for s0 in starts)
     assert best < ll.seam_score(x, fixed, span, period)
+
+
+def _with_sub_octave(f0, secs, level=0.4):
+    """A note at f0 with a steady partial series an octave below (1/2, 3/2 x f0), as the MT-32's
+    Pipe Org 2 has at every key."""
+    t = np.arange(int(secs * SR)) / SR
+    return tone(f0, secs) + level * (np.sin(2 * np.pi * f0 / 2 * t) + 0.7 * np.sin(2 * np.pi * 1.5 * f0 * t))
+
+
+def test_sub_octave_measures_the_series_an_octave_below_the_note():
+    f0 = 500.0
+    plain, sub = tone(f0, 1.5), _with_sub_octave(f0, 1.5)
+    assert lb.sub_octave(plain, 0, len(plain), SR / f0) < 1e-4
+    assert 0.05 < lb.sub_octave(sub, 0, len(sub), SR / f0) < 0.3
+    cfg = {"sub_octave_min_share": 0.02}
+    assert smp.loop_notes(sub, 0, len(sub), SR / f0, 0.4, cfg) == 2
+    assert smp.loop_notes(plain, 0, len(plain), SR / f0, 0.4, cfg) == 1
+    noise = np.random.default_rng(0).standard_normal(len(plain))       # inharmonic: no period at all
+    assert smp.loop_notes(noise, 0, len(noise), SR / f0, 0.4, cfg) == 1
+
+
+def test_a_two_period_loop_keeps_the_sub_octave_that_a_one_period_loop_drops():
+    """The bug: Pipe Organ 88's 512 B loop held 32 single note periods, so its 659 Hz series
+    was gone and the attack (as recorded) sounded an octave below the loop."""
+    f0 = 500.0
+    x = _with_sub_octave(f0, 1.5)
+    P = SR / f0
+    one = lb.loop_power(x, 0.3 * SR, 1.2 * SR, P, 16, 512)
+    two = lb.loop_power(x, 0.3 * SR, 1.2 * SR, 2 * P, 8, 512, notes=2)
+    share = lambda loop: lb.sub_octave(np.tile(loop, 40), 0, 40 * 512, 32.0)   # 32 samples per note period
+    assert share(one) < 1e-3
+    assert abs(share(two) - lb.sub_octave(x, 0.3 * SR, 1.2 * SR, P)) < 0.02
