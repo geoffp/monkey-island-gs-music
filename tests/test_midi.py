@@ -88,3 +88,14 @@ def test_midi_files_survive_a_save_load_round_trip(tmp_path):
         mf.save(p)
         back = mido.MidiFile(p)
         assert [list(abs_messages(t)) for t in back.tracks] == [list(abs_messages(t)) for t in mf.tracks]
+
+
+def test_patch_notes_are_valid_toml_with_channel_statistics():
+    import tomllib
+    from migs.extract_music import patch_notes
+    notes = tomllib.loads(patch_notes(make_song(DATA)))
+    assert notes["song"]["loops"] is True and notes["song"]["max_polyphony"] == 3
+    by_ch = {c["channel"]: c for c in notes["channel"]}
+    assert by_ch[2]["mt32_name"] == "Panpipes" and by_ch[2]["initial_pan_mt32"] == 0
+    assert by_ch[10]["role"] == "rhythm" and by_ch[10]["max_polyphony"] == 2
+    assert by_ch[10]["rhythm_keys"]["76"][1].startswith("UNMAPPED")
