@@ -2,10 +2,11 @@
 """Tuning experiment: a bank + sequence that make MIDI Synth reveal how it turns
 (key, octave, semitone, fine, wave size) into DOC oscillator registers.
 
-Each instrument plays one sine cycle (stored at 256 B, 1 KB or 8 KB) with a different tuning.
-TUNE.SEQ plays A4 (69) then A3 (57) on each instrument in turn, 2.5 s per note, with
-1 s quarter notes (half-note tempo 30). While it plays, `gs2-docscope` samples the
-DOC registers; `analyze()` fits the result.
+Each instrument plays one sine cycle (stored at a given wave size) with its own tuning.
+TUNE.SEQ plays A4 (69) then A3 (57) on each instrument in turn: a 3 s slot per note, the
+note held 2.5 s, at 1 s quarter notes (half-note tempo 30). While it plays, `gs2-docscope`
+(migs.gs2client) logs the DOC registers; the fitted model is migs.doc_tuning, the results
+docs/iigs-midisynth.md "Measured".
 """
 
 from __future__ import annotations
@@ -14,33 +15,47 @@ import argparse
 import math
 import sys
 from pathlib import Path
+from typing import NamedTuple
 
-from .midisynth import TRACK_ON, Bank, Instrument, SeqItem, Sequence, WaveBank, envelope, wavelist
+from .midisynth import (INSTRUMENT_SIZE, INSTRUMENTS, TRACK_ON, TRACKS, Bank, Instrument, SeqItem,
+                        Sequence, WaveBank, envelope, wavelist)
 
-# (name, page, size code, octave, semitone, fine)
+
+class Case(NamedTuple):
+    label: str
+    page: int           # DOC page of the wave
+    size: int           # wave size code: 256 << size bytes
+    octave: int
+    semitone: int
+    fine: int
+
+
+# Experiment 1 (TUNE): the tuning fields and wave size against the oscillator frequency.
 CASES = [
-    ("256 o3", 0x10, 0, 3, 0, 0),
-    ("1K o3", 0x20, 2, 3, 0, 0),
-    ("8K o3", 0x40, 5, 3, 0, 0),
-    ("256 o4", 0x10, 0, 4, 0, 0),
-    ("256 o3 s7 f32", 0x10, 0, 3, 7, 32),
-    ("8K o1", 0x40, 5, 1, 0, 0),
+    Case("256 o3", 0x10, 0, 3, 0, 0),
+    Case("1K o3", 0x20, 2, 3, 0, 0),
+    Case("8K o3", 0x40, 5, 3, 0, 0),
+    Case("256 o4", 0x10, 0, 4, 0, 0),
+    Case("256 o3 s7 f32", 0x10, 0, 3, 7, 32),
+    Case("8K o1", 0x40, 5, 1, 0, 0),
 ]
 # Experiment 2 (TUNE2): which DOC resolution MIDI Synth picks for each wave size.
 # One sine cycle per wave, octave 4; sizes 512 B - 32 KB, each aligned to its size
 # (pages $00-$01 are left free for synthLAB's metronome).
 CASES2 = [
-    ("512 o4", 0x02, 1, 4, 0, 0),
-    ("1K o4", 0x04, 2, 4, 0, 0),
-    ("2K o4", 0x08, 3, 4, 0, 0),
-    ("4K o4", 0x10, 4, 4, 0, 0),
-    ("8K o4", 0x20, 5, 4, 0, 0),
-    ("16K o4", 0x40, 6, 4, 0, 0),
-    ("32K o4", 0x80, 7, 4, 0, 0),
+    Case("512 o4", 0x02, 1, 4, 0, 0),
+    Case("1K o4", 0x04, 2, 4, 0, 0),
+    Case("2K o4", 0x08, 3, 4, 0, 0),
+    Case("4K o4", 0x10, 4, 4, 0, 0),
+    Case("8K o4", 0x20, 5, 4, 0, 0),
+    Case("16K o4", 0x40, 6, 4, 0, 0),
+    Case("32K o4", 0x80, 7, 4, 0, 0),
 ]
 NOTES = (69, 57)
-NOTE_SECONDS = 3            # slot per note; note held 2.5 s
+NOTE_SECONDS = 3            # slot per note
+HELD_SECONDS = 2.5
 TICKS_PER_SECOND = 96       # half-note tempo 30 = 60 quarter BPM
+SILENCE = 0x80              # DOC sample value at rest
 
 
 def sine_cycle(n: int) -> bytes:
@@ -48,28 +63,28 @@ def sine_cycle(n: int) -> bytes:
     return bytes(max(1, min(255, round(128 + 120 * math.sin(2 * math.pi * i / n)))) for i in range(n))
 
 
-def build(cases=CASES, notes=NOTES, name="TUNE") -> tuple[Bank, WaveBank, Sequence]:
-    ram = bytearray(b"\x80" * 0x10000)
+def build(cases: list[Case] = CASES, notes: tuple[int, ...] = NOTES,
+          name: str = "TUNE") -> tuple[Bank, WaveBank, Sequence]:
+    ram = bytearray([SILENCE]) * 0x10000
     waves = {}
-    for page, size in {(c[1], c[2]) for c in cases}:
+    for page, size in sorted({(c.page, c.size) for c in cases}):
         n = 256 << size
-        ram[page * 256 : page * 256 + n] = sine_cycle(n)
+        ram[page * 256:page * 256 + n] = sine_cycle(n)
         waves[page] = (f"Sine {n}", size)
     env = envelope(sustain=127, release1=(0, 31))
-    insts = [Instrument.build(label, (env, [wavelist(127, 0, (page, size, 127, o, s, f))]))
-             for label, page, size, o, s, f in cases]
-    insts += [Instrument("", bytes(288))] * (16 - len(insts))
+    insts = [Instrument.build(c.label, (env, [wavelist(127, 0, (c.page, c.size, 127, c.octave, c.semitone, c.fine))]))
+             for c in cases]
+    insts += [Instrument("", bytes(INSTRUMENT_SIZE))] * (INSTRUMENTS - len(insts))
     bank = Bank(f"{name}.WAV", len(cases), insts)
 
     items = []
-    for i in range(len(cases)):
+    for slot in range(len(cases)):
         for j, note in enumerate(notes):
-            t = (1 + (i * len(notes) + j) * NOTE_SECONDS) * TICKS_PER_SECOND
-            items.append(SeqItem(0, t, 0x90 | i, bytes([note, 100])))
-            items.append(SeqItem(0, t + int(2.5 * TICKS_PER_SECOND), 0x80 | i, bytes([note, 0x40])))
-    seq = Sequence(bank_name=f"{name}.BNK", items=items, tempo=30)
-    seq.track_names = ["Tuning test"] + [""] * 15
-    seq.track_play = [TRACK_ON] + [0] * 15
+            t = (1 + (slot * len(notes) + j) * NOTE_SECONDS) * TICKS_PER_SECOND
+            items.append(SeqItem(0, t, 0x90 | slot, bytes([note, 100])))
+            items.append(SeqItem(0, t + int(HELD_SECONDS * TICKS_PER_SECOND), 0x80 | slot, bytes([note, 0x40])))
+    seq = Sequence(bank_name=f"{name}.BNK", items=items, tempo=30,
+                   track_names=["Tuning test"] + [""] * (TRACKS - 1), track_play=[TRACK_ON] + [0] * (TRACKS - 1))
     return bank, WaveBank(waves, bytes(ram)), seq
 
 
