@@ -104,3 +104,17 @@ def test_sixteen_channels_leave_no_room_for_the_title_and_do_not_crash():
     seq, rep = convert(mf, BANK, title="MI1 999")
     assert len(rep.channel_slots) == 16 and "MI1 999" not in seq.track_names
     seq.to_bytes()
+
+
+def test_a_note_never_released_holds_its_voice_to_the_end():
+    from migs.midisynth import Bank, Instrument, SeqItem, Sequence, envelope, wavelist
+    from migs.voices import report
+    inst = Instrument.build("I", (envelope(release1=(0, 31)), [wavelist(127, 0, (0, 0, 255, 4, 0, 0))]))
+    bank = Bank("W", 1, [inst] * 16)
+    on = lambda t, k: SeqItem(0, t, 0x90, bytes([k, 100]))
+    off = lambda t, k: SeqItem(0, t, 0x80, bytes([k, 64]))
+    seq = Sequence("B", [on(0, 60), on(96, 60), off(192, 60), on(960, 62), off(1920, 62)], tempo=60)
+    from migs.voices import spans
+    r = report(seq, bank)
+    assert r.notes == 3 and r.peak == 2          # at tick 960: key 62 and the unreleased 60
+    assert max(s.free for s in spans(seq, bank)) >= seq.seconds()
