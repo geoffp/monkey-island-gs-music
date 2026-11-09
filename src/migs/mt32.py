@@ -6,9 +6,13 @@ Table provenance (ScummVM, GPL-2.0-or-later; see ref/scummvm):
 - MT32_TO_GM: audio/mididrv.cpp (MidiDriver::_mt32ToGm)
 - MT32_RHYTHM_KEYS: map-mt32-to-gm.h (Mt32PresetRhythmKeymap, identity-mapped keys)
 - MT32_DEFAULT_PANNING: audio/mt32gm.cpp (MidiDriver_MT32GM::MT32_DEFAULT_PANNING)
+
+Programs, keys and channels are 0-based, as on the wire.
 """
 
-MT32_PRESET_NAMES = [
+RHYTHM_CHANNEL = 9  # MIDI channel 10
+
+MT32_PRESET_NAMES = (
     "AcouPiano1", "AcouPiano2", "AcouPiano3", "ElecPiano1", "ElecPiano2", "ElecPiano3",
     "ElecPiano4", "Honkytonk", "Elec Org 1", "Elec Org 2", "Elec Org 3", "Elec Org 4",
     "Pipe Org 1", "Pipe Org 2", "Pipe Org 3", "Accordion", "Harpsi 1", "Harpsi 2",
@@ -29,9 +33,9 @@ MT32_PRESET_NAMES = [
     "MelodicTom", "Deep Snare", "Elec Perc1", "Elec Perc2", "Taiko", "Taiko Rim", "Cymbal",
     "Castanets", "Triangle", "Orche Hit", "Telephone", "Bird Tweet", "OneNoteJam",
     "WaterBells", "JungleTune",
-]
+)
 
-MT32_TO_GM = [
+MT32_TO_GM = (  # MT-32 preset program -> nearest GM program
     0, 1, 0, 2, 4, 4, 5, 3, 16, 17, 18, 16, 16, 19, 20, 21,
     6, 6, 6, 7, 7, 7, 8, 112, 62, 62, 63, 63, 38, 38, 39, 39,
     88, 95, 52, 98, 97, 99, 14, 54, 102, 96, 53, 102, 81, 100, 14, 80,
@@ -40,18 +44,16 @@ MT32_TO_GM = [
     66, 67, 71, 71, 68, 69, 70, 22, 56, 59, 57, 57, 60, 60, 58, 61,
     61, 11, 11, 98, 14, 9, 14, 13, 12, 107, 107, 77, 78, 78, 76, 76,
     47, 117, 127, 118, 118, 116, 115, 119, 115, 112, 55, 124, 123, 0, 14, 117,
-]
+)
 
 # MT-32 default rhythm setup: these keys sound, and map to the same GM percussion key.
 MT32_RHYTHM_KEYS = frozenset([*range(35, 52), 54, 56, *range(60, 74), 75])
 
 # Power-on panning of MT-32 parts 1-8 (MIDI channels 2-9), in MT-32 (reversed) pan sense.
-MT32_DEFAULT_PANNING = [0x40, 0x49, 0x40, 0x49, 0x25, 0x5B, 0x00, 0x7F]
+MT32_DEFAULT_PANNING = (0x40, 0x49, 0x40, 0x49, 0x25, 0x5B, 0x00, 0x7F)
 
 # ScummVM initGM: "Reverb 64 = equivalent of MT-32 default Reverb Level 5".
 GM_DEFAULT_REVERB = 64
-
-RHYTHM_CHANNEL = 9  # 0-based (MIDI channel 10)
 
 
 def flip_pan(v: int) -> int:
@@ -59,7 +61,12 @@ def flip_pan(v: int) -> int:
     return min(0x80 - v, 0x7F)
 
 
-GM_NAMES = [
+def default_pan(channel: int) -> int:
+    """MT-32 power-on pan of a melodic part's channel (1-8), in MT-32 pan sense."""
+    return MT32_DEFAULT_PANNING[channel - 1]
+
+
+GM_NAMES = (
     "Acoustic Grand Piano", "Bright Acoustic Piano", "Electric Grand Piano", "Honky-tonk Piano",
     "Electric Piano 1", "Electric Piano 2", "Harpsichord", "Clavinet", "Celesta", "Glockenspiel",
     "Music Box", "Vibraphone", "Marimba", "Xylophone", "Tubular Bells", "Dulcimer",
@@ -85,7 +92,7 @@ GM_NAMES = [
     "Taiko Drum", "Melodic Tom", "Synth Drum", "Reverse Cymbal", "Guitar Fret Noise",
     "Breath Noise", "Seashore", "Bird Tweet", "Telephone Ring", "Helicopter", "Applause",
     "Gunshot",
-]
+)
 
 GM_DRUM_NAMES = {
     35: "Acoustic Bass Drum", 36: "Bass Drum 1", 37: "Side Stick", 38: "Acoustic Snare",
@@ -101,5 +108,3 @@ GM_DRUM_NAMES = {
     76: "Hi Wood Block", 77: "Low Wood Block", 78: "Mute Cuica", 79: "Open Cuica",
     80: "Mute Triangle", 81: "Open Triangle",
 }
-
-assert len(MT32_PRESET_NAMES) == 128 and len(MT32_TO_GM) == 128 and len(GM_NAMES) == 128

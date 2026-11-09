@@ -75,6 +75,12 @@ def test_flip_pan_keeps_center():
     assert mt32.flip_pan(0) == 127 and mt32.flip_pan(127) == 1
 
 
+def test_mt32_tables_cover_every_program():
+    assert len(mt32.MT32_PRESET_NAMES) == len(mt32.MT32_TO_GM) == len(mt32.GM_NAMES) == 128
+    assert all(0 <= p < 128 for p in mt32.MT32_TO_GM)
+    assert mt32.default_pan(1) == mt32.MT32_DEFAULT_PANNING[0] and len(mt32.MT32_DEFAULT_PANNING) == 8
+
+
 def test_midi_files_survive_a_save_load_round_trip(tmp_path):
     for gm in (False, True):
         mf = build_midi(make_song(DATA), gm=gm)
