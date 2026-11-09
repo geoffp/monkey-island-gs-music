@@ -1,53 +1,35 @@
-"""MT-32 bank builder pieces that don't need Munt: DOC RAM placement and conversion, and the
-audio analysis the samplers share."""
+"""The MI1 MIDI Synth bank builder's Munt-free parts: envelope fitting and the slot map."""
+
+import tomllib
 
 import numpy as np
-import pytest
 
-from migs.audio import one_cycle, pitch_offset, refine_period
-from migs.docram import Wave, allocate, ram_image, to_doc
-from migs.munt import SR
+from migs import doc_tuning as dt
+from migs.mt32bank import MIN_RELEASE_RATE, SR, fit_envelope, map_toml
 
 
-def test_allocator_packs_power_of_two_waves_aligned_and_reports_overflow():
-    waves = [Wave("a", bytes(4096)), Wave("b", bytes(256)), Wave("c", bytes(1024)), Wave("d", bytes(2048))]
-    pages = allocate(waves, 2, 31)
-    for w in waves:
-        n = len(w.data) // 256
-        assert pages[w.name] % n == 0 and 2 <= pages[w.name] and pages[w.name] + n - 1 <= 31
-    spans = sorted((pages[w.name], pages[w.name] + len(w.data) // 256) for w in waves)
-    assert all(a[1] <= b[0] for a, b in zip(spans, spans[1:]))         # no overlap
-    with pytest.raises(ValueError):
-        allocate([Wave("big", bytes(8192))], 2, 31)                     # 32 pages don't fit in 30
+def _contour(levels_db, seconds):
+    """A piecewise-linear (in dB) loudness envelope through (t, dB) points, at SR."""
+    t = np.arange(int(seconds * SR)) / SR
+    return 10 ** (np.interp(t, *zip(*levels_db)) / 20)
 
 
-def test_doc_bytes_never_contain_zero():
-    y = np.sin(np.linspace(0, 20, 1000)) * 5
-    assert 0 not in to_doc(y) and max(to_doc(y)) <= 255
+def test_a_held_sound_keeps_its_sustain_and_releases_promptly():
+    env = _contour([(0, -60), (0.02, 0), (0.3, -3), (2.0, -3), (2.05, -40), (3.0, -80)], 3.0)
+    e = fit_envelope(env, 0, int(2.0 * SR))
+    attack_level, sustain = e[0], e[6]
+    assert attack_level == 127 and 80 <= sustain <= 100          # -3 dB of linear 127 is 90
+    assert e[9] >= MIN_RELEASE_RATE                              # release 1 rate
+    assert e[8] == 0                                             # release 1 goes to silence
 
 
-def test_period_and_cycle_extraction_on_a_pure_tone():
-    f = 261.63
-    x = np.sin(2 * np.pi * f * np.arange(SR) / SR)
-    p = refine_period(x, 1000, f)
-    assert p == pytest.approx(SR / f, rel=1e-3)
-    cyc = one_cycle(x, 1000, p)
-    assert len(cyc) == 256
-    ref = np.sin(2 * np.pi * np.arange(256) / 256 + 2 * np.pi * f * 1000 / SR)
-    assert np.corrcoef(cyc, ref)[0, 1] > 0.999
+def test_a_decaying_sound_reaches_zero_by_itself_so_its_voice_frees():
+    env = _contour([(0, -60), (0.01, 0), (0.6, -30), (2.0, -70)], 2.5)
+    e = fit_envelope(env, 0, int(2.0 * SR))
+    assert e[6] == 0                                             # sustain 0: the voice ends at its decay
+    assert dt.ENVELOPE_RATE_SECONDS[e[7]] < 13                   # and gets there (decay 3 isn't the slowest)
 
 
-def test_pitch_offset_sign_lower_is_negative():
-    t = np.arange(int(0.2 * SR)) / SR
-    tone = lambda hz: np.sin(2 * np.pi * hz * t) * np.exp(-t * 10) + 0.5 * np.sin(4 * np.pi * hz * t) * np.exp(-t * 10)
-    assert pitch_offset(tone(400), tone(400 * 2 ** (-5 / 12))) == -5
-    assert pitch_offset(tone(400), tone(400 * 2 ** (3 / 12))) == 3
-
-
-def test_ram_image_places_each_wave_at_its_page():
-    waves = [Wave("a", bytes([1]) * 512), Wave("b", bytes([2]) * 256)]
-    pages = allocate(waves, 2, 255)
-    ram = ram_image(waves, pages)
-    assert len(ram) == 65536 and ram[0] == 0x80
-    assert ram[pages["a"] * 256:pages["a"] * 256 + 512] == bytes([1]) * 512
-    assert ram[pages["b"] * 256] == 2
+def test_map_toml_is_what_mid2seq_reads():
+    m = tomllib.loads(map_toml("config/mt32bank.toml", {9: 2, 13: 2}, {36: [0, 40], 38: [0, 42]}))
+    assert m["programs"] == {"9": 2, "13": 2} and m["drums"]["38"] == [0, 42]
