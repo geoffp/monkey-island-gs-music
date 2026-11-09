@@ -54,3 +54,10 @@ def test_unterminated_stream_runs_to_end():
 def test_malformed_streams_raise(data):
     with pytest.raises(ValueError):
         ro.parse(data)
+
+
+def test_event_kinds_compare_as_their_names_and_ticks_convert_at_mi1_tempo():
+    t = ro.parse(bytes([0x91, 60, 100, 0xF0, 120, 0x81, 60, 0, 0x00]))
+    assert [e.kind for e in t.events] == ["note_on", "note_off"]
+    assert t.events[0].kind is ro.Kind.NOTE_ON
+    assert ro.ticks_to_seconds(t.end_tick) == 0.5               # 120 ticks per quarter at 120 BPM
