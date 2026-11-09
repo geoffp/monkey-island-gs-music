@@ -22,12 +22,12 @@ import math
 
 import numpy as np
 
-from . import mt32bank as mb
+from . import audio, munt
 from .loopbuild import (Settle, Sound, Tracks, _at, _cycle_at_rate, _smooth, analyse,  # noqa: F401
                         harmonic_cycle, harmonic_tracks, join_aligned, loop_power,
                         modulation_period, settle, zero_start_exact)
 
-SR = mb.SR
+SR = munt.SR
 
 
 # ---------------------------------------------------------------------------
@@ -299,7 +299,7 @@ def trial(snd: Sound, cand: str, loop_bytes: int, attack_bytes: int, tables: dic
                                 min(key_lo, key), max(key_hi, key), whole_cycles=whole)
     att_end = snd.a + attack_bytes / rate * SR
     if where == "fixed":                           # as ntpmod.attack_and_loop picks it
-        env = mb.rms_envelope(snd.x)
+        env = audio.rms_envelope(snd.x)
         top = float(np.max(env[snd.a:])) or 1.0
         at = snd.a + sustain_s * SR
         while at > att_end and env[int(at)] < 0.2 * top:
@@ -494,7 +494,7 @@ def main(argv: list[str] | None = None) -> int:
         if not s.steady:                                   # the build's one-shot rule
             hold = spec.get("hold_seconds", 2.0)
             x2 = render(m["program"], m["key"], hold)
-            a2 = mb.onset(x2)
+            a2 = audio.onset(x2)
             t_floor = nm.floor_time(x2, a2, a2 + int(hold * SR), cfg.get("one_shot_floor_lsb", 1.5))
             shot = nm.one_shot_tuning(t_floor, s.rate, sum(s.ntp_blocks()) // 256, tables, m["key"], klo, khi,
                                       cfg["min_rate"], cfg.get("one_shot_max_rate_drop", 0.1))

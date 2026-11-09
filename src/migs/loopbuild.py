@@ -19,9 +19,9 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from . import mt32bank as mb
+from . import audio, munt
 
-SR = mb.SR
+SR = munt.SR
 
 
 @dataclass
@@ -283,9 +283,9 @@ class Sound:
 
 def analyse(m: dict, render, hold: float = 6.0, build_hold: float = 2.0) -> Sound:
     x = render(m["program"], m["key"], hold)
-    a = mb.onset(x)
+    a = audio.onset(x)
     f0 = 440 * 2 ** ((m["key"] - 69) / 12)
-    period = mb.refine_period(x, a + int(0.25 * SR), f0)
+    period = audio.refine_period(x, a + int(0.25 * SR), f0)
     tr = harmonic_tracks(x, a, period, end=a + int(hold * SR))
     st = settle(tr)
     if st.steady:

@@ -13,25 +13,25 @@ from __future__ import annotations
 import argparse
 import hashlib
 import math
-import subprocess
 import sys
 import tomllib
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-import mido
 import numpy as np
-from scipy.io import wavfile
 from scipy.signal import resample
 
 from . import doc_tuning as dt
-from .midisynth import Bank, Instrument, WaveBank, envelope, wavelist
+from .audio import one_cycle, onset, pitch_offset, refine_period, rising_zero, rms_envelope
+from .docram import SILENCE, Wave, allocate, ram_image, to_doc
+from .midisynth import INSTRUMENT_SIZE, INSTRUMENTS, WAVELISTS, Bank, Instrument, WaveBank, envelope, wavelist
+from .munt import SR, render
 
-SR = 32000                      # Munt output rate
-MELODIC_CH, RHYTHM_CH = 1, 9    # MT-32 part 1 = MIDI channel 2; rhythm = 10
 LOOP_BYTES = 256
 FIRST_PAGE = 2                  # pages $00-$01: synthLAB metronome woodblock
 MIN_DRUM_RATE = 6000
+OSC_SWAP, OSC_ONESHOT, OSC_FREE = 3, 2, 0     # wavelist oscillator configs
 # Voices free only at envelope 0, and MIDI Synth steals the least noticeable (quietest) voice.
 # Slow tails from loud notes therefore outlive quieter *sustained* notes, which get stolen.
 # Keep tails short:
@@ -39,112 +39,22 @@ MIN_RELEASE_RATE = 20           # release <= ~0.18 s full scale
 MIN_KIT_FALL_RATE = 18          # drum kit voice ends within ~0.28 s
 SUSTAIN_FLOOR = 12              # fitted sustain below this -> 0, so the voice frees itself
 AUDIBLE = 0.1                   # a decaying sound is "over" below 10% of its peak (-20 dB)
+MIN_VOLUME = 16                 # quietest wavelist volume (loudness is relative to the loudest)
 # Generator 2 plays silence; an all-zero envelope ends at once so it never holds a voice
 # (MIDI Synth frees a voice only when BOTH envelopes reach zero).
 GEN2_OFF = envelope(attack=(0, 31), decay1=(0, 31), decay2=(0, 31), sustain=0, decay3_rate=31,
                     release1=(0, 31), release2=(0, 31), release3_rate=31, velocity_gain=0)
 
-
-# ---------------------------------------------------------------------------
-# Rendering through Munt
-
-def _reverb_off() -> mido.Message:
-    # MT-32 system area 10 00 03 = reverb level 0; Roland checksum
-    addr_data = [0x10, 0x00, 0x03, 0x00]
-    cs = (128 - sum(addr_data) % 128) % 128
-    return mido.Message("sysex", data=[0x41, 0x10, 0x16, 0x12, *addr_data, cs])
-
-
-def render(smf2wav: Path, roms: Path, cache: Path, *, program: int | None, key: int,
-           hold: float, velocity: int = 100, volume: int = 100) -> np.ndarray:
-    """Render one note (melodic `program` on part 1, or rhythm `key` if program is None) at
-    channel volume (CC7) `volume`."""
-    tag = f"{'p%03d' % program if program is not None else 'rhythm'}-k{key}-h{hold}-v{velocity}"
-    tag += f"-c{volume}" if volume != 100 else ""
-    wav = cache / f"{tag}.wav"
-    if not wav.exists():
-        cache.mkdir(parents=True, exist_ok=True)
-        tpq, s = 480, 960                               # 120 BPM: 960 ticks per second
-        ch = RHYTHM_CH if program is None else MELODIC_CH
-        trk = mido.MidiTrack([_reverb_off(),
-                              mido.Message("control_change", channel=ch, control=7, value=volume, time=0),
-                              mido.Message("control_change", channel=ch, control=10, value=64, time=0)])
-        if program is not None:
-            trk.append(mido.Message("program_change", channel=ch, program=program, time=0))
-        trk.append(mido.Message("note_on", channel=ch, note=key, velocity=velocity, time=int(0.5 * s)))
-        trk.append(mido.Message("note_off", channel=ch, note=key, velocity=64, time=int(hold * s)))
-        trk.append(mido.MetaMessage("end_of_track", time=int(2.0 * s)))
-        mf = mido.MidiFile(ticks_per_beat=tpq)
-        mf.tracks.append(trk)
-        mid = cache / f"{tag}.mid"
-        mf.save(mid)
-        subprocess.run([str(smf2wav), "--quiet", "-m", str(roms), "-f", "-o", str(wav), str(mid)],
-                       check=True, stdout=subprocess.DEVNULL)
-    rate, data = wavfile.read(wav)
-    if rate != SR:
-        raise ValueError(f"{wav}: expected {SR} Hz, got {rate}")
-    x = data.astype(np.float64)
-    return (x.mean(axis=1) if x.ndim == 2 else x) / 32768.0
-
-
-# ---------------------------------------------------------------------------
-# Analysis
-
-def rms_envelope(x: np.ndarray, win: float = 0.01) -> np.ndarray:
-    n = max(1, int(win * SR))
-    return np.sqrt(np.convolve(x * x, np.ones(n) / n, mode="same"))
-
-
-def onset(x: np.ndarray, frac: float = 0.02) -> int:
-    peak = np.max(np.abs(x))
-    return int(np.argmax(np.abs(x) > frac * peak))
-
-
-def refine_period(x: np.ndarray, at: int, f0: float) -> float:
-    """Period (samples) near SR/f0 by autocorrelation around sample `at`, with parabolic peak."""
-    p0 = SR / f0
-    n = int(p0 * 8)
-    seg = x[at : at + n + int(p0 * 1.1) + 2]
-    lo, hi = int(p0 * 0.97), int(p0 * 1.03) + 1
-    corr = [float(np.dot(seg[:n], seg[lag : lag + n])) for lag in range(lo, hi + 1)]
-    i = int(np.argmax(corr))
-    if i in (0, len(corr) - 1):
-        return p0                       # no clear period near the nominal pitch (inharmonic)
-    if 0 < i < len(corr) - 1:
-        a, b, c = corr[i - 1], corr[i], corr[i + 1]
-        den = a - 2 * b + c
-        return lo + i + (0.5 * (a - c) / den if den else 0.0)
-    return float(lo + i)
-
-
-def rising_zero(x: np.ndarray, near: int, span: int) -> int:
-    for i in range(near, min(len(x) - 1, near + span)):
-        if x[i] <= 0 < x[i + 1]:
-            return i + 1
-    return near
-
-
-def one_cycle(x: np.ndarray, start: int, period: float, cycles: int = 4, out: int = LOOP_BYTES) -> np.ndarray:
-    """Average `cycles` consecutive periods, band-limited to `out` points (periodic)."""
-    fine = 4096
-    acc = np.zeros(fine)
-    for c in range(cycles):
-        pos = start + period * (c + np.arange(fine) / fine)
-        acc += np.interp(pos, np.arange(len(x)), x)
-    return resample(acc / cycles, out)
-
-
-def to_doc(y: np.ndarray, peak: float | None = None) -> bytes:
-    """Signed float -> DOC unsigned 8-bit; 0 is never emitted (it halts the oscillator)."""
-    peak = peak or (float(np.max(np.abs(y))) or 1.0)
-    return bytes(np.clip(np.round(128 + 126 * y / peak), 1, 255).astype(np.uint8))
+Renderer = Callable[..., np.ndarray]           # munt.render with the paths bound
 
 
 def fit_envelope(env: np.ndarray, start: int, off: int, release_slow: bool = False) -> bytes:
-    """MIDI Synth envelope approximating a loudness contour (levels linear 0-127)."""
+    """MIDI Synth envelope approximating a loudness contour (levels linear 0-127): attack to
+    the peak, two decays (150 ms and 600 ms after it), sustain at the level 100 ms before
+    note-off, and a release fitted to the fall after note-off."""
     top = float(np.max(env[start:off])) or 1.0
     half = int(0.05 * SR)                    # average +-50 ms: tremolo/beating would mislead points
-    lv = lambda i: int(round(127 * float(np.mean(env[max(i - half, 0) : max(min(i + half, len(env)), 1)])) / top))
+    lv = lambda i: int(round(127 * float(np.mean(env[max(i - half, 0):max(min(i + half, len(env)), 1)])) / top))
     pk = start + int(np.argmax(env[start:off]))
     t = lambda a, b: (b - a) / SR
     d1, d2 = min(pk + int(0.15 * SR), off), min(pk + int(0.6 * SR), off)
@@ -173,186 +83,201 @@ def fit_envelope(env: np.ndarray, start: int, off: int, release_slow: bool = Fal
         release2=(0, 31), release3_rate=31, velocity_gain=4)
 
 
-def pitch_offset(ref: np.ndarray, other: np.ndarray) -> int:
-    """Semitone shift of `other` relative to `ref` (log-frequency spectrum cross-correlation)."""
-    def logspec(x):
-        a = onset(x)
-        seg = x[a : a + int(0.06 * SR)] * np.hanning(int(0.06 * SR))[: len(x[a : a + int(0.06 * SR)])]
-        mag = np.abs(np.fft.rfft(seg, 8192))
-        freqs = np.fft.rfftfreq(8192, 1 / SR)
-        grid = 60 * 2 ** (np.arange(0, 7 * 12 * 4) / 48)            # 60 Hz .. ~7.7 kHz, 1/4 semis
-        return np.log1p(np.interp(grid, freqs, mag))
-    a, b = logspec(ref), logspec(other)
-    a, b = a - a.mean(), b - b.mean()
-    best = max(range(-48, 49), key=lambda s: float(np.dot(a[max(0, s):len(a) + min(0, s)],
-                                                          b[max(0, -s):len(b) - max(0, s)])))
-    return -round(best / 4)            # a[i+s] ~ b[i]: s > 0 means `other` is lower
+# ---------------------------------------------------------------------------
+# Sampling
+
+@dataclass
+class Melodic:
+    spec: dict                  # its [[melodic]] entry
+    attack: Wave
+    loop: Wave
+    rate: float                 # the attack's sample rate
+    loop_cycles: float          # nominal cycles the loop holds (see sample_melodic)
+    env: bytes                  # fitted EnvelopeRec
+    loudness: float             # peak RMS of the render
+    period: float               # MT-32 period at the loop (samples at SR)
+
+
+@dataclass
+class Drum:
+    spec: dict                  # its [[drum]] entry
+    wave: Wave
+    rate: float
+    offsets: dict[int, int]     # rhythm key it covers -> semitones from the sampled key
+    loudness: float
+    seconds: float              # length to -46 dB
+
+
+def sample_melodic(m: dict, render_note: Renderer, hold: float) -> Melodic:
+    x = render_note(program=m["program"], key=m["key"], hold=hold)
+    f0 = 440 * 2 ** ((m["key"] - 69) / 12)
+    a = onset(x)
+    off = a + int(hold * SR)                # smf2wav drops leading silence: the note starts at a
+    env = rms_envelope(x)
+    nbytes = m.get("attack_bytes", 2048)
+    rate = min(dt.DOC_RATE, max(nbytes / 0.12, 20 * f0))
+    end = rising_zero(x, a + int(nbytes / rate * SR), int(SR / f0) + 2)
+    loop_at = rising_zero(x, max(end, a + int(0.3 * SR)), int(SR / f0) + 2)
+    period = refine_period(x, loop_at, f0)
+    flat = x[a:end] / np.maximum(env[a:end], 0.1 * np.max(env[a:off]))
+    attack = resample(flat, nbytes)
+    # the loop is level-matched to the attack's last quarter, so the handover is level
+    cycle = one_cycle(x, loop_at, period, out=LOOP_BYTES)
+    cycle_rms = float(np.sqrt(np.mean(cycle ** 2))) or 1.0
+    attack_rms = float(np.sqrt(np.mean(attack[-nbytes // 4:] ** 2))) or 1.0
+    peak = max(np.max(np.abs(attack)), np.max(np.abs(cycle)) * attack_rms / cycle_rms)
+    return Melodic(
+        m, Wave(f"{m['name']} A", to_doc(attack, peak)),
+        Wave(f"~{m['name']} L", to_doc(cycle * attack_rms / cycle_rms, peak)),
+        rate=nbytes / ((end - a) / SR),
+        # the loop holds one MT-32 period = f0*period/SR nominal cycles, so it plays at the
+        # MT-32's own pitch, matching the attack sample
+        loop_cycles=f0 * period / SR,
+        env=fit_envelope(env, a, off), loudness=float(np.max(env[a:off])), period=period)
+
+
+def sample_drum(d: dict, render_note: Renderer) -> Drum:
+    """A one-shot of d["bytes"], at the rate that spreads its -46 dB length over them (at
+    least MIN_DRUM_RATE), faded out over its last 10%."""
+    x = render_note(program=None, key=d["key"], hold=0.5)
+    a = onset(x)
+    env = rms_envelope(x, 0.005)
+    tail = np.nonzero(env[a:] > 0.005 * np.max(env))[0]
+    dur = (tail[-1] + 1) / SR if len(tail) else 0.1
+    n = d["bytes"]
+    rate = min(dt.DOC_RATE, max(MIN_DRUM_RATE, n / dur))
+    seg = x[a:a + int(min(dur, n / rate) * SR)]
+    fade = np.ones(len(seg))
+    k = max(1, len(seg) // 10)
+    fade[-k:] = np.linspace(1, 0, k)
+    data = to_doc(resample(seg * fade, int(len(seg) / SR * rate)))
+    offsets = {c: 0 if c == d["key"] else pitch_offset(x, render_note(program=None, key=c, hold=0.5))
+               for c in d["covers"]}
+    return Drum(d, Wave(d["name"], data.ljust(n, bytes([SILENCE]))[:n]), rate, offsets, float(np.max(env)), dur)
+
+
+# ---------------------------------------------------------------------------
+# Instruments
+
+def _volume(loudness: float, loudest: float) -> int:
+    return max(MIN_VOLUME, min(127, round(127 * loudness / loudest)))
+
+
+def melodic_instrument(s: Melodic, pages: dict[str, int], volume: int, silence: tuple) -> Instrument:
+    m = s.spec
+    ta = dt.encode(dt.tuning_for(s.rate, m["key"], s.attack.size_code))
+    tl = dt.encode(dt.single_cycle_tuning(s.loop_cycles))
+    wl = wavelist(127, OSC_SWAP, (pages[s.attack.name], s.attack.size_code, volume, *ta),
+                  (pages[s.loop.name], 0, volume, *tl))
+    return Instrument.build(m["name"], (s.env, [wl]), (GEN2_OFF, [wavelist(127, OSC_FREE, silence, silence)]))
+
+
+def _key_max(z: Drum) -> int:
+    """The highest home key at which a drum's wave plays in tune: its tuning must fit in
+    octaves 0-6, so slow and small (single-cycle mode) waves need low keys."""
+    size = z.wave.size_code
+    return math.floor(69 + 12 * (math.log2(z.rate / dt.B0) - (size - dt.resolution(size)) + 4) - 0.5)
+
+
+def _audible_seconds(z: Drum) -> float:
+    """Where the one-shot falls below AUDIBLE of its peak."""
+    y = np.abs(np.frombuffer(z.wave.data, np.uint8).astype(float) - 128)
+    e = np.convolve(y, np.ones(32) / 32, mode="same")
+    above = np.nonzero(e >= AUDIBLE * e.max())[0]
+    return (above[-1] + 1) / z.rate if len(above) else 0.05
+
+
+def kit_instrument(slot: int, zones: list[Drum], pages: dict[str, int], volume: Callable[[Drum], int],
+                   silence: tuple, drums: dict[int, list[int]]) -> tuple[Instrument, float, int]:
+    """A drum kit: its zones laid out up the keyboard in order of how high each can play
+    (`_key_max`), each wide enough for the rhythm keys it covers. Fills `drums` (rhythm key ->
+    [slot, key]). Returns the instrument, its longest one-shot (s) and its fall rate."""
+    if len(zones) > WAVELISTS:
+        raise ValueError(f"kit slot {slot}: {len(zones)} zones > {WAVELISTS}")
+    wls = []
+    cursor = 0
+    ordered = sorted(zones, key=_key_max)
+    for j, z in enumerate(ordered):
+        home = cursor + max(0, -min(z.offsets.values()))
+        if home > _key_max(z):
+            raise ValueError(f"kit slot {slot}: no key range left for {z.spec['name']} "
+                             f"(home {home} > max {_key_max(z)})")
+        top = 127 if j == len(ordered) - 1 else home + max(0, max(z.offsets.values()))
+        cursor = top + 1
+        t = dt.encode(dt.tuning_for(z.rate, home, z.wave.size_code))
+        wls.append(wavelist(top, OSC_ONESHOT, (pages[z.wave.name], z.wave.size_code, volume(z), *t), silence))
+        for c, off in z.offsets.items():
+            drums[c] = [slot, home + off]
+    # One-shot drums: decay to zero over the kit's longest sample, so each hit frees its
+    # voice by itself (note-off, if early, releases at the same rate).
+    longest = max(_audible_seconds(z) for z in zones)
+    fall = max(MIN_KIT_FALL_RATE, dt.segment_rate(127, 0, longest))
+    env = envelope(attack=(127, 31), decay1=(127, 31), decay2=(127, 31), sustain=0,
+                   decay3_rate=fall, release1=(0, fall), velocity_gain=4)
+    inst = Instrument.build(f"Kit {'AB'[slot != 0]}", (env, wls),
+                            (GEN2_OFF, [wavelist(127, OSC_FREE, silence, silence)] * len(wls)))
+    return inst, longest, fall
 
 
 # ---------------------------------------------------------------------------
 # Building
 
-@dataclass
-class Wave:
-    name: str
-    data: bytes
-
-    @property
-    def size_code(self) -> int:
-        return int(math.log2(len(self.data) // 256))
-
-
-def allocate(waves: list[Wave], first: int, last: int) -> dict[str, int]:
-    """Largest-first, size-aligned placement in DOC pages [first, last]. Returns name -> page."""
-    used = [False] * 256
-    for p in range(256):
-        used[p] = not first <= p <= last
-    out = {}
-    for w in sorted(waves, key=lambda w: -len(w.data)):
-        n = len(w.data) // 256
-        for p in range(0, 256, n):
-            if not any(used[p : p + n]):
-                for q in range(p, p + n):
-                    used[q] = True
-                out[w.name] = p
-                break
-        else:
-            free = sum(not u for u in used)
-            raise ValueError(f"DOC RAM full placing {w.name} ({len(w.data)} B); {free} pages free")
-    return out
-
-
 def build(spec: dict, smf2wav: Path, roms: Path, cache: Path, log=print):
+    """(Bank, WaveBank, MT-32 program -> slot, rhythm key -> [slot, key])."""
+    render_note = lambda **kw: render(smf2wav, roms, cache, **kw)
     hold = spec.get("hold_seconds", 2.0)
-    waves: list[Wave] = [Wave("Silence", bytes([0x80]) * 256)]
-    slots: dict[int, dict] = {}
-    loud: dict[str, float] = {}
-
+    melodic: dict[int, Melodic] = {}
     for m in spec["melodic"]:
-        x = render(smf2wav, roms, cache, program=m["program"], key=m["key"], hold=hold)
-        f0 = 440 * 2 ** ((m["key"] - 69) / 12)
-        a = onset(x)
-        # smf2wav drops leading silence, so the note starts at the onset, not at 0.5 s
-        off = a + int(hold * SR)
-        env = rms_envelope(x)
-        loud[m["name"]] = float(np.max(env[a:off]))
-        nbytes = m.get("attack_bytes", 2048)
-        rate = min(dt.DOC_RATE, max(nbytes / 0.12, 20 * f0))
-        end = rising_zero(x, a + int(nbytes / rate * SR), int(SR / f0) + 2)
-        loop_at = rising_zero(x, max(end, a + int(0.3 * SR)), int(SR / f0) + 2)
-        period = refine_period(x, loop_at, f0)
-        flat = x[a:end] / np.maximum(env[a:end], 0.1 * np.max(env[a:off]))
-        attack = resample(flat, nbytes)
-        cycle = one_cycle(x, loop_at, period)
-        cycle_rms = float(np.sqrt(np.mean(cycle ** 2))) or 1.0
-        attack_rms = float(np.sqrt(np.mean(attack[-nbytes // 4:] ** 2))) or 1.0
-        peak = max(np.max(np.abs(attack)), np.max(np.abs(cycle)) * attack_rms / cycle_rms)
-        waves.append(Wave(f"{m['name']} A", to_doc(attack, peak)))
-        waves.append(Wave(f"~{m['name']} L", to_doc(cycle * attack_rms / cycle_rms, peak)))
-        true_rate = nbytes / ((end - a) / SR)
-        slots[m["slot"]] = {"kind": "melodic", "spec": m, "rate": true_rate,
-                            # the loop holds one MT-32 period = f0*period/SR nominal cycles, so
-                            # it plays at the MT-32's own pitch, matching the attack sample
-                            "loop_cycles": f0 * period / SR,
-                            "env": fit_envelope(env, a, off)}
-        log(f"  {m['name']:<12} prog {m['program']:3d} key {m['key']}: attack {nbytes} B @ {true_rate:7.0f} Hz "
-            f"({(end - a) / SR * 1000:.0f} ms), loop period {period:.2f} smp (MT-32 {SR / period:.2f} Hz vs {f0:.2f})")
-
-    kits: dict[int, list[dict]] = {}
+        s = melodic[m["slot"]] = sample_melodic(m, render_note, hold)
+        nbytes, f0 = len(s.attack.data), 440 * 2 ** ((m["key"] - 69) / 12)
+        log(f"  {m['name']:<12} prog {m['program']:3d} key {m['key']}: attack {nbytes} B @ {s.rate:7.0f} Hz "
+            f"({nbytes / s.rate * 1000:.0f} ms), loop period {s.period:.2f} smp "
+            f"(MT-32 {SR / s.period:.2f} Hz vs {f0:.2f})")
+    drum_list: list[Drum] = []
     for d in spec["drum"]:
-        x = render(smf2wav, roms, cache, program=None, key=d["key"], hold=0.5)
-        a = onset(x)
-        env = rms_envelope(x, 0.005)
-        loud[d["name"]] = float(np.max(env))
-        tail = np.nonzero(env[a:] > 0.005 * np.max(env))[0]
-        dur = (tail[-1] + 1) / SR if len(tail) else 0.1
-        n = d["bytes"]
-        rate = min(dt.DOC_RATE, max(MIN_DRUM_RATE, n / dur))
-        seg = x[a : a + int(min(dur, n / rate) * SR)]
-        fade = np.ones(len(seg))
-        k = max(1, len(seg) // 10)
-        fade[-k:] = np.linspace(1, 0, k)
-        samp = resample(seg * fade, int(len(seg) / SR * rate))
-        data = to_doc(samp)
-        data = data + bytes([0x80]) * (n - len(data))
-        waves.append(Wave(d["name"], data[:n]))
-        offsets = {}
-        for c in d["covers"]:
-            offsets[c] = 0 if c == d["key"] else pitch_offset(
-                x, render(smf2wav, roms, cache, program=None, key=c, hold=0.5))
-        kits.setdefault(d["slot"], []).append({"spec": d, "rate": rate, "offsets": offsets})
-        log(f"  {d['name']:<12} rhythm key {d['key']}: {n} B @ {rate:6.0f} Hz ({dur * 1000:.0f} ms), "
-            f"covers {offsets}")
+        z = sample_drum(d, render_note)
+        drum_list.append(z)
+        log(f"  {d['name']:<12} rhythm key {d['key']}: {d['bytes']} B @ {z.rate:6.0f} Hz "
+            f"({z.seconds * 1000:.0f} ms), covers {z.offsets}")
+    kits: dict[int, list[Drum]] = {}
+    for z in drum_list:
+        kits.setdefault(z.spec["slot"], []).append(z)
 
+    silence_wave = Wave("Silence", bytes([SILENCE]) * 256)
+    # spec order: the allocator places equal-size waves in list order
+    waves = [silence_wave, *(w for s in melodic.values() for w in (s.attack, s.loop)),
+             *(z.wave for z in drum_list)]
     reserve = spec.get("reserve_pages", 0)
     pages = allocate(waves, FIRST_PAGE, 255 - reserve)
-    used = sum(len(w.data) for w in waves) // 256
+    used = sum(w.pages for w in waves)
     log(f"  DOC RAM: {used} pages used of {256 - FIRST_PAGE - reserve} "
         f"(+{reserve} reserved for effects, {FIRST_PAGE} metronome)")
-    by_name = {w.name: w for w in waves}
-    vol = lambda name: max(16, min(127, round(127 * loud[name] / max(loud.values()))))
-    silence = (pages["Silence"], 0, 0, 4, 0, 0)
+    loudest = max([s.loudness for s in melodic.values()] + [z.loudness for z in drum_list])
+    silence = (pages[silence_wave.name], 0, 0, 4, 0, 0)
 
-    insts = [Instrument("", bytes(288)) for _ in range(16)]
-    programs, drums = {}, {}
-    for slot, s in slots.items():
-        m = s["spec"]
-        aw, lw = by_name[f"{m['name']} A"], by_name[f"~{m['name']} L"]
-        ta = dt.encode(dt.tuning_for(s["rate"], m["key"], aw.size_code))
-        tl = dt.encode(dt.single_cycle_tuning(s["loop_cycles"]))
-        v = vol(m["name"])
-        wl = wavelist(127, 3, (pages[aw.name], aw.size_code, v, *ta), (pages[lw.name], 0, v, *tl))
-        silent = wavelist(127, 0, silence, silence)
-        insts[slot] = Instrument.build(m["name"], (s["env"], [wl]), (GEN2_OFF, [silent]))
-        for p in m["covers"]:
-            programs[p] = slot
+    insts = [Instrument("", bytes(INSTRUMENT_SIZE)) for _ in range(INSTRUMENTS)]
+    programs: dict[int, int] = {}
+    drums: dict[int, list[int]] = {}
+    for slot, s in melodic.items():
+        insts[slot] = melodic_instrument(s, pages, _volume(s.loudness, loudest), silence)
+        programs.update(dict.fromkeys(s.spec["covers"], slot))
     for slot, zones in kits.items():
-        if len(zones) > 8:
-            raise ValueError(f"kit slot {slot}: {len(zones)} zones > 8")
-        wls = []
-        # A wave plays in tune only for home keys where its tuning fits octave 0-6; slow and
-        # small (single-cycle mode) waves need low keys. Lay zones out by that limit.
-        def key_max(z):
-            w = by_name[z["spec"]["name"]]
-            return math.floor(69 + 12 * (math.log2(z["rate"] / dt.B0)
-                                         - (w.size_code - dt.resolution(w.size_code)) + 4) - 0.5)
-        cursor = 0
-        ordered = sorted(zones, key=key_max)
-        for j, z in enumerate(ordered):
-            d = z["spec"]
-            neg = max(0, -min(z["offsets"].values()))
-            pos = max(0, max(z["offsets"].values()))
-            home = cursor + neg
-            if home > key_max(z):
-                raise ValueError(f"kit slot {slot}: no key range left for {d['name']} "
-                                 f"(home {home} > max {key_max(z)})")
-            top = 127 if j == len(ordered) - 1 else home + pos
-            cursor = top + 1
-            w = by_name[d["name"]]
-            t = dt.encode(dt.tuning_for(z["rate"], home, w.size_code))
-            wls.append(wavelist(top, 2, (pages[d["name"]], w.size_code, vol(d["name"]), *t), silence))
-            for c, off in z["offsets"].items():
-                drums[c] = [slot, home + off]
-        # One-shot drums: decay to zero over the kit's longest sample, so each hit frees its
-        # voice by itself (note-off, if early, releases at the same rate).
-        def audible_seconds(z):          # where the one-shot falls below 10% of its peak
-            y = np.abs(np.frombuffer(by_name[z["spec"]["name"]].data, np.uint8).astype(float) - 128)
-            e = np.convolve(y, np.ones(32) / 32, mode="same")
-            loud = np.nonzero(e >= AUDIBLE * e.max())[0]
-            return (loud[-1] + 1) / z["rate"] if len(loud) else 0.05
-        longest = max(audible_seconds(z) for z in zones)
-        fall = max(MIN_KIT_FALL_RATE, dt.segment_rate(127, 0, longest))
-        env = envelope(attack=(127, 31), decay1=(127, 31), decay2=(127, 31), sustain=0,
-                       decay3_rate=fall, release1=(0, fall), velocity_gain=4)
-        insts[slot] = Instrument.build(f"Kit {'AB'[slot != 0]}", (env, wls),
-                                       (GEN2_OFF, [wavelist(127, 0, silence, silence)] * len(wls)))
+        insts[slot], longest, fall = kit_instrument(slot, zones, pages, lambda z: _volume(z.loudness, loudest),
+                                                    silence, drums)
         log(f"  kit slot {slot}: {len(zones)} zones, voice frees after ~{longest:.2f}s (rate {fall})")
-    ram = bytearray([0x80]) * 0x10000
-    for w in waves:
-        ram[pages[w.name] * 256 : pages[w.name] * 256 + len(w.data)] = w.data
-    bank = Bank(f"{spec['bank']}.WAV", 16, insts)
-    wb = WaveBank({pages[w.name]: (w.name[:15], w.size_code) for w in waves}, bytes(ram))
+    bank = Bank(f"{spec['bank']}.WAV", INSTRUMENTS, insts)
+    wb = WaveBank({pages[w.name]: (w.name[:15], w.size_code) for w in waves}, ram_image(waves, pages))
     return bank, wb, programs, drums
+
+
+def map_toml(spec_path: Path, programs: dict[int, int], drums: dict[int, list[int]]) -> str:
+    """The generated mapping mid2seq reads (BankMap `map_file`)."""
+    lines = [f"# Generated by migs.mt32bank from {spec_path} -- do not edit",
+             "[programs]   # MT-32 program -> slot",
+             *(f'"{p}" = {s}' for p, s in sorted(programs.items())),
+             "", "[drums]      # MT-32 rhythm key -> [slot, key]",
+             *(f'"{k}" = {v}' for k, v in sorted(drums.items()))]
+    return "\n".join(lines) + "\n"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -368,16 +293,12 @@ def main(argv: list[str] | None = None) -> int:
     bank, wb, programs, drums = build(spec, args.smf2wav, args.roms, args.cache)
     args.out_dir.mkdir(parents=True, exist_ok=True)
     name = spec["bank"]
+    wave_bytes = wb.to_bytes()
     (args.out_dir / f"{name}.BNK").write_bytes(bank.to_bytes())
-    (args.out_dir / f"{name}.WAV").write_bytes(wb.to_bytes())
-    lines = [f"# Generated by migs.mt32bank from {args.spec} -- do not edit",
-             "[programs]   # MT-32 program -> slot"]
-    lines += [f'"{p}" = {s}' for p, s in sorted(programs.items())]
-    lines += ["", "[drums]      # MT-32 rhythm key -> [slot, key]"]
-    lines += [f'"{k}" = {v}' for k, v in sorted(drums.items())]
-    (args.out_dir / f"{name}.map.toml").write_text("\n".join(lines) + "\n")
-    h = hashlib.sha256((args.out_dir / f"{name}.WAV").read_bytes()).hexdigest()[:12]
-    print(f"wrote {args.out_dir}/{name}.BNK, {name}.WAV (sha {h}), {name}.map.toml")
+    (args.out_dir / f"{name}.WAV").write_bytes(wave_bytes)
+    (args.out_dir / f"{name}.map.toml").write_text(map_toml(args.spec, programs, drums))
+    print(f"wrote {args.out_dir}/{name}.BNK, {name}.WAV (sha {hashlib.sha256(wave_bytes).hexdigest()[:12]}), "
+          f"{name}.map.toml")
     return 0
 
 

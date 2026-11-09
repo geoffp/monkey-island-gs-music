@@ -1,9 +1,12 @@
-"""MT-32 bank builder pieces that don't need Munt."""
+"""MT-32 bank builder pieces that don't need Munt: DOC RAM placement and conversion, and the
+audio analysis the samplers share."""
 
 import numpy as np
 import pytest
 
-from migs.mt32bank import SR, Wave, allocate, one_cycle, pitch_offset, refine_period, to_doc
+from migs.audio import one_cycle, pitch_offset, refine_period
+from migs.docram import Wave, allocate, ram_image, to_doc
+from migs.munt import SR
 
 
 def test_allocator_packs_power_of_two_waves_aligned_and_reports_overflow():
@@ -39,3 +42,12 @@ def test_pitch_offset_sign_lower_is_negative():
     tone = lambda hz: np.sin(2 * np.pi * hz * t) * np.exp(-t * 10) + 0.5 * np.sin(4 * np.pi * hz * t) * np.exp(-t * 10)
     assert pitch_offset(tone(400), tone(400 * 2 ** (-5 / 12))) == -5
     assert pitch_offset(tone(400), tone(400 * 2 ** (3 / 12))) == 3
+
+
+def test_ram_image_places_each_wave_at_its_page():
+    waves = [Wave("a", bytes([1]) * 512), Wave("b", bytes([2]) * 256)]
+    pages = allocate(waves, 2, 255)
+    ram = ram_image(waves, pages)
+    assert len(ram) == 65536 and ram[0] == 0x80
+    assert ram[pages["a"] * 256:pages["a"] * 256 + 512] == bytes([1]) * 512
+    assert ram[pages["b"] * 256] == 2

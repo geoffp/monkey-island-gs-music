@@ -97,7 +97,7 @@ def test_conversion_invariants(tmp_path):
 
 
 def test_loop_is_exactly_periodic_and_the_attack_flows_into_it():
-    sr = nm.mb.SR
+    sr = nm.munt.SR
     t = np.arange(sr) / sr
     # a chorused tone: two slightly detuned partials, so raw cycles drift (what made loops buzz)
     x = np.sin(2 * np.pi * 220 * t) + 0.5 * np.sin(2 * np.pi * 221.3 * t + 1) + 0.3 * np.sin(2 * np.pi * 660 * t)
@@ -118,7 +118,7 @@ def test_loop_is_exactly_periodic_and_the_attack_flows_into_it():
 
 
 def test_drum_rate_follows_bandwidth():
-    sr = nm.mb.SR
+    sr = nm.munt.SR
     rng = np.random.default_rng(0)
     n = int(0.05 * sr)
     hat = rng.standard_normal(n) * np.exp(-np.arange(n) / (0.01 * sr))
@@ -369,7 +369,7 @@ def test_attack_rows_play_at_unit_gain():
 
 
 def test_raw_loop_keeps_chorus_and_has_a_continuous_seam():
-    sr = nm.mb.SR
+    sr = nm.munt.SR
     t = np.arange(3 * sr) / sr
     x = np.sin(2 * np.pi * 220 * t) + 0.6 * np.sin(2 * np.pi * 221.5 * t)   # 1.5 Hz beating
     period, k, out = sr / 220, 110, 8192                                       # 0.5 s of cycles
@@ -400,11 +400,11 @@ def test_loop_planner_spends_free_doc_ram_on_steady_sounds_only():
 
 
 def test_steadiness_separates_sustained_from_decaying():
-    sr = nm.mb.SR
+    sr = nm.munt.SR
     t = np.arange(int(2.6 * sr)) / sr
     a, off = int(0.1 * sr), int(2.1 * sr)
-    organ = nm.mb.rms_envelope(np.sin(2 * np.pi * 220 * t))
-    bell = nm.mb.rms_envelope(np.sin(2 * np.pi * 220 * t) * np.exp(-t / 0.4))
+    organ = nm.audio.rms_envelope(np.sin(2 * np.pi * 220 * t))
+    bell = nm.audio.rms_envelope(np.sin(2 * np.pi * 220 * t) * np.exp(-t / 0.4))
     assert nm.is_steady(organ, a, off, 0.4) and not nm.is_steady(bell, a, off, 0.4)
 
 
@@ -494,7 +494,7 @@ def test_floor_time_finds_the_8bit_floor():
 def test_drum_end_cuts_junk_after_the_decay():
     # a snare-like hit: a clean 0.1 s decay to ~-20 dB that stops abruptly, then 0.4 s of junk
     # hovering around the 8-bit floor (1.5 LSB = -38.5 dB) with bursts just above it
-    sr = nm.mb.SR
+    sr = nm.munt.SR
     rng = np.random.default_rng(1)
     n = int(0.1 * sr)
     hit = rng.standard_normal(n) * np.exp(-np.arange(n) / (0.04 * sr))
@@ -641,7 +641,7 @@ def test_loop_construction_defaults_to_eprime_and_rejects_unknown_names():
 def test_sustain_contour_does_not_droop_into_the_release():
     # a steady note held 2 s, then a fast release: smoothing over the release pulled the last
     # 0.4 s of the contour down, and envelopes hold their last value for longer notes
-    sr = nm.mb.SR
+    sr = nm.munt.SR
     env = np.concatenate([np.ones(2 * sr), np.exp(-np.arange(sr) / (0.05 * sr))])
     c = nm.sustain_contour(env, 2 * sr, 0.8)
     assert 20 * np.log10(c[int(1.95 * sr)]) > -0.1

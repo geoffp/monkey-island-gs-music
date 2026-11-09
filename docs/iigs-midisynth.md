@@ -274,7 +274,7 @@ Measured in GSSquared by playing `/synthLAB/Tune/TUNE.SEQ` and sampling the Enso
 
   Held notes alone (no tails) exceed 7 voices for 23% of MI160, so that song needs musical thinning on top of this.
 
-## Custom MT-32 bank: MI1 (`just mt32bank`, config/mt32bank.toml, src/migs/mt32bank.py)
+## Custom MT-32 bank: MI1 (`just mt32bank`, config/mt32bank.toml, src/migs/mt32bank.py; Munt rendering in munt.py, analysis in audio.py, DOC RAM placement in docram.py)
 - **Why one shared bank:** a game port can't stop to load banks between songs. The bank is loaded once and every sequence references `MI1.BNK`.
 - **Effects reserve:** `reserve_pages` (16 = 4 KB) keeps DOC pages free at the top for game sound effects, which MIDI Synth's generator 7 plays from the same 64 KB.
 - **Slot layout:**

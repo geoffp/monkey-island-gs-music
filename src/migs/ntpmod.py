@@ -33,7 +33,7 @@ import mido
 import numpy as np
 from scipy.signal import resample
 
-from . import mt32bank as mb
+from . import audio, docram, munt
 
 PAL = 7093789.2 / 2                       # Amiga PAL clock / 2: rate = PAL / period (NTP)
 ROWS = 64
@@ -252,9 +252,9 @@ def attack_and_loop(x: np.ndarray, a: int, period: float, rate: float, k: int, a
       bytes into the loop header, which pushed 2040 B headers into 4 KB blocks and overflowed
       DOC RAM. Of the rising crossings, the one whose phase best matches the attack's tail is
       used, so the crossfade doesn't cancel itself."""
-    SR = mb.SR
+    SR = munt.SR
     att_end = a + attack_bytes / rate * SR
-    env = mb.rms_envelope(x)
+    env = audio.rms_envelope(x)
     top = float(np.max(env[a:])) or 1.0
     at = a + sustain_s * SR
     while at > att_end and env[int(at)] < 0.2 * top:
@@ -312,7 +312,7 @@ def eprime_attack_and_loop(m: dict, x: np.ndarray, a: int, period: float, rate: 
     The sustain span comes from the attack detection on a 6 s render (identical to the 2 s one
     up to note-off). Same return as attack_and_loop."""
     from . import loopbuild as ll
-    SR = mb.SR
+    SR = munt.SR
     snd = ll.analyse(m, render, build_hold=hold)
     att_end = a + attack_bytes / rate * SR
     lo = max(snd.lo, att_end)
@@ -327,7 +327,7 @@ def drum_rate(seg: np.ndarray, nbytes: int, lo: float, hi: float) -> float:
     frequency below which 95% of its energy lies), then lowered, by at most half, if the bytes
     can't hold 95% of its energy at that rate. Filling the bytes with the whole -46 dB tail
     instead put hats and shakers (energy ~14 kHz) at 6 kHz, which made them all but silent."""
-    SR = mb.SR
+    SR = munt.SR
     P = np.abs(np.fft.rfft(seg)) ** 2
     c = np.cumsum(P) / (P.sum() or 1.0)
     f95 = float(np.fft.rfftfreq(len(seg), 1 / SR)[min(np.searchsorted(c, 0.95), len(c) - 1)])
@@ -347,9 +347,9 @@ _PEAKS: dict[int, float] = {}
 @functools.lru_cache(maxsize=None)
 def _render(smf2wav: Path, roms: Path, cache: Path, program: int | None, key: int, hold: float,
             velocity: int = 100, volume: int = 100) -> np.ndarray:
-    """mb.render, cached in-process (read-only arrays): each sound's velocity and key responses
+    """munt.render, cached in-process (read-only arrays): each sound's velocity and key responses
     were re-measured from the same WAVs for every song."""
-    x = mb.render(smf2wav, roms, cache, program=program, key=key, hold=hold, velocity=velocity, volume=volume)
+    x = munt.render(smf2wav, roms, cache, program=program, key=key, hold=hold, velocity=velocity, volume=volume)
     x.flags.writeable = False
     return x
 
@@ -357,7 +357,7 @@ def _render(smf2wav: Path, roms: Path, cache: Path, program: int | None, key: in
 def _peak(x: np.ndarray) -> float:
     if not x.flags.writeable and id(x) in _PEAKS:       # a cached render (kept alive by _render)
         return _PEAKS[id(x)]
-    v = float(np.max(mb.rms_envelope(x, 0.005)))
+    v = float(np.max(audio.rms_envelope(x, 0.005)))
     if not x.flags.writeable:
         _PEAKS[id(x)] = v
     return v
@@ -397,7 +397,7 @@ def sustain_contour(env: np.ndarray, held: int, win_s: float) -> np.ndarray:
     -14.5 dB, Strings -9.3, Chorale -4.0 at 1.95 s), and envelopes hold their last value, so
     every steady note held past ~1.7 s played that much too quiet. Near `held` the window
     shrinks (`smooth`'s edge handling)."""
-    out = np.exp(smooth(np.log(np.maximum(env[:held], 1e-6)), int(win_s * mb.SR)))
+    out = np.exp(smooth(np.log(np.maximum(env[:held], 1e-6)), int(win_s * munt.SR)))
     return np.concatenate([out, np.full(max(0, len(env) - held), out[-1] if len(out) else 1.0)])
 
 
@@ -405,7 +405,7 @@ def is_steady(env: np.ndarray, a: int, off: int, sustain_s: float, max_drop_db: 
     """True if the sound holds its level from the sustain start to note-off (organs, strings,
     winds). Decaying sounds (marimba, bass, vibes) keep the short averaged loop: a raw
     multi-cycle loop would bake the decay in and pump on every pass."""
-    SR = mb.SR
+    SR = munt.SR
     lv = np.exp(smooth(np.log(np.maximum(env, 1e-6)), int(0.25 * SR)))
     i0, i1 = a + int(sustain_s * SR), off - int(0.15 * SR)
     if i1 <= i0:
@@ -418,7 +418,7 @@ def floor_time(x: np.ndarray, a: int, off: int, floor_lsb: float = 1.5) -> float
     """Seconds after the onset until the sound stays below `floor_lsb` RMS (20 ms) in a sample
     normalised to its peak, i.e. below what 8-bit DOC samples can carry (1.5 LSB of 127:
     -38.5 dB re peak). `off - a` (the whole note) if it never gets there before note-off."""
-    SR = mb.SR
+    SR = munt.SR
     seg = x[a:off]
     pk = float(np.max(np.abs(seg))) or 1.0
     env = np.sqrt(np.maximum(smooth(seg * seg, int(0.02 * SR)), 0.0)) / pk
@@ -431,7 +431,7 @@ def drum_end(x: np.ndarray, a: int, off: int, floor_lsb: float = 1.5, junk: floa
     floor_time) after its last point above `junk` x the floor. Late low-level junk that
     hovers around the floor (the MT-32 snare has ~1 KB of it at 1-1.7 LSB after a clean
     decay) doesn't hold the end back, as it would with floor_time's last crossing."""
-    SR = mb.SR
+    SR = munt.SR
     seg = x[a:off]
     pk = float(np.max(np.abs(seg))) or 1.0
     env = np.sqrt(np.maximum(smooth(seg * seg, int(0.02 * SR)), 0.0)) / pk
@@ -485,7 +485,7 @@ def plan_loops(samples: list[ModSample], usage: dict[int, float], last_page: int
                 b = [sz[i]] if not s.loop_start else [b[0], sz[i]]
             blocks += b
         try:
-            mb.allocate([mb.Wave(f"b{j}", bytes(b)) for j, b in enumerate(blocks)], 0, last_page)
+            docram.allocate([docram.Wave(f"b{j}", bytes(b)) for j, b in enumerate(blocks)], 0, last_page)
             return True
         except ValueError:
             return False
@@ -507,17 +507,17 @@ def plan_loops(samples: list[ModSample], usage: dict[int, float], last_page: int
 def build_samples(spec: dict, cfg: dict, key_ranges: dict[int, tuple[int, int]], smf2wav, roms, cache,
                   tables, log=print) -> tuple[list[ModSample], dict, dict]:
     """Samples per config/mt32bank.toml; returns (samples, program->index, rhythm key->(index, note, level gain))."""
-    SR = mb.SR
+    SR = munt.SR
     hold = spec.get("hold_seconds", 2.0)
     samples, programs, drums = [], {}, {}
     for m in spec["melodic"]:
         x = _render(smf2wav, roms, cache, program=m["program"], key=m["key"], hold=hold)
-        a = mb.onset(x)
+        a = audio.onset(x)
         off = a + int(hold * SR)
-        env = mb.rms_envelope(x)
+        env = audio.rms_envelope(x)
         f0 = 440 * 2 ** ((m["key"] - 69) / 12)
         probe = a + int(0.25 * SR)
-        period = mb.refine_period(x, probe, f0)
+        period = audio.refine_period(x, probe, f0)
         fm = SR / period
         lo, hi = key_ranges.get(m["slot"], (m["key"], m["key"]))
         sustain_s = cfg.get("sustain_s", 0.4)
@@ -638,8 +638,8 @@ def build_samples(spec: dict, cfg: dict, key_ranges: dict[int, tuple[int, int]],
 
     for d in spec["drum"]:
         x = _render(smf2wav, roms, cache, program=None, key=d["key"], hold=0.5)
-        a = mb.onset(x)
-        env = mb.rms_envelope(x, 0.005)
+        a = audio.onset(x)
+        env = audio.rms_envelope(x, 0.005)
         tail = np.nonzero(env[a:] > 0.005 * np.max(env))[0]
         dur = (tail[-1] + 1) / SR if len(tail) else 0.1
         # End at the 8-bit floor, as melodic one-shots do: the -46 dB tail above was mostly
@@ -652,7 +652,7 @@ def build_samples(spec: dict, cfg: dict, key_ranges: dict[int, tuple[int, int]],
         want = drum_rate(x[a: a + int(dur * SR)], d["bytes"] - STOPPER,
                          cfg.get("drum_min_rate", 6000), cfg.get("drum_max_rate", 26000))
         # pick the note whose ft-0 period gives a rate close to `want`, leaving room for offsets
-        offs = {c: 0 if c == d["key"] else mb.pitch_offset(x, mb.render(smf2wav, roms, cache,
+        offs = {c: 0 if c == d["key"] else audio.pitch_offset(x, munt.render(smf2wav, roms, cache,
                                                                          program=None, key=c, hold=0.5))
                 for c in d["covers"]}
         lo_off, hi_off = min(offs.values()), max(offs.values())
@@ -694,8 +694,8 @@ def build_samples(spec: dict, cfg: dict, key_ranges: dict[int, tuple[int, int]],
 def ntp_doc_pages(samples: list[ModSample], last_page: int = 255) -> int:
     """DOC pages NTP needs for these samples (aligned blocks, packed largest first)."""
     blocks = sorted((b for s in samples for b in s.ntp_blocks()), reverse=True)
-    waves = [mb.Wave(f"b{i}", bytes(b)) for i, b in enumerate(blocks)]
-    pages = mb.allocate(waves, 0, last_page)             # raises if it can't fit
+    waves = [docram.Wave(f"b{i}", bytes(b)) for i, b in enumerate(blocks)]
+    pages = docram.allocate(waves, 0, last_page)             # raises if it can't fit
     return sum(b // 256 for b in blocks)
 
 
