@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from migs.extract_music import load_songs
-from migs.scumm_v4 import Game, xor
+from migs.scumm_v4 import Game, blocks, xor
 
 ROOT = Path(__file__).resolve().parents[1]
 REAL_GAME = ROOT / "original files" / "The Secret of Monkey Island (Floppy DOS VGA)"
@@ -76,7 +76,6 @@ def test_real_game_mt32_soundtrack():
 
 
 def test_a_zero_size_block_is_an_error_not_an_endless_scan():
-    from migs.scumm_v4 import blocks
     data = blk(b"AA", b"xy") + struct.pack("<I", 0) + b"BB"
     with pytest.raises(ValueError, match="size 0"):
         list(blocks(data))
