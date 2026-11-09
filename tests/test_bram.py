@@ -1,8 +1,10 @@
 """IIgs battery RAM checksum and patching."""
 
-from migs.bram import STARTUP_SLOT, SLOT_INTERNAL, checksum, is_valid, patch
-
 from pathlib import Path
+
+import pytest
+
+from migs.bram import SLOT_INTERNAL, STARTUP_SLOT, checksum, is_valid, patch, with_checksum
 
 # config/emu/default-bram.hex: a BRAM image saved by GSSquared after a real IIgs session.
 REAL = bytes.fromhex("".join(
@@ -20,3 +22,10 @@ def test_patch_sets_startup_slot_and_disables_slot6_with_a_valid_checksum():
     assert is_valid(new) and new[:0x26] == REAL[:0x26]
     assert not is_valid(new[:0x28] + bytes([4]) + new[0x29:])     # any edit needs a new checksum
 
+
+def test_patch_rejects_the_checksum_bytes_and_short_images():
+    with pytest.raises(ValueError):
+        patch(REAL, {0xFC: 0})
+    with pytest.raises(ValueError):
+        with_checksum(REAL[:255])
+    assert not is_valid(REAL[:255])
