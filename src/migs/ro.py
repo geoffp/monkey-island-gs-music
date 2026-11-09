@@ -1,21 +1,37 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Parser for the SCUMM v3/v4 'RO' (Roland MT-32) music stream.
 
-Grammar follows ScummVM engines/scumm/midiparser_ro.cpp; see docs/ro-format.md.
+Grammar follows ScummVM engines/scumm/midiparser_ro.cpp; see docs/ro-format.md:
+
+    F0 n          delay n ticks          F1 n   delay 256 + n ticks
+    8c k v        note off               9c k v note on (v = 0: note off)
+    Bc c v        control change         Cc p   program change
+    Ac            marker (one byte)      00     end          FF  end, loop
+
+There is no running status: every event starts with a status byte.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import StrEnum
 
 PPQN = 120
-TEMPO_US = 500_000  # µs per quarter note
+TEMPO_US = 500_000  # µs per quarter note: RO streams have no tempo events
+
+
+class Kind(StrEnum):
+    NOTE_ON = "note_on"
+    NOTE_OFF = "note_off"
+    CC = "cc"
+    PROGRAM = "program"
+    MARKER = "marker"
 
 
 @dataclass(frozen=True)
 class Event:
     tick: int
-    kind: str      # "note_on" | "note_off" | "cc" | "program" | "marker"
+    kind: Kind
     channel: int   # 0-based MIDI channel (for markers: the low nibble of the Ax byte)
     a: int = 0     # note / controller / program
     b: int = 0     # velocity / value
@@ -24,54 +40,52 @@ class Event:
 @dataclass
 class Track:
     events: list[Event] = field(default_factory=list)
-    end_tick: int = 0
+    end_tick: int = 0          # includes any delay before the terminator (loop length)
     loops: bool = False        # ended with FF (ScummVM: autoLoop)
     terminated: bool = False   # ended with 00 or FF (vs. running off the block end)
 
 
+def ticks_to_seconds(ticks: int) -> float:
+    return ticks / PPQN * TEMPO_US / 1e6
+
+
+DELAYS = {0xF0: 0, 0xF1: 256}             # status -> ticks added to the delay byte
+END, END_LOOP = 0x00, 0xFF
+PARAMS = {0x8: 2, 0x9: 2, 0xB: 2, 0xC: 1, 0xA: 0}   # command nibble -> parameter bytes
+
+
 def parse(data: bytes) -> Track:
-    """Parse an RO payload (the bytes after the 6-byte block header)."""
-    t = Track()
-    tick = 0
-    i = 0
-    n = len(data)
-
-    def need(k: int) -> None:
-        if i + k > n:
-            raise ValueError(f"truncated event at offset {i - 1}")
-
-    while i < n:
-        status = data[i]
+    """Parse an RO payload (the bytes after the 6-byte block header). Parsing stops at the
+    first terminator; a stream without one runs to the end of the data."""
+    track = Track()
+    tick = i = 0
+    while i < len(data):
+        at, status = i, data[i]
         i += 1
-        if status in (0xF0, 0xF1):          # delay
-            need(1)
-            tick += data[i] + (256 if status == 0xF1 else 0)
-            i += 1
-            continue
-        if status in (0x00, 0xFF):          # end of track; FF = loop
-            t.terminated = True
-            t.loops = status == 0xFF
+        if status in (END, END_LOOP):
+            track.terminated, track.loops = True, status == END_LOOP
             break
         if status < 0x80:
-            raise ValueError(f"data byte {status:#04x} without status at offset {i - 1}")
+            raise ValueError(f"data byte {status:#04x} without status at offset {at}")
         cmd, ch = status >> 4, status & 0x0F
-        if cmd == 0xA:                      # one-byte marker
-            t.events.append(Event(tick, "marker", ch))
+        n = 1 if status in DELAYS else PARAMS.get(cmd)
+        if n is None:
+            raise ValueError(f"unsupported status {status:#04x} at offset {at}")
+        if i + n > len(data):
+            raise ValueError(f"truncated event at offset {at}")
+        p, i = data[i:i + n], i + n
+
+        if status in DELAYS:
+            tick += DELAYS[status] + p[0]
+        elif cmd == 0xA:
+            track.events.append(Event(tick, Kind.MARKER, ch))
         elif cmd == 0xC:
-            need(1)
-            t.events.append(Event(tick, "program", ch, data[i]))
-            i += 1
-        elif cmd in (0x8, 0x9, 0xB):
-            need(2)
-            a, b = data[i], data[i + 1]
-            i += 2
-            if cmd == 0x9 and b > 0:
-                t.events.append(Event(tick, "note_on", ch, a, b))
-            elif cmd in (0x8, 0x9):
-                t.events.append(Event(tick, "note_off", ch, a, b if cmd == 0x8 else 0))
-            else:
-                t.events.append(Event(tick, "cc", ch, a, b))
-        else:
-            raise ValueError(f"unsupported status {status:#04x} at offset {i - 1}")
-    t.end_tick = tick
-    return t
+            track.events.append(Event(tick, Kind.PROGRAM, ch, p[0]))
+        elif cmd == 0xB:
+            track.events.append(Event(tick, Kind.CC, ch, p[0], p[1]))
+        elif cmd == 0x9 and p[1] > 0:
+            track.events.append(Event(tick, Kind.NOTE_ON, ch, p[0], p[1]))
+        else:                                   # 8x, or 9x with velocity 0
+            track.events.append(Event(tick, Kind.NOTE_OFF, ch, p[0], p[1] if cmd == 0x8 else 0))
+    track.end_tick = tick
+    return track
