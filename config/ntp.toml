@@ -39,9 +39,9 @@ sustain_s = 0.4         # where the loop's cycles are taken (s after onset): the
 min_rate = 9000         # sample-rate window for melodic samples (Hz)
 max_rate = 22000
 release_max = 0.3       # seconds of release ramp after note-off
-pitch_plan = false       # choose each sound's sampled key(s), key zones and short-loop rate from
-                        # the notes its songs play (pitchplan, measured with docsim against Munt);
-                        # off: config/mt32bank.toml's fixed key. Trial modes *-pitch turn it on
+pitch_plan = true       # choose each sound's sampled key(s), key zones and short-loop rate from
+                        # the notes its songs play (pitchplan, measured with docsim against Munt;
+                        # default since 2026-11-09). false: config/mt32bank.toml's fixed key
 pitch_move_gain_db = 0.5  # a single sample moves off the configured key only if this lowers the error
                         # (the measure covers the first 0.6 s, not the loop the move changes)
 pitch_max_zones = 3     # samples (key zones) one sound may get, each an attack + loop and a MOD slot
@@ -85,15 +85,10 @@ ntp_attack_bytes = { "Elec Organ" = 1016, "Sax" = 1016, "Acou Bass" = 1016, "Vib
 # [modes.shared-avg]
 # base = "shared"
 # loop_construction = "averaged"
-
-# Sampled keys, zones and rates chosen from the notes played (pitch_plan; 2026-11-09)
-[modes.per-song-pitch]
-base = "per-song"
-pitch_plan = true
-
-[modes.shared-pitch]
-base = "shared"
-pitch_plan = true
+# or the configured keys without the pitch plan:
+# [modes.per-song-fixed]
+# base = "per-song"
+# pitch_plan = false
 
 # Per-song overrides, e.g.:
 # [songs.160]
