@@ -1,5 +1,7 @@
 # Apple IIGS MIDI Synth and synthLAB: everything we know
 
+> **Experimental aside (since 2026-11-09).** The project's target is NinjaTrackerPlus (`docs/ninjatrackerplus.md`, `just disk` / `just emu`). The MIDI Synth path is kept working for comparison: `just seq`, `just synthlab-disk` (`build/disks/MI.SYNTHLAB.PO`, volume `/MI.SYNTHLAB`, the smallest power of two that holds it: 8 MB; `MI.HD.PO`, 32 MB, before 2026-11-09; plus `build/dist/MI.SYNTHLAB.zip` / `.SHK`), `just emu-synthlab`.
+
 MIDI Synth is Apple's integrated sequencer and synthesizer tool set, tool #35 (`$23`): `/SYSTEM/TOOLS/TOOL035`. It shipped with System 6.0. synthLAB is Apple's player/editor application for it.
 
 Each fact is tagged with its source:
@@ -170,9 +172,9 @@ The `num_inst` byte doesn't always match the number of named slots: COMBO says 9
 7. `SeqPlayer` with `PbufStart` = the item buffer and `SeqFlags = $0100` (play).
 
 ## Disks and installation [DATA]
-- System 6.0.4's `System.Disk` does **not** contain `Tool035`. The synthLAB disk carries it in its own `System:Tools:Tool035`. `just hdimage` copies it into the hard-disk image's `System/Tools`.
+- System 6.0.4's `System.Disk` does **not** contain `Tool035`. The synthLAB disk carries it in its own `System:Tools:Tool035`. `just synthlab-disk` copies it into the hard-disk image's `System/Tools`.
 - The synthLAB disk layout: `/synthLAB` (S16 `$DB02`), `Icons`, `Reference` (a GWP+ document), `System/Tools/Tool035`, `System/CDevs/MIDI`, `Seq.and.Instr/` (the banks, waves and sample sequences).
-- `just hdimage` builds `build/disks/MI.HD.PO`: `/synthLAB` with a folder per export profile holding our `MInnn.SEQ` files and the bank/wave files they use. (Until 2026-11-07, `just gsdisk` also built an 800K synthLAB floppy, `MI.SYNTHLAB.PO`. It was removed with the other floppy targets.)
+- `just synthlab-disk` builds `build/disks/MI.SYNTHLAB.PO`: `/synthLAB` with a folder per export profile holding our `MInnn.SEQ` files and the bank/wave files they use. (Until 2026-11-07, `just gsdisk` also built an 800K synthLAB floppy, `MI.SYNTHLAB.PO`. It was removed with the other floppy targets.)
 - File types are set with CiderPress II NAPS suffixes (`MI160.SEQ#d50001`, `COMBO.BNK#d60001`, `COMBO.WAV#d80004`), then `cp2 add`. `cp2 list` paths use `:` separators; `cp2 delete` takes `/`.
 - The stored-byte junk we ignore: leftover memory in Pascal-string padding, and unused data bytes in 1-byte messages. Semantic round trips of every sample pass (`tests/test_midisynth.py`).
 
@@ -192,11 +194,11 @@ The `num_inst` byte doesn't always match the number of named slots: COMBO says 9
 - **MIDI Surgeon** (GS+ magazine): converter and editor.
 - **CiderPress II** (`vendor/cp2/cp2`): extracts and adds files on ProDOS images with file types.
 
-## IIGS test results (2026-11-06, GSSquared, `just emu-music`, COMBO bank)
+## IIGS test results (2026-11-06, GSSquared, `just emu-synthlab`, COMBO bank)
 - synthLAB opens our `MInnn.SEQ` files from `Seq.and.Instr` and plays them; it loads COMBO.BNK/.WAV from the same folder. It does **not** open a sequence by itself at startup; use File → Open.
 - **Timing and tempo are correct.** Tempo 75 with unchanged 120-PPQN ticks is confirmed, and so is the half-note tempo field.
 - Voice stealing is only a noticeable problem in sound 160 (16 simultaneous notes peak).
-- A 32 MB BazFast hard-disk image (`just hdimage`, System 6.0.4 merged from the boot disk + SystemTools1/3, plus Tool035) boots and runs synthLAB fine, and is far faster than floppies. GS/OS needs no special driver for BazFast; its generic SmartPort support handles it.
+- A 32 MB BazFast hard-disk image (`just synthlab-disk`, System 6.0.4 merged from the boot disk + SystemTools1/3, plus Tool035) boots and runs synthLAB fine, and is far faster than floppies. GS/OS needs no special driver for BazFast; its generic SmartPort support handles it.
 - **The first drum mapping was poor.** See "Drum kits" below.
 
 ## Drum kits [DATA]

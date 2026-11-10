@@ -29,12 +29,13 @@ manual_url    := "https://www.brutaldeluxe.fr/documentation/synthlab/synthlab_us
 manual_sha    := "54a5ec84e5fd152043a9a5b666bec0dab366656effeae5bd4a759894aa488a93"
 ntpsrc_sha    := "461260e35dc0b10176c05865d01c4e31694f704c0c3a9e5760fc093623dc52fb"
 ntpdemo_sha   := "350843388bde213b10101212fcd6e3f5affa3b4f25b74ea970b0b6ab85d14d97"
-# NTP sample-set modes built side by side (build/ntp/<mode>/): per-song (each song carries only
-# its own sounds, longer loops) and shared (one set for every song, like the MIDI Synth bank),
-# plus any trial variants ([modes.<name>] with a `base` in config/ntp.toml).
-ntp_modes     := "per-song shared"
+# NTP builds made side by side (build/ntp/<variant>/), each a [modes.<name>] in config/ntp.toml
+# with a sample-set `base`: inst-per-song (per-song: each song carries only its own sounds,
+# longer loops) and inst-shared (shared: one set for every song, like the MIDI Synth bank), plus
+# any trial variants.
+ntp_modes     := "inst-per-song inst-shared"
 # Copy build/ntp/<mode>/*.ntp (typed $D5/$0008) into <dir>/<MODE>/, one folder per variant.
-# ProDOS names allow no "-": per-song -> PER.SONG, shared-avg -> SHARED.AVG.
+# ProDOS names allow no "-" (and 15 characters): inst-per-song -> INST.PER.SONG.
 ntp_folders   := 'ntpf() { local m d f; for m in ' + ntp_modes + '; do d="$1/$(echo $m | tr a-z- A-Z.)"; for f in build/ntp/$m/*.ntp; do [ -f "$f" ] || continue; mkdir -p "$d"; cp "$f" "$d/$(basename "$f" .ntp | tr a-z A-Z).NTP#d50008"; done; done; }; ntpf'
 # Add host tree $3 (relative to cwd) to ProDOS image $2 with cp2 $1, in sorted order: folders
 # first (cp2 mkdir), then each folder's files. SenseiPlay lists directory order, and `cp2 add` of
@@ -48,6 +49,21 @@ p8_tree       := 'p8t() { local cp2=$1 img=$2 d f k g fs; for d in $(find "$3" -
 # whose build/ntp/<mode>/.inputs matches, and writes it only after a successful build.
 # Deliberately broad: an extra rebuild is cheap, a stale one isn't. Munt renders are cached by spec.
 ntp_inputs    := 'ntpi() { { find src/migs config "' + vendor + '/ntp/src" build/music/midi/mt32 -name __pycache__ -prune -o -type f -print; printf "%s\\n" pyproject.toml uv.lock justfile; } | LC_ALL=C sort | xargs -d "\\n" sha256sum | { echo "mode $1"; cat; } | sha256sum | cut -d" " -f1; }; ntpi'
+# Fingerprint of what `extract` reads: the game data, the extractor and the modules it imports,
+# the optional song names, and the lockfile (mido). `extract` skips itself when
+# build/music/.inputs matches and its MIDI is there, and writes it only after a successful run.
+music_inputs  := 'musici() { { find "' + game + '" -type f; ls config/song_names.toml 2>/dev/null; printf "%s\n" src/migs/__init__.py src/migs/extract_music.py src/migs/mt32.py src/migs/ro.py src/migs/scumm_v4.py pyproject.toml uv.lock; } | LC_ALL=C sort | xargs -d "\n" sha256sum | sha256sum | cut -d" " -f1; }; musici'
+# Build ProDOS image $1 (volume $2) from staging dir $3 at the smallest power-of-two size that
+# holds it (1, 2, ... 32 MB, the ProDOS limit): `eval $4` (run in $3) fills it; an attempt counts
+# when every staged entry is on the image (bash ignores errexit inside conditions, so the count
+# decides; a NAPS resource fork, NAME#tttaaaar, is part of its file's entry). p8_tree's GAP placeholders are made anew each time. Odd sizes would work too
+# (CFFA3000, Floppy Emu SmartPort mode and emulators size block devices from the file), but a
+# power of two leaves room to copy a file on by hand.
+fit_image     := 'fiti() { local img=$1 vol=$2 st=$3 fill=$4 size want got; for size in 1 2 4 8 16 32; do rm -f "$img"; find "$st" -name "GAP.*" -delete; "$cp2" create-disk-image "$img" ${size}m prodos >/dev/null; "$cp2" rename "$img" : "$vol" >/dev/null; (cd "$st" && eval "$fill") >/dev/null 2>&1 || true; want=$(find "$st" -mindepth 1 ! -regex ".*#[0-9a-fA-F]\{6\}r" | wc -l); got=$("$cp2" list "$img" 2>/dev/null | grep -c . || true); if [ "$got" -ge "$want" ]; then echo "$(basename "$img"): $size MB"; return 0; fi; done; echo "$(basename "$img"): $want entries do not fit in 32 MB"; return 1; }; fiti'
+# Distribution archives of image $1 in build/dist/: <volume>.zip holds the image itself (for
+# emulators, CFFA3000, Floppy Emu), <volume>.SHK the volume's files with their ProDOS types (to
+# unpack with ShrinkIt on a IIgs). cp2 makes .SDK (ShrinkIt disk) archives only of floppy sizes.
+dist_pack     := 'distp() { local img=$1 vol d="$PWD/build/dist"; vol=$(basename "$img" .PO); mkdir -p "$d"; rm -f "$d/$vol.zip" "$d/$vol.SHK"; "$cp2" create-file-archive "$d/$vol.zip" >/dev/null; (cd "$(dirname "$img")" && "$cp2" add "$d/$vol.zip" "$(basename "$img")" >/dev/null); "$cp2" create-file-archive "$d/$vol.SHK" >/dev/null; "$cp2" copy --recurse "$img" "*" "$d/$vol.SHK" >/dev/null; echo "build/dist/$vol.zip: $(( $(stat -c %s "$d/$vol.zip") / 1024 )) KB, build/dist/$vol.SHK: $(( $(stat -c %s "$d/$vol.SHK") / 1024 )) KB"; }; distp'
 sensei_ver    := "v2.0"     # digarok/senseiplay (no published checksums)
 
 # List recipes
@@ -188,37 +204,41 @@ fetch-docs:
 # speed: 1.024mhz | 2.8mhz | 7.159mhz | 14.3mhz | ludicrous
 seed_bram := "config/emu/default-bram.hex"
 
-# Boot the IIgs from the BazFast hard disk image (System 6 + synthLAB + our music)
-emu-music speed="ludicrous": fetch-gssquared hdimage
-    uv run gs2-config build/disks/mi-music.gs2 --name "MI1 music (BazFast HD)" --speed {{speed}} \
-      --card 7=bazfast3 --disk 7:1=MI.HD.PO --startup-slot 7 --your-card 6 --your-card 7 --seed {{seed_bram}}
-    "{{gs2}}" "$PWD/build/disks/mi-music.gs2"
-
-# Boot straight into SenseiPlay (ProDOS 8 NTP player) with our songs in /songs, from BazFast
-emu-ntp speed="ludicrous": fetch-gssquared ntpdisk
+# From the NTP disk (`just disk`) on a BazFast card, in GSSquared:
+# Boot the IIgs straight into SenseiPlay with our NinjaTrackerPlus songs
+emu speed="ludicrous": fetch-gssquared disk
     uv run gs2-config build/disks/mi-ntp.gs2 --name "MI1 NinjaTrackerPlus (SenseiPlay)" --speed {{speed}} \
       --card 7=bazfast3 --disk 7:1=MI.NTP.PO --startup-slot 7 --your-card 6 --your-card 7 --seed {{seed_bram}}
     "{{gs2}}" "$PWD/build/disks/mi-ntp.gs2"
 
-# ProDOS 8 disk that boots into SenseiPlay: its PRODOS + player, our .NTP songs in /songs
-ntpdisk: ntp
+# Experimental aside: boot System 6 + synthLAB with the MIDI Synth sequences (`just synthlab-disk`)
+emu-synthlab speed="ludicrous": fetch-gssquared synthlab-disk
+    uv run gs2-config build/disks/mi-synthlab.gs2 --name "MI1 synthLAB (experimental, BazFast HD)" --speed {{speed}} \
+      --card 7=bazfast3 --disk 7:1=MI.SYNTHLAB.PO --startup-slot 7 --your-card 6 --your-card 7 --seed {{seed_bram}}
+    "{{gs2}}" "$PWD/build/disks/mi-synthlab.gs2"
+
+# ProDOS 8 image for BazFast, sized to the smallest power of two that holds it (4 MB in 2026-11):
+# SenseiPlay (its PRODOS + player) and our .NTP songs in /songs,
+# one folder per build variant.
+# Build the NinjaTrackerPlus disk, build/disks/MI.NTP.PO
+disk: ntp
     #!/usr/bin/env bash
     set -euo pipefail
     cp2="$PWD/{{cp2}}"; img="$PWD/build/disks/MI.NTP.PO"; st="$PWD/build/disks/ntpstage"
     # up to date: no song, player disk or justfile (the variant list) newer than the image
     if [ -f "$img" ] && [ -z "$(find build/ntp -name '*.ntp' -newer "$img"; find "{{vendor}}/ntp/senseiplay800.2mg" justfile -newer "$img")" ]; then
-      echo "build/disks/MI.NTP.PO: up to date"; exit 0
+      echo "build/disks/MI.NTP.PO: up to date"
+      [ build/dist/MI.NTP.SHK -nt "$img" ] && [ build/dist/MI.NTP.zip -nt "$img" ] || {{dist_pack}} "$img"
+      exit 0
     fi
     rm -rf "$st" "$img" && mkdir -p "$st"
     "$cp2" extract --preserve=naps --overwrite --exdir="$st" "{{vendor}}/ntp/senseiplay800.2mg" \
       PRODOS sensei.system ntpplayer dgr.radio.dgr >/dev/null
     {{ntp_folders}} "$st/songs"
-    "$cp2" create-disk-image "$img" 32m prodos >/dev/null
-    "$cp2" rename "$img" : MI.NTP >/dev/null
     # songs first on the disk, so it's the first entry in SenseiPlay
-    (cd "$st" && {{p8_tree}} "$cp2" "$img" songs
-     "$cp2" add "$img" PRODOS* sensei.system* ntpplayer* dgr.radio.dgr* >/dev/null)
+    {{fit_image}} "$img" MI.NTP "$st" '{{p8_tree}} "$cp2" "$img" songs; "$cp2" add "$img" PRODOS* sensei.system* ntpplayer* dgr.radio.dgr*'
     rm -rf "$st"
+    {{dist_pack}} "$img"
     "$cp2" catalog "$img" | head -12
 
 # Render an MT-32 MIDI file to WAV with Munt (needs ROMs)
@@ -231,7 +251,16 @@ gm-wav mid wav: fetch-soundfont
 
 # Extract the MT-32 soundtrack: build/music/midi/{mt32,gm}/*.mid + build/music/patches/*.toml
 extract:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    [ -d "{{game}}" ] || { echo "no game data in '{{game}}' (see original files/README.md)"; exit 1; }
+    fp=$({{music_inputs}})
+    if [ "$(cat build/music/.inputs 2>/dev/null)" = "$fp" ] && compgen -G "build/music/midi/mt32/*.mid" >/dev/null; then
+      echo "build/music: up to date"; exit 0
+    fi
+    rm -f build/music/.inputs
     uv run extract-music "{{game}}" build/music
+    echo "$fp" > build/music/.inputs
 
 # Render every extracted song to WAV via both paths (build/music/wav/{mt32,gm}/)
 render: extract fetch-munt fetch-soundfont
@@ -271,7 +300,7 @@ voices: seq
 
 # MT-32 MIDI -> ProTracker MODs within NinjaTrackerPlus limits (build/ntp/<mode>/MInnn.mod), for
 # each sample-set mode (default both), plus libopenmpt previews in build/ntp/<mode>/wav/. Config: config/ntp.toml
-ntpmod modes=ntp_modes: fetch-ntp fetch-munt
+ntpmod modes=ntp_modes: extract fetch-ntp fetch-munt
     #!/usr/bin/env bash
     set -euo pipefail
     # modes build concurrently (logs in build/ntp/<mode>.log); previews render on all cores
@@ -318,7 +347,7 @@ ntp modes=ntp_modes: (ntpmod modes)
         '[ "${2%.mod}.ntp" -nt "$2" ] && exit 0; php "$1" "$2" STREAM_FORBIDDEN > "${2%.mod}.log" || { echo "$2:"; cat "${2%.mod}.log"; exit 255; }' \
         _ "{{vendor}}/ntp/src/ntpconverter.php" {}
       echo "$m: $(ls build/ntp/$m/*.ntp | wc -l) .NTP files in build/ntp/$m/"
-      case "$m" in shared*)       # resident bank: identical instruments + samples in every song
+      case "$m" in *shared*)      # resident bank: identical instruments + samples in every song
         uv run ntpcheck --shared build/ntp/$m/*.ntp | tail -1;; esac
     done
 
@@ -326,26 +355,28 @@ ntp modes=ntp_modes: (ntpmod modes)
 tunetest:
     uv run tunetest -o build/seq/tune
 
-# Boot the HD and sample the DOC oscillators to build/disks/docscope.jsonl while you play something
-docscope seconds="240": fetch-gssquared fetch-mcp hdimage
-    uv run gs2-config build/disks/mi-music.gs2 --name "MI1 music (BazFast HD)" --speed ludicrous \
-      --card 7=bazfast3 --disk 7:1=MI.HD.PO --startup-slot 7 --your-card 6 --your-card 7 --seed {{seed_bram}}
-    uv run gs2-docscope --config build/disks/mi-music.gs2 --seconds {{seconds}}
+# Boot the NTP disk and sample the DOC oscillators to build/disks/docscope.jsonl while you play something
+docscope seconds="240": fetch-gssquared fetch-mcp disk
+    uv run gs2-config build/disks/mi-ntp.gs2 --name "MI1 NinjaTrackerPlus (SenseiPlay)" --speed ludicrous \
+      --card 7=bazfast3 --disk 7:1=MI.NTP.PO --startup-slot 7 --your-card 6 --your-card 7 --seed {{seed_bram}}
+    uv run gs2-docscope --config build/disks/mi-ntp.gs2 --seconds {{seconds}}
 
 # Drum-kit audition sequences (build/seq/stock/AUDITnn.SEQ + .txt key tables) for the default bank's kits
 drum-audition: stock-banks
     uv run audition "{{vendor}}/synthlab/COMBO.BNK" 0 --wave "{{vendor}}/synthlab/COMBO.WAV" -o build/seq/stock --lo 28 --hi 100
     uv run audition "{{vendor}}/synthlab/COMBO.BNK" 9 --wave "{{vendor}}/synthlab/COMBO.WAV" -o build/seq/stock --lo 28 --hi 100
 
-# 32 MB ProDOS hard disk image for BazFast (build/disks/MI.HD.PO): System 6.0.4 merged from the
+# Experimental aside (MIDI Synth): a ProDOS hard disk image for BazFast, sized like `disk`
+# (build/disks/MI.SYNTHLAB.PO, volume /MI.SYNTHLAB): System 6.0.4 merged from the
 # boot disk + SystemTools1 (Finder, CDevs, DAs, FSTs, tools, fonts; not its SCSI/printer
 # drivers) + SystemTools3 (sounds, fonts), Tool035, and /synthLAB with a folder per export
 # profile (Stock, ...), the tuning test (Tune), and /SenseiPlay with our NTP songs (MI).
-hdimage: seq drum-audition tunetest
+# Experimental aside: build the synthLAB disk, build/disks/MI.SYNTHLAB.PO
+synthlab-disk: seq drum-audition tunetest
     #!/usr/bin/env bash
     set -euo pipefail
     shopt -s extglob                       # !(SenseiPlay) below
-    cp2="$PWD/{{cp2}}"; img="$PWD/build/disks/MI.HD.PO"; st="$PWD/build/disks/hdstage"
+    cp2="$PWD/{{cp2}}"; img="$PWD/build/disks/MI.SYNTHLAB.PO"; st="$PWD/build/disks/synthlabstage"
     rm -rf "$st" "$img" && mkdir -p "$st/synthLAB"
     x() { "$cp2" extract --preserve=naps --overwrite --exdir="$1" "${@:2}" >/dev/null; }
     x "$st" system6/SYSTEM.DISK.PO
@@ -373,12 +404,10 @@ hdimage: seq drum-audition tunetest
       x "$st/SenseiPlay" "{{vendor}}/ntp/senseiplay800.2mg" sensei.system ntpplayer dgr.radio.dgr
       {{ntp_folders}} "$st/SenseiPlay/MI"
     fi
-    "$cp2" create-disk-image "$img" 32m prodos >/dev/null
-    "$cp2" rename "$img" : MI.HD >/dev/null
     # /SenseiPlay goes in folder by folder in sorted order (p8_tree)
-    (cd "$st" && "$cp2" add "$img" !(SenseiPlay) >/dev/null
-     if [ -d SenseiPlay ]; then {{p8_tree}} "$cp2" "$img" SenseiPlay; fi)
+    {{fit_image}} "$img" MI.SYNTHLAB "$st" '"$cp2" add "$img" !(SenseiPlay); if [ -d SenseiPlay ]; then {{p8_tree}} "$cp2" "$img" SenseiPlay; fi'
     rm -rf "$st"
+    {{dist_pack}} "$img"
     "$cp2" catalog "$img" | grep -E '^Disk|blocks free'
     "$cp2" list "$img" | grep -c . | sed 's/^/files: /'
 

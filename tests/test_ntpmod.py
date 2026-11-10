@@ -94,3 +94,10 @@ def test_drum_error_counts_a_low_rate_and_a_cut():
     assert hi < lo - 6                                       # the top end and drop-sample images
     cut = docsim.drum_error_db(hit, at(26273.0, 0.03), 26273.0, 0, 0.15)
     assert cut > hi                                          # stopped after 30 ms of 150
+
+
+def test_a_missing_midi_file_stops_with_a_hint_to_extract(tmp_path):
+    """After `just clean` the shell passes the unexpanded glob: say what to do, not a traceback."""
+    import pytest
+    with pytest.raises(SystemExit, match="just extract"):
+        nm.main([str(tmp_path / "*.mid"), "-o", str(tmp_path / "out")])

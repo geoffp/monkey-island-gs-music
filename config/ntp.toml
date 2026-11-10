@@ -94,6 +94,13 @@ drum_floor_lsb = 1.5    # drums end at the 8-bit floor (drum_end: junk near the 
 [modes.shared]
 ntp_attack_bytes = { "Elec Organ" = 1016, "Sax" = 1016, "Acou Bass" = 1016, "Vibes" = 1016 }
 
+# The two builds (justfile `ntp_modes`): build/ntp/<name>/ and /songs/<NAME> on the disks
+# (INST.PER.SONG, INST.SHARED). Each is its sample-set mode with nothing overridden.
+[modes.inst-per-song]
+base = "per-song"
+[modes.inst-shared]
+base = "shared"
+
 # Trial variants, built side by side for listening: a `base` sample-set mode plus overrides.
 # Add the name to `ntp_modes` in the justfile. E.g. the original loops next to `shared`:
 # [modes.shared-avg]

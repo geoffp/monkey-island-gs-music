@@ -137,7 +137,7 @@ The MOD is the primary artefact: it renders on the desktop (ffmpeg's libopenmpt 
 - About 60% of notes need an `EDx` delay. Most of those start at the default volume for one row (70–150 ms) before the envelope corrects them.
 
 ### First listening (2026-11-06)
-The user listened to the desktop previews (`build/ntp/wav/`): **the pipeline works**, but there are problems still to fix. The `.NTP` conversion and SenseiPlay on the IIGS are wired up (`just ntp`, `just emu-music`) but haven't been run yet; they need `php-cli`.
+The user listened to the desktop previews (`build/ntp/wav/`): **the pipeline works**, but there are problems still to fix. The `.NTP` conversion and SenseiPlay on the IIGS are wired up (`just ntp`, `just emu-synthlab`) but haven't been run yet; they need `php-cli`.
 
 Known problems and open work, from the build log and analysis:
 - **MI167 drops 89 notes** (MI152 and MI160 drop 16 each). *Resolved 2026-11-07:* see "Track allocation" (drum tracks borrowing idle melodic tracks).
@@ -186,7 +186,12 @@ User report: velocity jumps up and down unnaturally in MI153, which is a single 
 - **Fix:** an NTP-only Pipe Organ sample, log-domain smoothing, and row-mean envelope sampling (above). The organ now follows Pipe Org 2's real slow swell (volume 29 → 40 → 29 over about 1 s).
 
 ## On the IIGS (verified in GSSquared, 2026-11-06)
-- **`just emu-ntp`** boots `build/disks/MI.NTP.PO` (`just ntpdisk`). This is a ProDOS 8 BazFast disk made from SenseiPlay's own `PRODOS` + `sensei.system` + `ntpplayer` + `dgr.radio.dgr`, with our songs in `/songs/<MODE>` (`PER.SONG`, `SHARED`, plus any trial variants), all 16 in one folder. It boots straight into SenseiPlay. `just emu-music` also has them, under `/SenseiPlay/MI/<MODE>`.
+- **`just emu`** boots `build/disks/MI.NTP.PO` (`just disk`). This is a ProDOS 8 BazFast disk made from SenseiPlay's own `PRODOS` + `sensei.system` + `ntpplayer` + `dgr.radio.dgr`, with our songs in `/songs/<VARIANT>` (`INST.PER.SONG`, `INST.SHARED`, plus any trial variants; `PER.SONG` / `SHARED` before 2026-11-09), all 16 in one folder. It boots straight into SenseiPlay. `just emu-synthlab` also has them, under `/SenseiPlay/MI/<MODE>`.
+  - **Size (2026-11-09):** the smallest power of two that holds it: `just disk` builds it at 1, 2, 4, ... 32 MB until every entry fits (4 MB now: about 2.9 MB used, 2363 blocks free). Verified in GSSquared: boots into SenseiPlay and plays MI160. A ProDOS volume can have any number of 512-byte blocks up to 65,535 (32 MB), recorded in its volume directory.
+    - **CFFA3000:** mounts `.PO` / `.HDV` / `.2MG` of at least 256 KB and a multiple of 512 bytes as block devices; 140 KB images may be taken as Disk II floppies ([applefritter](https://www.applefritter.com/node/32022); [CFFA3000 Reference Manual](https://manualmachine.com/rdautomation/cffa3000/20407985-reference-manual) for the 32 MB ProDOS limit).
+    - **Floppy Emu:** SmartPort hard-disk mode takes `.PO` / `.HDV` / `.2MG`, 32 MB per ProDOS image (more on recent firmware, HFS only). The image must be contiguous on the SD card ("image not contiguous" otherwise), and the 3.5″ modes need real 400K/800K images ([BMOW](https://www.bigmessowires.com/?p=2938), [BMOW](https://www.bigmessowires.com/2015/07/02/2-gb-smartport-hard-drive-for-apple-iigs/)).
+    - **Emulators:** GSSquared, KEGS and AppleWin size hard-disk images from the file ([AppleWin help](https://git.applefritter.com/Apple-2-Tools/AppleWin/raw/commit/7f9563b8ea24ce51ecbb5fb18a8ff9fbbee3aa12/help/ddi-harddisk.html)).
+  - **Distribution archives:** `just disk` also writes `build/dist/MI.NTP.zip` (the image, 1.5 MB: for emulators, CFFA3000, Floppy Emu) and `build/dist/MI.NTP.SHK` (ShrinkIt LZW/2 archive of the volume's files with their ProDOS types, 1.8 MB: unpack with ShrinkIt on a IIgs). cp2 writes `.SDK` ShrinkIt *disk* archives only at floppy sizes. Both are copyrighted derivatives of the game and ROMs, like the rest of `build/`.
 - **Checked in the emulator** by driving it through gs2-mcp (`tap_key`, `video_text`, `state_get`, `read_mem ENSONIQ`):
   - MI150, MI160 and MI165 play, with 10–17 oscillators running and frequencies and volumes changing;
   - DOC RAM holds every sample byte for byte at the page the `.NTP` header gives;
@@ -214,7 +219,7 @@ User report: heard on the IIgs.
 - **Side bug found:** with the loop taken later, rows inside the attack were scaled by the loop-relative gain. That made decaying sounds' attacks too loud (Taiko +5 dB in its first 100 ms). Fixed with gain 1 during the attack.
 
 ## Sample-set modes and long loops (2026-11-07)
-NTP files carry their own samples, and `NTPprepare` copies them into DOC RAM for each song. So the MIDI Synth "one shared bank" constraint doesn't apply. Both modes are built side by side (`ntp_modes` in the justfile):
+NTP files carry their own samples, and `NTPprepare` copies them into DOC RAM for each song. So the MIDI Synth "one shared bank" constraint doesn't apply. Both modes are built side by side (`ntp_modes` in the justfile). Since 2026-11-09 the builds are named `inst-per-song` and `inst-shared`: `[modes.*]` variants with these sample-set modes as `base` and nothing overridden (`build/ntp/inst-*/`, disk folders `INST.PER.SONG`, `INST.SHARED`). Measurements below use the mode names.
 - **`per-song`** (default `samples` in `config/ntp.toml`): each song carries only the sounds it plays (`sample_set`). Its free DOC RAM, after `reserve_pages` (16 pages = 4 KB for game sound effects), goes to longer loops (`plan_loops`). The planner repeatedly doubles the loop with the most sustained playing time per byte, while everything still packs the way NTP packs it, up to `max_loop_bytes` (16 KB) and the recording's length. Example: MI153 carries 3 organ samples with 16 KB loops (204 pages).
 - **`shared`**: one set for every song (union of sounds and key ranges; loops planned over all songs' usage). `[modes.shared]` sets `reserve_pages = 0`, because the full set needs 256/256 pages with 512 B loops. NTP-only sounds can be limited with `modes = [...]` (Pipe Organ Lo2 is per-song only; in shared mode keys 36–39 fall back to the nearest split).
 - **Long loops** (`raw_loop`) are for **steady** sounds only: the level's trend must drop ≤ 6 dB from the sustain start to note-off (`is_steady`). They hold k recorded periods (chorus, beating and vibrato kept), with a crossfade seam: the last 25% fades into the audio just before the loop start. Decaying sounds (bass, marimba, vibes, xylophone) keep the 512 B averaged-cycle loop, because a raw loop would bake the decay in and pump.
@@ -260,7 +265,7 @@ Goal: a game loads the instruments once and leaves them in DOC RAM, then loads o
 - The stock `NTPprepare` expects one contiguous file. A resident-bank game would rebuild that image in RAM (song header + resident instrument records + song order and patterns), skipping the sample copy. Alternatively it could patch the player to keep its instrument table and skip `NTPprepare`'s DOC upload. That's outside this project's scope; `ninjatrackerplus.s` is the reference.
 
 ## Build speed (2026-11-07)
-`just ntpdisk` (both modes, previews, `.NTP`, bank check, boot disk) went from about 4 min to **22 s**. All 64 MOD/NTP outputs are byte-identical to the build before the changes (sha256).
+`just disk` (both modes, previews, `.NTP`, bank check, boot disk) went from about 4 min to **22 s**. All 64 MOD/NTP outputs are byte-identical to the build before the changes (sha256).
 | cause (cProfile) | fix |
 |---|---|
 | `smooth()`: `np.convolve` with 250 ms (8000-tap) windows, O(n·w); 36 of 56 s in shared mode | cumulative-sum moving average, O(n), the same window as `np.convolve(..., "same")` (max deviation ~1e-12) |

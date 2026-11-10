@@ -452,6 +452,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--samples", help="build variant: per-song, shared, or a [modes.<name>] with a `base` "
                                       "(e.g. shared-avg); default config/ntp.toml `samples`")
     args = ap.parse_args(argv)
+    if missing := [str(p) for p in args.inputs if not p.is_file()]:
+        raise SystemExit(f"ntpmod: no MIDI file {', '.join(missing)} (extract the songs first: just extract)")
     conf = tomllib.loads(args.config.read_text())
     mode, cfg = resolve_mode(conf, args.samples or conf["defaults"].get("samples", "per-song"))
     spec = with_attack_bytes(ntp_spec(tomllib.loads(args.spec.read_text()), conf, mode), cfg)

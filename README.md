@@ -1,15 +1,15 @@
 # Monkey Island 1 MT-32 → Apple IIGS
 
-This project ports the Roland MT-32 soundtrack of *The Secret of Monkey Island* (LucasArts, 1990/91) to the Apple IIGS as **MIDI Synth** sequences (System 6.0 / synthLAB).
+This project ports the Roland MT-32 soundtrack of *The Secret of Monkey Island* (LucasArts, 1990/91) to the Apple IIGS as **NinjaTrackerPlus** songs: the MT-32's own sounds, sampled through Munt, played by the Ensoniq DOC. MIDI Synth sequences (System 6.0 / synthLAB) are an experimental aside.
 
 ## Approach
-1. **Document** the SCUMM v4 resource format, the MT-32 `RO` music format, and the IIGS MIDI Synth file formats (`docs/`).
+1. **Document** the SCUMM v4 resource format, the MT-32 `RO` music format, and the IIGS formats (`docs/`).
 2. **Extract** each distinct piece of music to Standard MIDI Files in two renditions (`build/music/`):
    - `midi/mt32/`: faithful to the original, for an MT-32 or Munt;
    - `midi/gm/`: converted for General MIDI (rules in `docs/mt32-to-gm.md`);
    - plus a patch-notes file per song listing each channel's MT-32 and GM instrument.
-3. **Convert** the MIDI files to MIDI Synth sequences, keeping the channel→instrument mapping as far as the IIGS allows (`build/seq/`, configured in `config/`).
-4. **Alternative: NinjaTrackerPlus.** Convert the MT-32 MIDI to ProTracker MODs that fit NinjaTrackerPlus's limits (up to 31 oscillators, samples packed into the 64 KB DOC RAM), preview them on the desktop, then convert them to `.NTP` with Ninjaforce's converter (`docs/ninjatrackerplus.md`).
+3. **NinjaTrackerPlus.** Convert the MT-32 MIDI to ProTracker MODs that fit NinjaTrackerPlus's limits (up to 31 oscillators, samples packed into the 64 KB DOC RAM), preview them on the desktop, then convert them to `.NTP` with Ninjaforce's converter (`docs/ninjatrackerplus.md`).
+4. **Experimental aside: MIDI Synth.** Convert the MIDI files to MIDI Synth sequences, keeping the channel→instrument mapping as far as the IIGS allows (`build/seq/`, configured in `config/`; `docs/iigs-midisynth.md`).
 
 ## Required game files
 Use the **DOS VGA floppy** release. The CD-ROM release won't work, because its music is CD audio. Put its files in `original files/The Secret of Monkey Island (Floppy DOS VGA)/`. The tools only read them, and they are not stored in git.
@@ -44,8 +44,9 @@ build/             everything generated, not in git (`just clean`, `just clean-a
   music/wav/{mt32,gm}/   Munt / FluidSynth renders of the songs
   seq/{stock,mt32,tune}/ MIDI Synth sequences, banks and wave files
   ntp/<variant>/         MODs, .NTP files, desktop previews (wav/), build logs
-  disks/                 hard-disk images (MI.HD.PO, MI.NTP.PO) and the GSSquared machine
+  disks/                 hard-disk images (MI.NTP.PO; experimental MI.SYNTHLAB.PO) and the GSSquared machine
                          configs (*.gs2) that boot them
+  dist/                  each disk as <VOLUME>.zip (the image) and <VOLUME>.SHK (ShrinkIt archive of its files)
   cache/mt32samples/     Munt sample renders (kept by `just clean`)
   looplab/               loop-lab report, A/B WAVs and plots
 ```
@@ -65,9 +66,9 @@ Then:
 ```sh
 just setup    # checks tools, fetches the ScummVM submodule, builds the Python env, fetches and builds everything in vendor/
 just          # list all recipes
-just emu-music  # boot our 32 MB BazFast hard-disk image in GSSquared: System 6 + synthLAB +
-                # the MI1 sequences + SenseiPlay (unlimited speed; `just emu-music 2.8mhz` for stock)
-just emu-ntp    # boot straight into SenseiPlay with the NTP songs
+just emu      # build the NTP songs and boot straight into SenseiPlay in GSSquared
+              # (unlimited speed; `just emu 2.8mhz` for stock)
+just emu-synthlab  # experimental aside: System 6 + synthLAB + the MIDI Synth sequences
 ```
 `just setup` fetches into the gitignored `vendor/`, with pinned versions and checksums where published:
 - GSSquared (IIgs emulator)
@@ -88,16 +89,16 @@ These go in `original files/`, which is gitignored and never committed:
 ## Listening tests
 1. **MT-32**: `just mt32-wav <mid> <wav>` renders with [Munt](https://github.com/munt/munt)'s `mt32emu-smf2wav`. Needs your ROMs. Plays `build/music/midi/mt32/`.
 2. **General MIDI**: `just gm-wav <mid> <wav>` renders with FluidSynth and the [GeneralUser GS](https://github.com/mrbumpy409/GeneralUser-GS) soundfont. Plays `build/music/midi/gm/`.
-3. **IIGS**: `just emu-music` boots the hard-disk image; open `MI.HD/synthLAB/synthLAB`, then a sequence from the `Stock` or `MT32` folder.
-4. **NinjaTrackerPlus, desktop**: `just ntpmod` writes MODs in two sample-set modes:
-   - `build/ntp/per-song/`: each song carries only its own sounds, with longer loops;
-   - `build/ntp/shared/`: one set for every song, like the MIDI Synth bank;
+3. **NinjaTrackerPlus, desktop**: `just ntpmod` writes MODs in two builds, one per sample-set mode:
+   - `build/ntp/inst-per-song/`: each song carries only its own sounds, with longer loops;
+   - `build/ntp/inst-shared/`: one set for every song, like a resident instrument bank;
    Short loops are built as E′+ (`loop_construction` in `config/ntp.toml`; `"averaged"` gives the original loops). Trial variants of a mode can be built side by side (`[modes.<name>]` with a `base`, added to `ntp_modes`).
 
-   It renders previews of each to `<mode>/wav/` (ffmpeg/libopenmpt). `just ntpmod per-song` builds just one mode.
+   It renders previews of each to `<mode>/wav/` (ffmpeg/libopenmpt). `just ntpmod inst-per-song` builds just one.
    A mode whose inputs (code, `config/`, MIDI, converter, justfile) haven't changed since its last successful build is skipped, and so are the `.NTP` conversion and the disk image; `just ntpmod-force` (or `just clean`) rebuilds anyway.
    `just looplab` measures attack/loop construction methods on the MT-32 samples (`build/looplab/report.md`, A/B WAVs, plots; see `docs/loop-detection.md`).
-5. **NinjaTrackerPlus, IIGS**: `just emu-ntp` converts the MODs to `.NTP` and boots straight into SenseiPlay. Open `songs`, then `PER.SONG` or `SHARED`, and press Return on a song. `just emu-music` also has SenseiPlay and the songs in `/SenseiPlay/MI` (launch `sensei.system`).
+4. **NinjaTrackerPlus, IIGS**: `just emu` converts the MODs to `.NTP`, builds the disk (`just disk`) and boots straight into SenseiPlay. Open `songs`, then `INST.PER.SONG` or `INST.SHARED`, and press Return on a song.
+5. **Experimental aside, MIDI Synth on the IIGS**: `just emu-synthlab` boots the synthLAB disk; open `MI.SYNTHLAB/synthLAB/synthLAB`, then a sequence from the `Stock` or `MT32` folder. It also has SenseiPlay and the NTP songs in `/SenseiPlay/MI` (launch `sensei.system`).
 
 ## Status
 - [x] Repo setup, ScummVM reference submodule
@@ -105,8 +106,8 @@ These go in `original files/`, which is gitignored and never committed:
 - [ ] Docs: SCUMM v4 resources, `RO` format, MT-32, MIDI Synth formats
 - [x] Extract `RO` → SMF (MT-32 + GM) + patch notes (`just extract`, `just render`)
 - [ ] Name the 16 tracks (`config/song_names.toml`)
-- [x] SMF → MIDI Synth sequence converter (`just seq`), hard-disk image (`just hdimage`)
-- [ ] Play in synthLAB (`just emu-music`, open `/synthLAB/MT32/MI160.SEQ`)
+- [x] Experimental aside: SMF → MIDI Synth sequence converter (`just seq`), synthLAB disk (`just synthlab-disk`)
+- [ ] Experimental aside: play in synthLAB (`just emu-synthlab`, open `/synthLAB/MT32/MI160.SEQ`)
 - [x] Custom MT-32-sampled bank MI1 (`just mt32bank`), `mt32` export profile (first build, needs listening)
 - [x] MT-32 → ProTracker MOD → NinjaTrackerPlus pipeline (`just ntpmod`, `just ntp`): first build plays; known problems in `docs/ninjatrackerplus.md`
 - [ ] Measure MIDI Synth CPU cost vs. tracker players (SoundSmith/NinjaTracker)

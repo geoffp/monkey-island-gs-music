@@ -11,7 +11,7 @@ Overnight work list, 2026-11-07, in order. Commit after each item.
    - **Always leave 4 KB (16 pages) for sound effects**, in shared mode too. The full set currently needs 256/256 pages, so trim where it costs the least fidelity, measured, not guessed.
    - Document the layout a game loader would use.
 
-2. [x] **Pipeline speed.** Profile `just ntpmod` / `just ntp` / `just ntpdisk`. Speed up without losing fidelity or quality. Candidates:
+2. [x] **Pipeline speed.** Profile `just ntpmod` / `just ntp` / `just disk`. Speed up without losing fidelity or quality. Candidates:
    - O(n·w) `np.convolve` smoothing with long windows: use cumulative sums;
    - repeated `build_samples` per song: memoize identical sound builds;
    - serial work across songs and modes: parallelize ffmpeg, php and per-song conversion;

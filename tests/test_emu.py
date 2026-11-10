@@ -9,12 +9,12 @@ from migs.emu import Disk, write_config
 
 def test_new_config_is_valid_toml_with_seeded_patched_bram(tmp_path):
     f = tmp_path / "m.gs2"
-    write_config(f, "MI1", "ludicrous", {7: "bazfast3"}, [(7, 1, "MI.HD.PO")],
+    write_config(f, "MI1", "ludicrous", {7: "bazfast3"}, [(7, 1, "MI.NTP.PO")],
                  {bram.STARTUP_SLOT: 7, bram.SLOT_INTERNAL[6]: 1, bram.SLOT_INTERNAL[7]: 1}, REAL)
     cfg = tomllib.loads(f.read_text())
     assert cfg["platform"] == "apple2gs" and cfg["speed"] == "ludicrous"
     assert cfg["cards"] == [{"slot": 7, "card": "bazfast3"}]
-    assert cfg["storage"] == [{"slot": 7, "drive": 1, "image": "MI.HD.PO"}]
+    assert cfg["storage"] == [{"slot": 7, "drive": 1, "image": "MI.NTP.PO"}]
     b = bytes.fromhex(cfg["bram"])
     assert bram.is_valid(b) and (b[0x28], b[0x26], b[0x27]) == (7, 1, 1)
     assert f.read_text().index("bram") < f.read_text().index("[[cards]]")   # root key first
