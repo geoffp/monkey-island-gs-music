@@ -226,7 +226,7 @@ disk: ntp
     set -euo pipefail
     cp2="$PWD/{{cp2}}"; img="$PWD/build/disks/MI.NTP.PO"; st="$PWD/build/disks/ntpstage"
     # up to date: no song, player disk or justfile (the variant list) newer than the image
-    if [ -f "$img" ] && [ -z "$(find build/ntp -name '*.ntp' -newer "$img"; find "{{vendor}}/ntp/senseiplay800.2mg" justfile -newer "$img")" ]; then
+    if [ -f "$img" ] && [ -z "$(find build/ntp -name '*.ntp' -newer "$img"; find "{{vendor}}/ntp/senseiplay800.2mg" config/disk/README.TXT justfile -newer "$img")" ]; then
       echo "build/disks/MI.NTP.PO: up to date"
       [ build/dist/MI.NTP.SHK -nt "$img" ] && [ build/dist/MI.NTP.zip -nt "$img" ] || {{dist_pack}} "$img"
       exit 0
@@ -235,8 +235,11 @@ disk: ntp
     "$cp2" extract --preserve=naps --overwrite --exdir="$st" "{{vendor}}/ntp/senseiplay800.2mg" \
       PRODOS sensei.system ntpplayer dgr.radio.dgr >/dev/null
     {{ntp_folders}} "$st/songs"
+    # what the variant folders are: ProDOS TXT, CR line ends
+    ! LC_ALL=C grep -n '[^ -~]' config/disk/README.TXT || { echo "config/disk/README.TXT: only printable 7-bit ASCII (no tabs, no accents or curly quotes)"; exit 1; }
+    tr '\n' '\r' < config/disk/README.TXT > "$st/README.TXT#040000"
     # songs first on the disk, so it's the first entry in SenseiPlay
-    {{fit_image}} "$img" MI.NTP "$st" '{{p8_tree}} "$cp2" "$img" songs; "$cp2" add "$img" PRODOS* sensei.system* ntpplayer* dgr.radio.dgr*'
+    {{fit_image}} "$img" MI.NTP "$st" '{{p8_tree}} "$cp2" "$img" songs; "$cp2" add "$img" README.TXT* PRODOS* sensei.system* ntpplayer* dgr.radio.dgr*'
     rm -rf "$st"
     {{dist_pack}} "$img"
     "$cp2" catalog "$img" | head -12

@@ -62,7 +62,7 @@ Pipeline:
 - Never write into `original files/` (user-supplied: game data, MT-32 ROMs) or `ref/`.
 - **Everything not under source control must be fetchable by `just setup`** (into gitignored `vendor/`, pinned versions and sha256 where available). The only exceptions are user-supplied files in `original files/`. When adding a dependency, add a `fetch-*` recipe for it, not manual steps.
 - **Layout: tracked files are inputs, everything generated goes to `build/`.**
-  - `config/`: hand-maintained settings (`instruments.toml`, `mt32bank.toml`, `ntp.toml`, optional `song_names.toml`, `emu/default-bram.hex`).
+  - `config/`: hand-maintained settings (`instruments.toml`, `mt32bank.toml`, `ntp.toml`, optional `song_names.toml`, `emu/default-bram.hex`, `disk/README.TXT`: the NTP disk's root README, explaining the variant folders; keep it in step with them).
   - `system6/`: Apple's System 6.0.4 disk originals (read-only).
   - `original files/`: user-supplied game data and MT-32 ROMs. Only its README is tracked.
   - `build/`: all generated output, gitignored. That's `music/`, `ntp/<variant>/`, `seq/`, `disks/` (images plus the `.gs2` configs beside them), `dist/` (each disk as `<VOLUME>.zip` holding the image and `<VOLUME>.SHK`, a ShrinkIt archive of its files, made by `just disk` / `just synthlab-disk`), `cache/mt32samples/` and `looplab/`. `just clean` keeps `build/cache/`; `just clean-all` removes it all.

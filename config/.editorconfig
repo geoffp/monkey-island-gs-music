@@ -1,0 +1,10 @@
+# config/disk/*.TXT: text for the Apple II (ProDOS TXT). Kept as plain 7-bit ASCII with LF
+# line ends here, so git and editors treat it normally; `just disk` converts LF to CR.
+# EditorConfig globs are case-sensitive, hence both spellings.
+[*.{txt,TXT}]
+charset = utf-8
+end_of_line = lf
+indent_style = space
+insert_final_newline = true
+trim_trailing_whitespace = true
+max_line_length = 70
