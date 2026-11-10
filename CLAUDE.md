@@ -41,7 +41,7 @@ Pipeline:
   - New configs are seeded from `config/emu/default-bram.hex`, a ROM-accepted image.
   - The battery-RAM checksum is ROM `BCheckSum`. The carry into each `ROL` is always 0 because `CPX #$FF` clears it (verified against saved battery RAM). Map: GSSquared `Docs/GSClockBatteryRAM.md`.
   - Host speed defaults to `ludicrous`; pass e.g. `just emu 2.8mhz`. Config format: GSSquared `Docs/SystemConfigTOML.md`; storage and BazFast: `Docs/Storage.md`.
-- Never write to `system6/`. The disk images are built from it into `build/disks/` (gitignored).
+- System 6.0.4 (an unofficial community GS/OS release, not redistributable here) is fetched by `just fetch-system6` into `vendor/system6/` (Asimov archive, sha256-pinned): System.Disk, SystemTools1/3 and synthLAB, for the synthLAB disk and `stock-banks`.
 - Disk images and ShrinkIt archives: CiderPress II CLI at `vendor/cp2/cp2` (`just fetch-cp2`).
 
 ## Conventions
@@ -63,7 +63,6 @@ Pipeline:
 - **Everything not under source control must be fetchable by `just setup`** (into gitignored `vendor/`, pinned versions and sha256 where available). The only exceptions are user-supplied files in `original files/`. When adding a dependency, add a `fetch-*` recipe for it, not manual steps.
 - **Layout: tracked files are inputs, everything generated goes to `build/`.**
   - `config/`: hand-maintained settings (`instruments.toml`, `mt32bank.toml`, `ntp.toml`, optional `song_names.toml`, `emu/default-bram.hex`, `disk/README.TXT`: the NTP disk's root README, explaining the variant folders; keep it in step with them).
-  - `system6/`: Apple's System 6.0.4 disk originals (read-only).
   - `original files/`: user-supplied game data and MT-32 ROMs. Only its README is tracked.
   - `build/`: all generated output, gitignored. That's `music/`, `ntp/<variant>/`, `seq/`, `disks/` (images plus the `.gs2` configs beside them), `dist/` (each disk as `<VOLUME>.zip` holding the image and `<VOLUME>.SHK`, a ShrinkIt archive of its files, made by `just disk` / `just synthlab-disk`), `cache/mt32samples/` and `looplab/`. `just clean` keeps `build/cache/`; `just clean-all` removes it all.
 - Outputs must be reproducible from the game data plus `config/`.

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Analysis of rendered notes: pitch period, averaged cycle, relative pitch (audio)."""
 
 import numpy as np

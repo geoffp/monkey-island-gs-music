@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """GM MIDI -> MIDI Synth sequence conversion rules."""
 
 import mido

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """SCUMM v4 container access, using a tiny synthetic game, plus the real game if present."""
 
 import struct

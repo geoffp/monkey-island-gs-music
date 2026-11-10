@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """DOC RAM: aligned wave placement, 8-bit conversion, the RAM image (docram)."""
 
 import numpy as np

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Audition sequences: one hit per beat, and the measure:beat -> key table (audition)."""
 
 from migs.audition import audition

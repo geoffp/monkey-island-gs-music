@@ -2,6 +2,8 @@
 
 This project ports the Roland MT-32 soundtrack of *The Secret of Monkey Island* (LucasArts, 1990/91) to the Apple IIGS as **NinjaTrackerPlus** songs: the MT-32's own sounds, sampled through Munt, played by the Ensoniq DOC. MIDI Synth sequences (System 6.0 / synthLAB) are an experimental aside.
 
+**This repository contains no game data, music or ROMs.** You need your own copy of the game (DOS VGA floppy release) and, to sample the MT-32, your own MT-32 control and PCM ROMs. The tools read them from `original files/` and write everything derived from them to `build/`, which is never committed. *The Secret of Monkey Island* is © LucasArts / Disney; MT-32 is a trademark of Roland Corporation; Apple IIGS and GS/OS are trademarks of Apple Inc. This is an unofficial fan project, not affiliated with or endorsed by any of them.
+
 ## Approach
 1. **Document** the SCUMM v4 resource format, the MT-32 `RO` music format, and the IIGS formats (`docs/`).
 2. **Extract** each distinct piece of music to Standard MIDI Files in two renditions (`build/music/`):
@@ -34,10 +36,9 @@ config/            hand-maintained settings
   ntp.toml           MOD/NTP conversion (timing, sample sizes, build variants, per-song overrides)
   song_names.toml    names for sound ids (optional; not present yet)
   emu/default-bram.hex  battery-RAM seed for the emulator configs
-system6/           Apple System 6.0.4 disk images (synthLAB, stock instruments); read-only originals
 original files/    YOUR copies of the game and MT-32 ROMs; not distributable, not in git (see its README.md)
 ref/scummvm/       ScummVM source (git submodule, reference only)
-vendor/            fetched/built tools (`just fetch`), not in git
+vendor/            fetched/built tools and System 6.0.4 disk images (`just fetch`), not in git
 build/             everything generated, not in git (`just clean`, `just clean-all`):
   music/midi/{mt32,gm}/  extracted MIDI (faithful / General MIDI)
   music/patches/         per-song channel -> instrument notes
@@ -52,15 +53,15 @@ build/             everything generated, not in git (`just clean`, `just clean-a
 ```
 
 ## What may be distributed
-- **Tracked files** (code, docs, configs, `system6/`): this repository. System 6.0.4 was released by Apple as a free download.
-- **`vendor/`:** third-party tools and files, fetched by `just setup` from their own sources; we don't redistribute them.
+- **Tracked files** (code, docs, configs): this repository.
+- **`vendor/`:** third-party tools and files, fetched by `just setup` from their own sources; we don't redistribute them. That includes the Apple IIGS System 6.0.4 disk images (an unofficial community release of Apple's GS/OS, from the [Asimov archive](https://www.apple.asimov.net/images/gs/os/gsos/Apple_IIGS_System_6.0.4/)), used only by the experimental synthLAB disk.
 - **`original files/` and `build/`: never commit or share them.** The first holds the copyrighted game and ROMs. The second holds what's derived from them: the extracted soundtrack, renders, NTP songs and sequences, and disk images with the songs on them.
 
 
 ## Setup
-Host tools: [just](https://github.com/casey/just), [uv](https://github.com/astral-sh/uv), git, the GitHub CLI (`gh`), curl, unzip, cmake, a C++ compiler, glib2 headers, FluidSynth, ffmpeg (with libopenmpt, for MOD previews), and PHP CLI (for Ninjaforce's MOD → NTP converter). On Fedora:
+Host tools: [just](https://github.com/casey/just), [uv](https://github.com/astral-sh/uv), git, curl, unzip, cmake, a C++ compiler, glib2 headers, FluidSynth, ffmpeg (with libopenmpt, for MOD previews), and PHP CLI (for Ninjaforce's MOD → NTP converter). On Fedora:
 ```sh
-sudo dnf install just uv git gh curl unzip cmake gcc-c++ pkgconf glib2-devel fluidsynth ffmpeg php-cli
+sudo dnf install just uv git curl unzip cmake gcc-c++ pkgconf glib2-devel fluidsynth ffmpeg php-cli
 ```
 Then:
 ```sh
@@ -117,4 +118,4 @@ These go in `original files/`, which is gitignored and never committed:
 Our source code (`src/`, `tests/`, `justfile`, docs, configs) is licensed under the **GNU General Public License v3.0 or later**; see `LICENSE`.
 - Tables in `src/migs/mt32.py` come from [ScummVM](https://www.scummvm.org) (GPL-2.0-or-later), used here under GPLv3.
 - The MIDI Synth format code was written from Dave Tribby's synthfile 1.5 and Apple's MIDI Synth ERS (see `docs/sources.md`), with credit as synthfile's terms ask.
-- Not covered by this license, and not ours: the System 6.0.4 disk images in `system6/` (© Apple), and the game data and music derived from it (© LucasArts/Disney), which are never committed.
+- Not covered by this license, and not ours: System 6.0.4 (GS/OS © Apple; fetched into `vendor/`, never committed), the game data and the music derived from it (© LucasArts/Disney), and the MT-32 ROMs (© Roland), none of which are in this repository.

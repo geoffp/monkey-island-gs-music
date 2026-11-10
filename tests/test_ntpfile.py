@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """NinjaTrackerPlus .NTP section parsing and the shared-bank check."""
 
 import pytest

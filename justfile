@@ -1,4 +1,4 @@
-# Monkey Island 1 MT-32 → Apple IIGS MIDI Synth
+# Monkey Island 1 MT-32 → Apple IIGS (NinjaTrackerPlus; MIDI Synth as an experimental aside)
 # Run `just` to list recipes. `just setup` fetches everything not under source control,
 # except what you must supply yourself (see README: game data, MT-32 ROMs).
 
@@ -16,7 +16,8 @@ sf2      := vendor / "soundfonts/GeneralUser-GS.sf2"
 mcp_ver       := "v0.1.4"   # jawaidbazyar2/gssquared-mcp (verified via release SHA256SUMS)
 gs2_ver       := "v1.0.0"   # jawaidbazyar2/gssquared
 gs2_sha       := "a4ca6e0a5de1bbc4c93150dd7fd11a7c9a2e68a949101e3b9925136e4449778d"
-cp2_ver       := "1.2.0"    # fadden/CiderPress2 (no published checksums)
+cp2_ver       := "1.2.0"    # fadden/CiderPress2 (no published checksums: pinned here)
+cp2_sha       := "8c8748a0b484b4a778354146ffe4b6b44527f066b440a2e7bccebf4050948981"
 munt_tag      := "munt_2_8_3"
 munt_sha      := "a9baa120bbcdd9e5af7ed0878a32c59b378b730612459851b9acafcd76519b72"
 sf2_rev       := "684543d5e5efaef08d02be50dcda8d552478fa60"   # mrbumpy409/GeneralUser-GS
@@ -64,7 +65,16 @@ fit_image     := 'fiti() { local img=$1 vol=$2 st=$3 fill=$4 size want got; for 
 # emulators, CFFA3000, Floppy Emu), <volume>.SHK the volume's files with their ProDOS types (to
 # unpack with ShrinkIt on a IIgs). cp2 makes .SDK (ShrinkIt disk) archives only of floppy sizes.
 dist_pack     := 'distp() { local img=$1 vol d="$PWD/build/dist"; vol=$(basename "$img" .PO); mkdir -p "$d"; rm -f "$d/$vol.zip" "$d/$vol.SHK"; "$cp2" create-file-archive "$d/$vol.zip" >/dev/null; (cd "$(dirname "$img")" && "$cp2" add "$d/$vol.zip" "$(basename "$img")" >/dev/null); "$cp2" create-file-archive "$d/$vol.SHK" >/dev/null; "$cp2" copy --recurse "$img" "*" "$d/$vol.SHK" >/dev/null; echo "build/dist/$vol.zip: $(( $(stat -c %s "$d/$vol.zip") / 1024 )) KB, build/dist/$vol.SHK: $(( $(stat -c %s "$d/$vol.SHK") / 1024 )) KB"; }; distp'
-sensei_ver    := "v2.0"     # digarok/senseiplay (no published checksums)
+sensei_ver    := "v2.0"     # digarok/senseiplay (no published checksums: pinned here)
+sensei_sha    := "0965c0f8d45314910f8d20f06ef395006415314fbc2cabedf4d0a221d184c07f"
+# Apple IIGS System 6.0.4 (community release, 2016-12-31), 800K ProDOS-order images from the
+# Asimov archive, the location given in the release announcement (docs/sources.md). Not
+# redistributable here, so fetched: image name on the archive = sha256.
+s6_url        := "https://www.apple.asimov.net/images/gs/os/gsos/Apple_IIGS_System_6.0.4/PO%20Disk%20Images"
+s6            := vendor / "system6"
+s6_files      := "System.Disk:496f8d80d524ded42398e7b24f62694a1562d4bbe5d933eacbf391f3a26b599a SystemTools1:25c1f33fea4e6bb983a1d2a2b3234dbb7c14913e2f922a2587d28c7ff42c9944 SystemTools3:b41cc66963f8490f61854c85c4ba14c4b31b63b96a5f2ef666a19c4ecff48859 synthLAB:ddebd51f90a709a109c8d310159a112726bb6626504c1f5e78b59499e64d7087"
+# GitHub release asset $1/$2/$3 (owner/repo, tag, asset) to file $4, checked against sha256 $5
+gh_asset      := 'gha() { curl -fL --retry 3 -o "$4" "https://github.com/$1/releases/download/$2/$3" && echo "$5  $4" | sha256sum -c -; }; gha'
 
 # List recipes
 default:
@@ -77,12 +87,12 @@ setup: doctor submodules sync fetch
 doctor:
     #!/usr/bin/env bash
     missing=0
-    for c in git gh uv curl unzip tar sha256sum cmake c++ pkg-config fluidsynth ffmpeg php; do
+    for c in git uv curl unzip tar sha256sum cmake c++ pkg-config fluidsynth ffmpeg php; do
       command -v "$c" >/dev/null || { echo "missing: $c"; missing=1; }
     done
     pkg-config --exists glib-2.0 || { echo "missing: glib2 development files (for mt32emu-smf2wav)"; missing=1; }
     if [ $missing = 1 ]; then
-      echo "Fedora: sudo dnf install git gh uv curl unzip cmake gcc-c++ pkgconf glib2-devel fluidsynth ffmpeg php-cli"
+      echo "Fedora: sudo dnf install git uv curl unzip cmake gcc-c++ pkgconf glib2-devel fluidsynth ffmpeg php-cli"
       exit 1
     fi
     echo "host tools OK"
@@ -98,7 +108,7 @@ sync:
     uv sync
 
 # All downloaded/built dependencies
-fetch: fetch-gssquared fetch-mcp fetch-cp2 fetch-soundfont fetch-munt fetch-synthfile fetch-docs fetch-ntp
+fetch: fetch-gssquared fetch-mcp fetch-cp2 fetch-soundfont fetch-munt fetch-synthfile fetch-docs fetch-ntp fetch-system6
 
 # GSSquared emulator AppImage
 fetch-gssquared:
@@ -107,8 +117,7 @@ fetch-gssquared:
     f="{{gs2}}"
     if [ ! -f "$f" ] || ! echo "{{gs2_sha}}  $f" | sha256sum -c --quiet - 2>/dev/null; then
       mkdir -p "$(dirname "$f")"
-      gh release download {{gs2_ver}} -R jawaidbazyar2/gssquared -p GSSquared-x86_64.AppImage -D "$(dirname "$f")" --clobber
-      echo "{{gs2_sha}}  $f" | sha256sum -c -
+      {{gh_asset}} jawaidbazyar2/gssquared {{gs2_ver}} GSSquared-x86_64.AppImage "$f" {{gs2_sha}}
       chmod 755 "$f"
     fi
 
@@ -119,7 +128,7 @@ fetch-mcp:
     [ -x "{{vendor}}/bin/gs2-mcp" ] && exit 0
     asset=gs2-mcp-linux-amd64-{{mcp_ver}}
     mkdir -p "{{vendor}}/bin" && cd "{{vendor}}/bin"
-    gh release download {{mcp_ver}} -R jawaidbazyar2/gssquared-mcp -p "$asset" -p SHA256SUMS --clobber
+    for a in "$asset" SHA256SUMS; do curl -fL --retry 3 -o "$a" "https://github.com/jawaidbazyar2/gssquared-mcp/releases/download/{{mcp_ver}}/$a"; done
     grep "$asset" SHA256SUMS | sha256sum -c -
     mv "$asset" gs2-mcp && chmod 755 gs2-mcp && rm SHA256SUMS
 
@@ -136,7 +145,7 @@ fetch-cp2:
     [ -x "{{cp2}}" ] && exit 0
     zip=cp2_{{cp2_ver}}_linux-x64_sc.zip
     mkdir -p "{{vendor}}/cp2"
-    gh release download v{{cp2_ver}} -R fadden/CiderPress2 -p "$zip" -D "{{vendor}}" --clobber
+    {{gh_asset}} fadden/CiderPress2 v{{cp2_ver}} "$zip" "{{vendor}}/$zip" {{cp2_sha}}
     unzip -q -o "{{vendor}}/$zip" -d "{{vendor}}/cp2" && rm "{{vendor}}/$zip"
     chmod 755 "{{cp2}}"
 
@@ -186,7 +195,19 @@ fetch-ntp:
     get ntpsources.zip http://www.ninjaforce.com/downloads/ntpsources.zip "{{ntpsrc_sha}}"
     get ntp.2mg http://www.ninjaforce.com/downloads/ntp.2mg "{{ntpdemo_sha}}"
     [ -d "$d/src" ] || unzip -q -o "$d/ntpsources.zip" -d "$d/src"
-    [ -f "$d/senseiplay800.2mg" ] || gh release download {{sensei_ver}} -R digarok/senseiplay -p senseiplay800.2mg -D "$d"
+    [ -f "$d/senseiplay800.2mg" ] && echo "{{sensei_sha}}  $d/senseiplay800.2mg" | sha256sum -c --quiet - || \
+      {{gh_asset}} digarok/senseiplay {{sensei_ver}} senseiplay800.2mg "$d/senseiplay800.2mg" {{sensei_sha}}
+
+# Apple IIGS System 6.0.4 disks used by the synthLAB disk and stock-banks -> vendor/system6/
+fetch-system6:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    d="{{s6}}"; mkdir -p "$d"
+    for e in {{s6_files}}; do
+      n=${e%%:*}; h=${e#*:}; f="$d/$n.po"
+      [ -f "$f" ] && echo "$h  $f" | sha256sum -c --quiet - && continue
+      curl -fL --retry 3 -o "$f" "{{s6_url}}/$n.po" && echo "$h  $f" | sha256sum -c -
+    done
 
 # Reference PDFs: MIDI Synth ERS and synthLAB manual (Brutal Deluxe scans)
 fetch-docs:
@@ -277,13 +298,13 @@ render: extract fetch-munt fetch-soundfont
     done
     ls build/music/wav/*/ | head -50
 
-# Stock synthLAB banks/waves/sample sequences, extracted from system6/SYNTHLAB.PO
-stock-banks: fetch-cp2
+# Stock synthLAB banks/waves/sample sequences, extracted from System 6.0.4's synthLAB disk
+stock-banks: fetch-cp2 fetch-system6
     #!/usr/bin/env bash
     set -euo pipefail
     d="{{vendor}}/synthlab"; [ -f "$d/COMBO.BNK" ] && exit 0
     rm -rf "$d.tmp" && mkdir -p "$d.tmp" "$d"
-    "$PWD/{{cp2}}" extract --exdir="$d.tmp" system6/SYNTHLAB.PO SEQ.AND.INSTR >/dev/null
+    "$PWD/{{cp2}}" extract --exdir="$d.tmp" "{{s6}}/synthLAB.po" SEQ.AND.INSTR >/dev/null
     for f in "$d.tmp"/Seq.and.Instr/*; do cp "$f" "$d/$(basename "$f" | tr a-z A-Z)"; done
     rm -rf "$d.tmp"; ls "$d"
 
@@ -375,18 +396,18 @@ drum-audition: stock-banks
 # drivers) + SystemTools3 (sounds, fonts), Tool035, and /synthLAB with a folder per export
 # profile (Stock, ...), the tuning test (Tune), and /SenseiPlay with our NTP songs (MI).
 # Experimental aside: build the synthLAB disk, build/disks/MI.SYNTHLAB.PO
-synthlab-disk: seq drum-audition tunetest
+synthlab-disk: fetch-system6 seq drum-audition tunetest
     #!/usr/bin/env bash
     set -euo pipefail
     shopt -s extglob                       # !(SenseiPlay) below
     cp2="$PWD/{{cp2}}"; img="$PWD/build/disks/MI.SYNTHLAB.PO"; st="$PWD/build/disks/synthlabstage"
     rm -rf "$st" "$img" && mkdir -p "$st/synthLAB"
     x() { "$cp2" extract --preserve=naps --overwrite --exdir="$1" "${@:2}" >/dev/null; }
-    x "$st" system6/SYSTEM.DISK.PO
-    x "$st" system6/SYSTEMTOOLS1.PO System/Finder System/CDevs System/Desk.Accs System/FSTs System/Tools System/Fonts Icons
-    x "$st" system6/SYSTEMTOOLS3.PO System
-    x "$st" system6/SYNTHLAB.PO System/Tools/Tool035
-    x "$st/synthLAB" system6/SYNTHLAB.PO synthLAB Icons Reference
+    x "$st" "{{s6}}/System.Disk.po"
+    x "$st" "{{s6}}/SystemTools1.po" System/Finder System/CDevs System/Desk.Accs System/FSTs System/Tools System/Fonts Icons
+    x "$st" "{{s6}}/SystemTools3.po" System
+    x "$st" "{{s6}}/synthLAB.po" System/Tools/Tool035
+    x "$st/synthLAB" "{{s6}}/synthLAB.po" synthLAB Icons Reference
     # A folder per export profile (sequences + the banks they reference) and the tuning test
     typed() {   # copy file $1 into dir $2 with its ProDOS type (NAPS suffix)
       case "$1" in *.SEQ) t=d50001;; *.BNK) t=d60001;; *.WAV) t=d80004;; *) return;; esac

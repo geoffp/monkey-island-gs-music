@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """MIDI Synth file formats: byte layout, round trips, TopKey zones."""
 
 import struct

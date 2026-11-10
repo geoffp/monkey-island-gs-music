@@ -18,7 +18,7 @@ folder = "MT32"
 source = "mt32"           # convert build/music/midi/mt32 (MT-32 program numbers and rhythm keys)
 
 [banks.COMBO]
-# Stock synthLAB bank (system6/SYNTHLAB.PO /SEQ.AND.INSTR/), slots:
+# Stock synthLAB bank (System 6.0.4 synthLAB disk, vendor/system6/synthLAB.po /SEQ.AND.INSTR/), slots:
 #  0 Drum Kit 1 | 1 Slap Bass | 2 Synth Lead | 3 Marimba | 4 Xylophone | 5 Flute
 #  6 Trombones  | 7 Chiff Flute | 8 Dx Marimba | 9 Drum Kit 2
 file = "COMBO.BNK"

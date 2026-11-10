@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """MIDI output: faithful MT-32 timing and the General MIDI conversion rules."""
 
 import tomllib

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """The MI1 MIDI Synth bank builder's Munt-free parts: envelope fitting and the slot map."""
 
 import tomllib

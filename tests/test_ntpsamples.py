@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """NinjaTrackerPlus samples (ntpsamples): tuning, loops and their metrics, one-shots, drums,
 lengths, DOC block rules and loop planning."""
 

@@ -7,7 +7,7 @@ MIDI Synth is Apple's integrated sequencer and synthesizer tool set, tool #35 (`
 Each fact is tagged with its source:
 - **[ERS]**: *SynthLAB and MIDI Synth ERS* (APDA, Mark Cecys), `vendor/docs/apda_midisynth_synthlab_ocr.pdf` (`just fetch-docs`). Page numbers are the ERS's own: "ERS n" for the MIDI Synth part, "synthLAB n" for the synthLAB part.
 - **[SF]**: Dave Tribby's synthfile 1.5 source, `vendor/synthfile/src/` (`just fetch-synthfile`): `SynthFile.h`, `GSStuff.h` (structs from Apple's `MidiSynth.h`), `synthfile.c`.
-- **[DATA]**: verified by decoding the stock files on `system6/SYNTHLAB.PO` `/SEQ.AND.INSTR/` (2026-11-06).
+- **[DATA]**: verified by decoding the stock files on System 6.0.4's synthLAB disk (`vendor/system6/synthLAB.po`, `just fetch-system6`) `/SEQ.AND.INSTR/` (2026-11-06).
 - **[GL]**: GEnie Lamp A2Pro 1994-03 (midi2gs note).
 
 All multi-byte values are **little-endian** (65816).

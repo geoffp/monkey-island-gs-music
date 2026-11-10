@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """MIDI Synth voice-occupancy estimate (voices): envelope tails, unreleased notes."""
 
 import pytest

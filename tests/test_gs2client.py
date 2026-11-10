@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Ensoniq state-blob parsing for the DOC scope (no emulator needed)."""
 
 import struct

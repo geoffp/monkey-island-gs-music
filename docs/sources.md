@@ -16,6 +16,12 @@ Retrieved 2026-11-06 unless noted.
 - Ground (GNO) sounds mirror: https://mirrors.apple2.org.za/ground.icaen.uiowa.edu/apple16/gno/sounds/index.html
 - comp.sys.apple2, "Question on IIGS music/sound files": https://groups.google.com/d/topic/comp.sys.apple2/gtHSJf1upZE
 
+## Apple IIGS System 6.0.4 (retrieved 2026-11-09)
+- Release announcement (6.0.4, released 2016-12-31; an unofficial community GS/OS release, not Apple's): A2Central, "The Source Is Strong With This One – System 6.0.4.", https://a2central.com/2017/01/the-source-is-strong-with-this-one-system-6-0-4/. It names the Asimov archive as the download location and lists the images' MD5s.
+- Images: Asimov archive, https://www.apple.asimov.net/images/gs/os/gsos/Apple_IIGS_System_6.0.4/PO%20Disk%20Images/ (`just fetch-system6` → `vendor/system6/`, sha256 pinned in the justfile). Their MD5s match the announcement.
+- Until 2026-11-09 the repo tracked copies in `system6/` (removed from the history before publishing). Six were byte-identical to the archive's; `System.Disk` and `Install` differed only by Finder bookkeeping files (`Finder.Data`, `Finder.Root`, dated 2019) written when the disks were opened in the Finder.
+- Status: Wikipedia, GS/OS, "Unofficial versions": https://en.wikipedia.org/wiki/GS/OS. No redistribution license was found, so the images are fetched, not tracked.
+
 ## MT-32 / General MIDI
 - ScummVM `audio/mididrv.cpp` (`_mt32ToGm`, `_gmToMt32`), `audio/mt32gm.cpp` (MT-32 defaults, reversed pan), `engines/sci/sound/drivers/map-mt32-to-gm.h` (preset/rhythm names, SCI mapping, `Mt32PresetRhythmKeymap`)
 - Munt MT-32 emulator: https://github.com/munt/munt (latest tag munt_2_8_3)

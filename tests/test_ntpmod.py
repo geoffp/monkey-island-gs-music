@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """The NTP build's configuration: NTP-only sounds, key splits, modes (ntpmod)."""
 
 from migs import ntpmod as nm

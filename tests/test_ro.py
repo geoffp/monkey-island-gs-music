@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """RO stream parser: timing, event decoding, termination."""
 
 import pytest

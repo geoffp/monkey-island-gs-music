@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Arranging a song onto NinjaTrackerPlus tracks (ntpsong): grid, timing, levels, track
 allocation and steals, envelopes, the track plan."""
 

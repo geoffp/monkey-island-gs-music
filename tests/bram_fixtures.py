@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """The real battery RAM image the emulator tests start from (not collected: no test_ prefix)."""
 
 from pathlib import Path

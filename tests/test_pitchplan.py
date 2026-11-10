@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Choosing sampled keys, zones and rates (pitchplan) and the DOC playback measure (docsim)."""
 
 import numpy as np

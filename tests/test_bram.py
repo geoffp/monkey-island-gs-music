@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """IIgs battery RAM checksum and patching."""
 
 import pytest

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """MIDI Synth/DOC tuning model, checked against the GSSquared measurements."""
 
 import pytest
