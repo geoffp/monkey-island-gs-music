@@ -626,7 +626,13 @@ Main per-song gains come from the raw-loop rate alone; shared and shared-pitch h
   - Lost entirely: MI162 Shakuhachi (both), MI167, MI159 and MI152 (key 49) Elec Organ, MI168 Trombone, MI151 Panpipes.
   - Halved: e.g. MI160 Elec Organ, MI153 Pipe Organ 60.
   - Per-song samples 215 → 248, `.NTP` 1341 → 1377 KB.
-- Not yet listened to. A higher `upgrade_min_db_per_page` keeps more loops.
+- **Listening (2026-11-09):** "overall I think it sounds better", but "the organ is noticeably not as good on 160": its Elec Organ 64 16 KB loop had gone to 512 B, the 49 zone getting 8 KB.
+- **Threshold 0.01 → 0.011:** the lowest that gives it back; scanned on MI160 at 0.011 / 0.014 / 0.017 / 0.024 / 0.028 / 0.040. Only the last upgrade drops there: a 3rd Acou Bass zone, 0.010/page.
+  - Over all songs: MI160 Elec Organ 64 back to 16384r (steals 372 → 378);
+  - MI167 Elec Organ's 3rd zone (+0.6 dB) gives way to an 8 KB French Horn loop;
+  - MI163 Sax loses its 2nd zone (+2.5 dB, little played);
+  - MI151 Rim and MI161 Mute Conga keep their filled block instead of a doubling (+1.5, +1.6 dB);
+  - shared-hybrid unchanged.
 
 ## Track allocation (`convert_song`; current rules, 2026-11-07)
 NTP has no voice allocation: each MOD track owns its oscillators for the whole song (`determine_osc_per_track`). So `convert_song` assigns every note to a track itself, once, in onset order.

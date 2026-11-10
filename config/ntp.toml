@@ -54,7 +54,7 @@ pitch_key_share = 0.5
 sample_budget = "zones" # zones: extra zones while each gains pitch_zone_gain_db. value (trial): extra
                         # zones and bigger drum blocks compete for DOC pages by dB x exposure per page,
                         # down to upgrade_min_db_per_page; the rest grows loops
-upgrade_min_db_per_page = 0.01
+upgrade_min_db_per_page = 0.011  # (0.01 cost MI160 its Elec Organ 16 KB loop for a 3rd Acou Bass zone)
 drum_fill_block = false # true (trial): a drum takes the highest rate that still fits its block (seven
                         # drums sat at 5872 Hz in half-empty blocks: docs/ninjatrackerplus.md "Drums")
 pitch_max_zones = 3     # samples (key zones) one sound may get, each an attack + loop and a MOD slot
