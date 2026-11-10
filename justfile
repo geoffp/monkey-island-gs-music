@@ -35,6 +35,8 @@ ntpdemo_sha   := "350843388bde213b10101212fcd6e3f5affa3b4f25b74ea970b0b6ab85d14d
 # longer loops) and inst-shared (shared: one set for every song, like the MIDI Synth bank), plus
 # any trial variants.
 ntp_modes     := "inst-per-song inst-shared"
+# The helpers below expand to `f() {...}; f`: use them as whole commands (a line, or inside
+# if/then), never after `||` or `&&`, which would skip only the definition.
 # Copy build/ntp/<mode>/*.ntp (typed $D5/$0008) into <dir>/<MODE>/, one folder per variant.
 # ProDOS names allow no "-" (and 15 characters): inst-per-song -> INST.PER.SONG.
 ntp_folders   := 'ntpf() { local m d f; for m in ' + ntp_modes + '; do d="$1/$(echo $m | tr a-z- A-Z.)"; for f in build/ntp/$m/*.ntp; do [ -f "$f" ] || continue; mkdir -p "$d"; cp "$f" "$d/$(basename "$f" .ntp | tr a-z A-Z).NTP#d50008"; done; done; }; ntpf'
@@ -250,7 +252,7 @@ disk: ntp
     # up to date: no song, player disk or justfile (the variant list) newer than the image
     if [ -f "$img" ] && [ -z "$(find build/ntp -name '*.ntp' -newer "$img"; find "{{vendor}}/ntp/senseiplay800.2mg" config/disk/README.TXT justfile -newer "$img")" ]; then
       echo "build/disks/MI.NTP.PO: up to date"
-      [ build/dist/MI.NTP.SHK -nt "$img" ] && [ build/dist/MI.NTP.zip -nt "$img" ] || {{dist_pack}} "$img"
+      if [ ! build/dist/MI.NTP.SHK -nt "$img" ] || [ ! build/dist/MI.NTP.zip -nt "$img" ]; then {{dist_pack}} "$img"; fi
       exit 0
     fi
     rm -rf "$st" "$img" && mkdir -p "$st"
