@@ -23,7 +23,7 @@ from pathlib import Path
 import numpy as np
 from scipy.signal import resample
 
-from . import audio, docram, loopbuild
+from . import audio, docram, docsim, loopbuild
 from .audio import smooth
 from .munt import SR, Munt
 
@@ -566,7 +566,10 @@ def _raw_tuning(m: dict, src: _Source, cfg: dict, tables, z: int, att_bytes: int
     for top in dict.fromkeys(tops):
         if top < lo:
             continue
-        t = best_tuning(src.freq, tables, lo, top, z, m["key"], *src.keys, high_within_cents=tol)
+        try:
+            t = best_tuning(src.freq, tables, lo, top, z, m["key"], *src.keys, high_within_cents=tol)
+        except ValueError:              # no whole number of periods tunes in this window: no fit
+            continue
         _, k, r, _, _ = t
         if src.a + (sustain_s + z / r + 0.05) * SR > src.off:
             continue
@@ -711,25 +714,69 @@ def build_drum(d: dict, cfg: dict, munt: Munt, tables) -> tuple[ModSample, dict[
     floor = cfg.get("drum_floor_lsb", cfg.get("one_shot_floor_lsb", 1.5))
     if floor:
         dur = min(dur, max(drum_end(x, a, a + int(dur * SR), floor), 0.01))
-    want = drum_rate(x[a:a + int(dur * SR)], d["bytes"] - STOPPER,
-                     cfg.get("drum_min_rate", 6000), cfg.get("drum_max_rate", 26000))
+    budget = d.get("ntp_bytes", d["bytes"])          # ntp_bytes: a block the value budget chose
+    lo_rate, hi_rate = cfg.get("drum_min_rate", 6000), cfg.get("drum_max_rate", 26000)
+    want = drum_rate(x[a:a + int(dur * SR)], budget - STOPPER, lo_rate, hi_rate)
     renders = {c: x if c == d["key"] else cached_render(munt, None, c, 0.5) for c in d["covers"]}
     offs = {c: 0 if c == d["key"] else audio.pitch_offset(x, y) for c, y in renders.items()}
-    # the note whose finetune-0 period gives a rate closest to `want`, with room for the offsets
     lo_off, hi_off = min(offs.values()), max(offs.values())
-    n0 = min(range(-lo_off, NOTES - hi_off), key=lambda n: abs(PAL / tables[0][n] - want))
+    notes = range(-lo_off, NOTES - hi_off)
+    fill = False
+    if cfg.get("drum_fill_block"):
+        # The DOC stores a one-shot in a power-of-two block: take the highest rate at which the
+        # whole drum still fits the block it takes (or the one the budget gave it). The
+        # bandwidth rule follows where the energy is, which for drums is mostly bass: Kick
+        # and six others sat at 5872 Hz (Nyquist 2.9 kHz, drop-sample images) in a block
+        # they half filled (docs/ninjatrackerplus.md "Drums").
+        block = d.get("ntp_bytes") or ntp_block(min(budget - STOPPER, int(dur * want)))
+        top = min(hi_rate, (block - STOPPER) / dur)
+        if top > want:
+            budget, want, fill = block, top, True
+    if fill:      # the highest period-table rate at or below `want`: the drum must fit
+        n0 = max((n for n in notes if PAL / tables[0][n] <= want), key=lambda n: PAL / tables[0][n],
+                 default=min(notes, key=lambda n: abs(PAL / tables[0][n] - want)))
+    else:         # the note whose finetune-0 period gives a rate closest to `want`
+        n0 = min(notes, key=lambda n: abs(PAL / tables[0][n] - want))
     rate = PAL / tables[0][n0]
-    seg = x[a:a + int(min(dur, (d["bytes"] - STOPPER) / rate) * SR)]
+    seg = x[a:a + int(min(dur, (budget - STOPPER) / rate) * SR)]
     data = resample(_faded(seg, 10), max(2, int(len(seg) / SR * rate) // 2 * 2))
     peak = float(np.max(np.abs(data))) or 1.0
     s = ModSample(d["name"], data / peak, kind="drum", base_note=n0, key0=d["key"],
                   seconds=len(data) / rate, level=peak)
+    s.rate = rate
     s.vel_v, s.vel_g = velocity_response(lambda v: cached_render(munt, None, d["key"], 0.5, velocity=v))
     ref = _peak(x) or 1.0                            # each rhythm key has its own MT-32 level
     covers = {c: (o, 1.0 if c == d["key"] else _peak(renders[c]) / ref) for c, o in offs.items()}
     line = (f"  {d['name']:<12} {len(data)} B @ {rate:6.0f} Hz ({len(data) / rate * 1000:4.0f} ms) note {n0:2d}, "
             f"covers {offs}")
     return s, covers, line
+
+
+def drum_steps(d: dict, cfg: dict, munt: Munt, tables, hits: dict[int, float]
+               ) -> list[tuple[int, float, float]]:
+    """The blocks a drum can take with `drum_fill_block` (its own first, then each doubling
+    until the rate reaches drum_max_rate) as (bytes, error dB, stored seconds). The error is
+    docsim.drum_error_db against Munt, averaged over the keys it covers (each played at its
+    offset) weighted by `hits` (rhythm key -> how often it's struck)."""
+    cfg = {**cfg, "drum_fill_block": True}
+    out = []
+    block = None
+    while True:
+        s, covers, _ = build_drum({**d, "ntp_bytes": block} if block else d, cfg, munt, tables)
+        size = ntp_block(len(s.data))
+        if out and size <= out[-1][0]:
+            break                                       # no bigger block helps (top rate, whole drum)
+        ws = {c: hits.get(c, 0.0) for c in covers} if any(hits.get(c) for c in covers) else {c: 1.0 for c in covers}
+        err = sum(w * docsim.drum_error_db(_onset_cut(cached_render(munt, None, c, 0.5)), s.data, s.rate, off,
+                                           s.seconds)
+                  for c, (off, _) in covers.items() if (w := ws[c])) / sum(ws.values())
+        out.append((size, err, s.seconds))
+        block = 2 * size
+    return out
+
+
+def _onset_cut(x: np.ndarray) -> np.ndarray:
+    return x[audio.onset(x):]
 
 
 def rest_sample() -> ModSample:

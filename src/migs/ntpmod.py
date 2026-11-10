@@ -29,7 +29,8 @@ from .modfile import mod_file
 from .munt import Munt
 from .munt import SR
 from .ntpsamples import (MAX_SAMPLES, ModSample, best_tuning, build_samples, cached_render, cc7_curve, floor_time,
-                         is_steady, loop_problems, loop_summary, ntp_block, ntp_doc_pages, period_tables, plan_loops)
+                         drum_steps, is_steady, loop_problems, loop_summary, ntp_block, ntp_doc_pages, period_tables,
+                         plan_loops)
 from .ntpsong import RHYTHM, Note, convert_song, ntp_oscillators, plan_tracks, read_notes, sample_for
 
 SAMPLE_SETS = ("per-song", "shared")
@@ -63,6 +64,18 @@ def with_attack_bytes(spec: dict, cfg: dict) -> dict:
     over = cfg.get("ntp_attack_bytes", {})
     return {**spec, "melodic": [{**m, "ntp_attack_bytes": over[m["name"]]} if m["name"] in over else m
                                 for m in spec["melodic"]]}
+
+
+def key_weights(w: dict[int, float], cfg: dict) -> dict[int, float]:
+    """What each played key counts for in the pitch plan. "weighted" (default): its note
+    seconds, so samples gather where notes are held longest (MI153 Pipe Organ: key 52 from a
+    sample at 74, two samples 2 semitones apart). "hybrid": a mix, `pitch_key_share` (0.5) of
+    an equal share per played key plus the rest by note seconds, so every played key pulls
+    on the zones but long notes still pull harder. Unplayed keys never count."""
+    if cfg.get("pitch_zones", "weighted") != "hybrid":
+        return w
+    share, total = cfg.get("pitch_key_share", 0.5), sum(w.values())
+    return {k: share / len(w) + (1 - share) * v / total for k, v in w.items()}
 
 
 def _pitch_plans(spec: dict, usage_notes: list[tuple[int, Note]], cfg: dict, tables, munt: Munt
@@ -122,9 +135,10 @@ def _pitch_plans(spec: dict, usage_notes: list[tuple[int, Note]], cfg: dict, tab
         err = NoteError(m["program"], render, munt.cache.parent / "docsim.json")
         cands = pitchplan.candidates(min(w), max(w), lambda k: rates(k, shots),
                                      lambda k, r: base_note(k, r, whole=not shots))
-        plans = pitchplan.plan(w, cands, err, cfg.get("pitch_max_zones", 1))
         now_rates = [shot_rate(m["key"])] if shots else pitchplan.loop_rates(m["key"], loop, min_rate, cfg["max_rate"])
-        now = (sum(wt * err(m["key"], now_rates[0], k) for k, wt in w.items()) / sum(w.values())
+        wp = key_weights(w, cfg)
+        plans = pitchplan.plan(wp, cands, err, cfg.get("pitch_max_zones", 1))
+        now = (sum(wt * err(m["key"], now_rates[0], k) for k, wt in wp.items()) / sum(wp.values())
                if now_rates else float("nan"))
         err.save()
         # the measure sees the first 0.6 s, not the loop the new key and rate get: move only
@@ -185,6 +199,100 @@ def _extra_zones(plans: dict, samples: list[ModSample], spec: dict, cfg: dict, l
     return count
 
 
+def _budget(plans, samples, song_spec, unplanned, songs, usage_notes, cfg, last_page, tables, munt, log
+            ) -> tuple[dict[str, int], dict[str, int]]:
+    """Exposures and drum steps for _value_budget, which it runs; logs its choices."""
+    cap = lambda d: min(d, 0.6)
+    exposure: dict[str, float] = {}
+    for prog, n in usage_notes:
+        m = melodic_entry(unplanned, prog, n.key)
+        if m is not None:
+            exposure[m["name"]] = exposure.get(m["name"], 0.0) + cap(n.off - n.t)
+    hits: dict[int, float] = {}
+    for notes, _ in songs:
+        for n in notes:
+            if n.channel == RHYTHM:
+                hits[n.key] = hits.get(n.key, 0.0) + 1
+    steps = {}
+    for d in song_spec["drum"]:
+        st = drum_steps(d, cfg, munt, tables, hits)
+        steps[d["name"]] = st
+        exposure[d["name"]] = sum(hits.get(c, 0.0) for c in d["covers"]) * cap(st[0][2])
+    count, drum_bytes, lines = _value_budget(plans, samples, song_spec, cfg, last_page, exposure, steps)
+    for line in lines:
+        log(line)
+    return count, drum_bytes
+
+
+def _value_budget(plans: dict, samples: list[ModSample], spec: dict, cfg: dict, last_page: int,
+                  exposure: dict[str, float], steps: dict[str, list[tuple[int, float, float]]]
+                  ) -> tuple[dict[str, int], dict[str, int], list[str]]:
+    """sample_budget = "value": extra key zones and bigger drum blocks compete for the same DOC
+    pages (and zones for MOD slots), the best value per page first, while it is at least
+    `upgrade_min_db_per_page`. Value = dB gained (the sound's mean docsim error) x the sound's
+    share of the set's exposure (each note counted up to 0.6 s: the window both measures see).
+    A drum may jump straight to any larger block (Tom gains 0.2 dB at 16 pages, 3.8 more at
+    32). What stays free goes to loop growth, which the measure can't price. Returns (zones
+    per planned sound, drum bytes per drum, log lines)."""
+    count = {name: 1 for name in plans}
+    level = {name: 0 for name in steps}
+    entry = {m["name"]: m for m in spec["melodic"]}
+    blocks = [b for s in samples if s.kind != "drum" for b in s.ntp_blocks()]
+    drum_blocks = {name: st[0][0] for name, st in steps.items()}
+    slots = MAX_SAMPLES - len(samples)
+    total = sum(exposure.values()) or 1.0
+    floor = cfg.get("upgrade_min_db_per_page", 0.01)
+    zone_cost = lambda m: [ntp_block(m.get("ntp_attack_bytes", cfg["attack_bytes"])), ntp_block(cfg["loop_bytes"])]
+    lines = []
+
+    def fits(extra: list[int], drums: dict[str, int]) -> bool:
+        bl = sorted(blocks + extra + list(drums.values()), reverse=True)
+        try:
+            docram.allocate([docram.Wave(f"b{i}", bytes(b)) for i, b in enumerate(bl)], 0, last_page)
+            return True
+        except ValueError:
+            return False
+    banned: set = set()
+    while True:
+        opts = []
+        for name, (ps, *_) in plans.items():
+            z = count[name]
+            if z < len(ps) and slots > 0 and ("zone", name) not in banned:
+                g = pitchplan.gain_db(ps[z - 1], ps[z])
+                pages = sum(zone_cost(entry[name])) // 256
+                opts.append((g * exposure.get(name, 0.0) / total / pages, "zone", name, z + 1, g, pages))
+        for name, st in steps.items():
+            i = level[name]
+            for j in range(i + 1, len(st)):
+                if ("drum", name, j) in banned:
+                    continue
+                g, pages = st[i][1] - st[j][1], (st[j][0] - st[i][0]) // 256
+                opts.append((g * exposure.get(name, 0.0) / total / pages, "drum", name, j, g, pages))
+        opts = [o for o in opts if o[0] >= floor]
+        if not opts:
+            break
+        v, kind, name, to, g, pages = max(opts)
+        if kind == "zone":
+            extra = zone_cost(entry[name])
+            if not fits(extra, drum_blocks):
+                banned.add(("zone", name))
+                continue
+            blocks += extra
+            slots -= 1
+            count[name] = to
+            lines.append(f"  budget zone {name:<13} -> {to} zones: {g:+.1f} dB, {pages} pages ({v:.3f}/page)")
+        else:
+            trial = {**drum_blocks, name: steps[name][to][0]}
+            if not fits([], trial):
+                banned.add(("drum", name, to))
+                continue
+            st = steps[name]
+            lines.append(f"  budget drum {name:<13} {st[level[name]][0] // 256:3d} -> {st[to][0] // 256:3d} pages: "
+                         f"{st[level[name]][1]:+.1f} -> {st[to][1]:+.1f} dB ({v:.3f}/page)")
+            drum_blocks, level[name] = trial, to
+    return count, drum_blocks, lines
+
+
 def sample_set(spec: dict, cfg: dict, songs: list[tuple[list[Note], dict]], last_page: int, tables,
                munt: Munt, log=lambda *a: None) -> tuple[list[ModSample], dict, dict]:
     """(samples, programs, drums) for the sounds these songs play, with loop sizes planned into
@@ -231,7 +339,17 @@ def sample_set(spec: dict, cfg: dict, songs: list[tuple[list[Note], dict]], last
     if plans:
         song_spec = planned({name: 1 for name in plans})
     samples, programs, drums = build(song_spec, {**cfg, "one_shots": False})
-    if plans:
+    if cfg.get("sample_budget", "zones") == "value":
+        count, drum_bytes = _budget(plans, samples, song_spec, unplanned, songs, usage_notes, cfg, last_page,
+                                    tables, munt, log)
+        song_spec = {**planned(count), "drum": [{**d, "ntp_bytes": drum_bytes[d["name"]]} if d["name"] in drum_bytes
+                                                else d for d in song_spec["drum"]]}
+        for name, (ps, secs, now, _) in plans.items():
+            p = ps[count[name] - 1]
+            log(f"  pitch {name:<13} {secs:6.1f} s of notes: {now:+5.1f} -> {p.error_db:+5.1f} dB  "
+                f"{pitchplan.describe(p)}")
+        samples, programs, drums = build(song_spec, {**cfg, "one_shots": False})
+    elif plans:
         count = _extra_zones(plans, samples, song_spec, cfg, last_page)
         for name, (ps, secs, now, _) in plans.items():
             p = ps[count[name] - 1]

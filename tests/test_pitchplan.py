@@ -87,3 +87,4 @@ def test_steadiness_follows_the_level_trend_not_a_wobble():
     a, off = 0, int(2.5 * SR)
     assert smp.is_steady(wobble, a, off, 0.4)
     assert not smp.is_steady(decay, a, off, 0.4)
+

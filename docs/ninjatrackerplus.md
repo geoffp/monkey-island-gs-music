@@ -409,6 +409,7 @@ What each option buys and costs, as measured. Sizes are totals over all 16 songs
 
 **Sampling**
 - **`pitch_plan`** (default on since 2026-11-09, both modes; `pitch_plan = false` restores the configured keys, e.g. as a trial mode with a `base`). Each sound's sampled key(s), up to `pitch_max_zones` key zones (each needing ≥ `pitch_zone_gain_db`; a lone sample moves only for ≥ `pitch_move_gain_db`) and short-loop rate, from the notes played ("Sampled pitch and rate"). *Gains:* the DOC-vs-Munt measure −21.5 → −26.1 dB per-song, −21.3 → −22.9 shared. Listening: MI152 "way way better"; after the Panpipes and Pipe Organ fixes, "everything else I've listened to sounds good". *Costs:* per-song `.NTP` +168 KB (+14 %); per-song steals 275 → 433 (MI160); extra zones take DOC RAM before loop growth.
+- **Hybrid trial** (`per-song-hybrid` / `shared-hybrid`: `pitch_zones = "hybrid"`, `drum_fill_block`, `sample_budget = "value"`; defaults `"weighted"`, false, `"zones"`). Free zone boundaries with every played key counted; drums at the highest rate their block holds; zones and drum blocks bought from one DOC budget by dB × exposure per page ("Hybrid key weights, drums and one value budget"). *Gains:* per-song pitch error better on both measures (coverage −24.3 → −25.2, weighted −26.0 → −26.2); drums −9.6 → −16.5/−21.6 dB (Kick) and similar; shared uses 17 idle pages on drums. *Costs:* per-song raw loops 26 × 16 KB → 12 (several steady sounds lose theirs); +33 samples, +36 KB. Not yet listened to.
 - **Raw-loop rate** (`raw_loop_tune_cents = 1.0`, `raw_loop_max_rate_drop = 0.1`; all modes). Raw loops take the highest in-tune rate instead of the closest tuning. *Gains:* per-song −20.2 → −21.5 dB (Elec Organ −19.8 → −23.6, Shakuhachi −20.9 → −24.8). *Costs:* per-song `.NTP` 1116 → 1201 KB; steals 284 → 275 (fewer). `raw_loop_tune_cents = 0` restores the closest tuning.
 
 **Envelope**
@@ -523,6 +524,109 @@ Per note, key 60 played at keys 38–45 scores −8 to −10 dB in harmonics and
 | **all** | **−20.2 → −21.5** | **−26.1** | **−22.9** (shared −21.3) |
 
 Main per-song gains come from the raw-loop rate alone; shared and shared-pitch have no raw loops and don't change with it. Shared has no free MOD slot (31 samples), so it only moves keys; per-song adds zones (MI160: 21 samples, 3 for Acou Bass). *Size (`.NTP` total):* per-song 1116 → 1201 KB (raw loops at higher rates are longer), per-song-pitch 1369 KB, shared 1376 KB, shared-pitch 1370 KB. *Polyphony (drops / steals):* per-song 3 / 284 → 3 / 275; shared 1 / 184; per-song-pitch 1 / 433 (MI160 415); shared-pitch 1 / 105. *Build time:* the first run measures every candidate (≈ 7 ms a note); later runs read the cache. Listening (per-song-pitch): MI152 "sounds way way better"; with the Panpipes (MI154) and Pipe Organ (MI153) fixes, "everything else I've listened to sounds good". It was then made the default for both modes; the trial modes `per-song-pitch` / `shared-pitch` (the names used in the measurements above) became `per-song` / `shared`.
+
+### Even zones (trial `per-song-even` / `shared-even`, 2026-11-09; replaced by the hybrid trial and removed)
+**User report:** the sampled keys for the pipe organ are "not super evenly distributed".
+- Per-song MI153 Pipe Organ had 52–75 → key 74, 76–83 → 76, 84–91 → 88: key 52 played from a sample 22 semitones above it, while two samples sat 2 semitones apart.
+- Across the 42 multi-zone per-song sounds: MI162 Shakuhachi had samples at 63 and 64; MI163 Acou Bass played 41–54 from key 40; MI160 Panpipes had zones 38–45 and 66–84.
+- **Cause:** `pitchplan.plan` minimises the *note-seconds-weighted* error, so samples gather where notes are held longest.
+
+**Trial rule (`pitchplan.even_plans`):**
+- zones of equal width across the sound's played range (per song, or every song's union for shared);
+- each zone takes the key and rate with the lowest docsim error averaged over **every key in the zone, played or not**;
+- the zone count and `pitch_move_gain_db` use the same equal-weight mean;
+- shared still has one sample per sound (no free MOD slot), with its key now chosen for the whole range.
+
+**Up or down?**
+- **Practitioner advice:** small shifts, root mid-zone ([Sound On Sound](https://www.soundonsound.com/sound-advice/q-how-can-get-my-multisampled-synths-sound-more-even), [Polyphone forum](https://www.polyphone.io/en/forum/help/283-advice-on-how-to-lay-out-key-ranges-to-samples)). It disagrees on direction ([Elektronauts](https://www.elektronauts.com/t/making-sample-banks-of-your-analog-synths/149168?page=2): lower usually works better); no controlled study was found.
+- **On the DOC the measure is asymmetric the other way.** Mean extra error vs the sampled key, from `build/cache/docsim.json` (averaged over whatever key/rate pairs were measured, so indicative):
+
+  | Sound | 6 semitones down | 6 up | 12 down | 12 up |
+  |---|---|---|---|---|
+  | Elec Organ | +7.1 | +0.7 | +12.3 | +3.1 |
+  | Strings | +8.0 | −0.4 | +12.2 | +3.0 |
+  | Panpipes | +5.1 | +0.6 | +9.4 | +3.8 |
+  | Trombone | +8.1 | +2.5 | +12.9 | +6.9 |
+  | Pipe Org 2 | +9.8 | +8.1 | +15.1 | +15.4 |
+
+- **Why:** a sample played below its key loses bandwidth with it, and drop-sample stepping leaves images. The planner doesn't snap to the nearest sample; the measure places each key in its zone.
+
+**Results** (both planners scored on the same two measures, dB, lower is better):
+
+| | Coverage (every key once) | Note-time weighted |
+|---|---|---|
+| per-song → per-song-even, 62 sounds | −24.28 → −25.00 | −26.00 → −25.28 |
+| shared → shared-even, 16 sounds | −20.43 → −20.71 | −23.65 → −22.95 |
+
+- **Zones changed:** 48 of 62 per-song sounds and 8 of 16 shared ones.
+- **Biggest coverage gains:**
+  - MI167 Elec Organ 46–72:64 → 46–59:49 | 60–72:64 (−21.5 → −26.8);
+  - MI168 Elec Organ (−22.0 → −26.4);
+  - MI163 Acou Bass (−16.7 → −20.6, three zones);
+  - MI160 Panpipes (−18.3 → −21.6);
+  - MI153 Pipe Organ 52–65:60 | 66–78:73 | 79–91:86 (−21.6 → −24.1; held notes −26.1 → −23.8).
+- **Biggest held-note losses:**
+  - MI162 Shakuhachi (−29.7 → −24.7);
+  - MI153 Pipe Organ Lo (−28.8 → −25.0);
+  - MI151 Panpipes (−26.0 → −22.9);
+  - shared Strings 70 → 64 (−28.0 → −24.3, coverage unchanged).
+- **Side effect:** unplayed keys count. MI153 Pipe Organ Lo2 gets three samples for keys 36–38, one of them for key 37, which the song never plays.
+- **Cost:**
+  - per-song samples 118 → 126, DOC pages +98 in total; no raw loop lost;
+  - steals per-song MI152 11 → 24, MI160 414 → 263 (+1 drop), MI151 3 → 1;
+  - shared MI160 92 → 131, MI151 0 → 2.
+- `per-song` / `shared` stay byte-identical (the default is `pitch_zones = "weighted"`).
+- **Side fix:** `_raw_tuning` treats a raw-loop size with no whole number of periods in its rate window as no fit. Even zones sampled Pipe Organ Lo2 at 37, a 34.4 Hz two-period cycle, and `best_tuning` raised.
+- Not listened to: replaced by the hybrid trial below. Equal widths were too rigid. Against the weighted plan, 13 per-song sounds were better on both measures, 15 worse on both, and 17 traded one for the other; where played keys cluster or leave gaps, a fixed cut splits a cluster or spends a zone on a gap.
+
+### Hybrid key weights, drums and one value budget (trial `per-song-hybrid` / `shared-hybrid`, 2026-11-09)
+**Pitch plan (`pitch_zones = "hybrid"`, `ntpmod.key_weights`).**
+- The weighted plan's free zone boundaries (`pitchplan.plan`) are kept. Each played key weighs `pitch_key_share` (0.5) of an equal share per played key plus the rest by note seconds.
+- Every played key pulls on the zones, long notes pull harder, and unplayed keys never count.
+- MI153 Pipe Organ: 52–75: 74 | 76–83: 76 | 84–91: 88 → 52–67: 60 | 69–80: 74 | 81–91: 88. Pipe Organ Lo2: 36 | 38 (no sample for the unplayed 37).
+
+**Drums were "pretty crunchy" (user, 2026-11-09).**
+- **The rate rule:** `drum_rate` follows where 95 % of the energy lies, and for drums that is mostly bass. Seven of the 14 drums were stored at 5872 Hz:
+  - Kick, Tom, Claves, Bongo, Mute Conga, Conga and Timbale;
+  - their Nyquist is 2.9 kHz, so Kick's click (99 % of its energy lies below 3.1 kHz) and Timbale's ring (below 5.1 kHz) were cut;
+  - drop-sample playback at 26.3 kHz leaves images around 5.9 and 11.7 kHz.
+- **Half-empty blocks:** several drums left half their block unused (Kick 788 B of a 1 KB block). Cabasa and Quijada were held down by their configured bytes.
+- **Measure:** `docsim.drum_error_db`, the A-weighted distortion of the DOC playing the stored drum (8-bit, drop-sample, at its offset for each covered key) against Munt, over 39 ms frames across the hit, level-free.
+- **Error by rate, dB / DOC pages, to the 8-bit floor:**
+
+  | Drum | 5.9 kHz | 11 kHz | 14 kHz | 26.3 kHz |
+  |---|---|---|---|---|
+  | Kick | −9.6 / 4 | −15.5 / 8 | −16.6 / 8 | −23.2 / 16 |
+  | Snare | −3.8 / 4 | −13.1 / 8 | −13.4 / 8 | −21.4 / 16 |
+  | Closed Hat | −0.3 / 2 | −3.4 / 4 | −4.5 / 8 | −11.8 / 8 |
+  | Claves | −4.6 / 2 | −13.0 / 4 | −14.4 / 4 | −23.3 / 8 |
+
+- **Fix (`drum_fill_block`):** a drum takes the highest period-table rate at which the whole drum still fits the block it occupies (or the one the budget gives it, `ntp_bytes`).
+  - **Free gains:** Kick −12.0 dB in its 4 pages; Snare −13.7 dB in 8; Bongo −12.1 dB in 1.
+  - **`drum_steps`:** each doubling up to the top rate. Tom gains 0.2 dB at 16 pages and 3.8 more at 32.
+
+**One budget (`sample_budget = "value"`, `ntpmod._value_budget`).**
+- Extra zones (an attack + short loop and a MOD slot) and bigger drum blocks compete for DOC pages, the best value per page first, down to `upgrade_min_db_per_page` (0.01).
+- **Value** = dB gained × the sound's share of the set's exposure, each note or hit counted up to 0.6 s (what both measures see).
+- A drum may jump to any larger block.
+- What is left grows loops, as before.
+- Example, MI160:
+  - zones for Elec Organ (+2.8 dB, 0.076/page) and Panpipes (+5.7 dB);
+  - drums Mute Conga 2 → 4 pages (−15.7 → −22.5 dB), Kick 4 → 8 → 16 (−12.0 → −21.6 dB), Conga, Claves and Bongo;
+  - Marimba and Acou Bass zones after them.
+- Shared (no free slot): only drums. Kick, Mute Conga, Conga, Claves and Bongo use 17 pages that were idle (221 → 238 of 240).
+
+**Results** (`per-song` / `shared` byte-identical):
+- **Pitch plan** (the two measures of "Even zones"): per-song coverage −24.28 → −25.15 dB and note-time weighted −26.00 → −26.17, both better.
+  - 32 of 62 sounds better or equal on both, 3 worse on both (MI160 Fantasy and Shakuhachi, MI167 Trombone: low exposure, so they lost zones to drums), 5 trades;
+  - shared −20.43 → −20.57 and −23.65 → −23.52 (French Horn traded, Trombone slightly worse).
+- **Polyphony:** steals MI160 414 → 372, MI152 11 → 17, MI151 3 → 2, MI168 2 → 1; shared unchanged; no drops.
+- **The cost: long loops.** The measure can't price them, and zones and drums now take pages first.
+  - Per-song raw loops: 26 × 16 KB + 6 × 8 KB → 12 × 16 KB + 14 × 8 KB.
+  - Lost entirely: MI162 Shakuhachi (both), MI167, MI159 and MI152 (key 49) Elec Organ, MI168 Trombone, MI151 Panpipes.
+  - Halved: e.g. MI160 Elec Organ, MI153 Pipe Organ 60.
+  - Per-song samples 215 → 248, `.NTP` 1341 → 1377 KB.
+- Not yet listened to. A higher `upgrade_min_db_per_page` keeps more loops.
 
 ## Track allocation (`convert_song`; current rules, 2026-11-07)
 NTP has no voice allocation: each MOD track owns its oscillators for the whole song (`determine_osc_per_track`). So `convert_song` assigns every note to a track itself, once, in onset order.

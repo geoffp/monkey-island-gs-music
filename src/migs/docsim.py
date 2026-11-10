@@ -105,6 +105,29 @@ def spectrum_error(ref: np.ndarray, got: np.ndarray, f0: float) -> tuple[float, 
     return harm, rest
 
 
+def drum_error_db(ref: np.ndarray, sample: np.ndarray, rate: float, semis: float, seconds: float,
+                  frame: int = 1024, hop: int = 256) -> float:
+    """A drum's version of note_error_db: the A-weighted distortion-to-signal ratio of the DOC
+    playing `sample` (stored at `rate`, values -1..1, rounded to 8 bits here) `semis` above its
+    key, against `ref` (Munt's render of the played key, at SR, from its onset), over the
+    drum's own `seconds`. Drums are inharmonic and short: short frames (1024 at DOC_RATE,
+    39 ms) averaged over the hit, power spectra compared as magnitudes, level-free. What a
+    sample loses to a low rate (the top end, drop-sample images: Kick at 5872 Hz -9.6 dB,
+    at 26273 Hz -23.2 dB) and to being cut short both count."""
+    n = max(2 * frame, int((seconds + 0.02) * DOC_RATE))
+    q = np.clip(np.round(sample / (float(np.max(np.abs(sample))) or 1.0) * 127), -127, 127)
+    got = doc_play(q, rate, semis, n / DOC_RATE)
+    want = to_doc_rate(ref[:int(n / DOC_RATE * SR) + 1])
+    win = np.hanning(frame)
+
+    def spec(y: np.ndarray) -> np.ndarray:
+        y = np.pad(y, (0, max(0, n - len(y))))[:n]
+        p = np.mean([np.abs(np.fft.rfft(y[i:i + frame] * win, N_FFT)) ** 2 for i in range(0, n - frame + 1, hop)],
+                    axis=0) * _WEIGHT
+        return p / (p.sum() or 1.0)
+    return db(float(np.sum((np.sqrt(spec(got)) - np.sqrt(spec(want))) ** 2)))
+
+
 def db(power_ratio: float) -> float:
     return float(10 * np.log10(power_ratio + 1e-12))
 

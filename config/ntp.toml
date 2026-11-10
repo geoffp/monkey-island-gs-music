@@ -47,6 +47,16 @@ pitch_plan = true       # choose each sound's sampled key(s), key zones and shor
                         # default since 2026-11-09). false: config/mt32bank.toml's fixed key
 pitch_move_gain_db = 0.5  # a single sample moves off the configured key only if this lowers the error
                         # (the measure covers the first 0.6 s, not the loop the move changes)
+pitch_zones = "weighted"  # what each played key counts for. weighted: its note seconds (samples gather
+                        # where notes are held longest). hybrid (trial modes *-hybrid): half an equal
+                        # share per played key, half by note seconds (pitch_key_share)
+pitch_key_share = 0.5
+sample_budget = "zones" # zones: extra zones while each gains pitch_zone_gain_db. value (trial): extra
+                        # zones and bigger drum blocks compete for DOC pages by dB x exposure per page,
+                        # down to upgrade_min_db_per_page; the rest grows loops
+upgrade_min_db_per_page = 0.01
+drum_fill_block = false # true (trial): a drum takes the highest rate that still fits its block (seven
+                        # drums sat at 5872 Hz in half-empty blocks: docs/ninjatrackerplus.md "Drums")
 pitch_max_zones = 3     # samples (key zones) one sound may get, each an attack + loop and a MOD slot
 pitch_zone_gain_db = 1.0  # an extra zone must lower its sound's mean error by this much; zones take
                         # DOC RAM before loop growth
@@ -82,6 +92,18 @@ drum_floor_lsb = 1.5    # drums end at the 8-bit floor (drum_end: junk near the 
 # Elec Organ -0.28 dB, Sax -0.10, Acou Bass +0.04, Vibes +0.06) get 1016 B attacks (-16 pages).
 [modes.shared]
 ntp_attack_bytes = { "Elec Organ" = 1016, "Sax" = 1016, "Acou Bass" = 1016, "Vibes" = 1016 }
+
+# Trial: hybrid key weights, drums filling their blocks, and one value budget for zones + drums.
+[modes.per-song-hybrid]
+base = "per-song"
+pitch_zones = "hybrid"
+sample_budget = "value"
+drum_fill_block = true
+[modes.shared-hybrid]
+base = "shared"
+pitch_zones = "hybrid"
+sample_budget = "value"
+drum_fill_block = true
 
 # Trial variants, built side by side for listening: a `base` sample-set mode plus overrides.
 # Add the name to `ntp_modes` in the justfile. E.g. the original loops next to `shared`:

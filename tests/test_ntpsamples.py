@@ -142,6 +142,20 @@ def test_long_loops_take_the_highest_rate_that_is_in_tune():
     assert nothing == closest                                    # none that close: the closest
 
 
+def test_a_raw_loop_size_that_no_rate_tunes_is_no_fit_not_an_error():
+    """A low two-period cycle (Pipe Organ Lo2 sampled at 37 in the even-zone trial: 34.4 Hz)
+    can leave no whole number of periods for a raw loop size inside its rate window;
+    best_tuning raises there, and the size must just not be offered."""
+    tables = {ft: [int(1712 * 2 ** (-(n + ft / 8) / 12)) for n in range(72)] for ft in range(-8, 8)}
+    f = 34.4
+    src = smp._Source(np.zeros(4 * smp.SR), 0, 2 * smp.SR, np.zeros(400), smp.SR / f, (36, 38), 2)
+    cfg = {"loop_bytes": 512, "min_rate": 20000, "max_rate": 20500, "loop_construction": "eprime"}
+    m = {"key": 37, "ntp_rate": 512 * f}                      # the short loop: 1 cycle at 17613 Hz
+    with pytest.raises(ValueError):                           # 2048 B: 3.44-3.52 cycles, no whole one
+        smp.best_tuning(f, tables, 20000, 20500, 2048, 37, 36, 38, high_within_cents=1.0)
+    assert smp._raw_tuning(m, src, cfg, tables, 2048, 1016, 0.4) is None
+
+
 @pytest.mark.parametrize("rate", [14903.0, 18000.0, 21770.0])
 def test_raw_loop_joins_its_attack_in_phase(rate):
     """The attack ends wherever attack_bytes / rate falls in the cycle; it moves into phase
