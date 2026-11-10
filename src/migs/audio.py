@@ -25,14 +25,31 @@ def smooth(x: np.ndarray, n: int) -> np.ndarray:
 
 
 def interp_at(x: np.ndarray, pos: np.ndarray) -> np.ndarray:
-    """x at fractional sample positions (linear interpolation)."""
-    return np.interp(pos, np.arange(len(x)), x)
+    """x at fractional sample positions (linear interpolation, held at the ends): the same
+    arithmetic as np.interp(pos, arange(len(x)), x), but reading only the two neighbours of
+    each position. np.interp scanned the whole render per call (1.2M calls on renders of
+    ~300k samples were 40% of an NTP build)."""
+    pos = np.asarray(pos, dtype=np.float64)
+    if len(x) < 2:
+        return np.full(pos.shape, float(x[0]) if len(x) else np.nan)
+    p = np.clip(pos, 0.0, len(x) - 1.0)
+    j = np.minimum(np.floor(p).astype(np.int64), len(x) - 2)
+    y = (x[j + 1] - x[j]) * (p - j) + x[j]
+    return np.where(p == len(x) - 1, x[-1], y)
 
 
 def rms_envelope(x: np.ndarray, win: float = 0.01) -> np.ndarray:
-    """RMS over a centred `win`-second window, per sample."""
+    """RMS over a centred `win`-second window, per sample: the window of
+    np.convolve(x * x, ones(n) / n, "same") (zeros beyond the ends), from a cumulative sum
+    as in `smooth` (the convolution was 15% of an NTP build)."""
     n = max(1, int(win * SR))
-    return np.sqrt(np.convolve(x * x, np.ones(n) / n, mode="same"))
+    if n == 1:
+        return np.abs(x)
+    c = np.concatenate([[0.0], np.cumsum(x * x, dtype=np.float64)])
+    i = np.arange(len(x))
+    lo = np.maximum(i - n // 2, 0)
+    hi = np.minimum(i + (n - 1) // 2, len(x) - 1) + 1
+    return np.sqrt(np.maximum(c[hi] - c[lo], 0.0) / n)
 
 
 def onset(x: np.ndarray, frac: float = 0.02) -> int:
