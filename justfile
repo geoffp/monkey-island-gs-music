@@ -74,7 +74,8 @@ s6_url        := "https://www.apple.asimov.net/images/gs/os/gsos/Apple_IIGS_Syst
 s6            := vendor / "system6"
 s6_files      := "System.Disk:496f8d80d524ded42398e7b24f62694a1562d4bbe5d933eacbf391f3a26b599a SystemTools1:25c1f33fea4e6bb983a1d2a2b3234dbb7c14913e2f922a2587d28c7ff42c9944 SystemTools3:b41cc66963f8490f61854c85c4ba14c4b31b63b96a5f2ef666a19c4ecff48859 synthLAB:ddebd51f90a709a109c8d310159a112726bb6626504c1f5e78b59499e64d7087"
 # GitHub release asset $1/$2/$3 (owner/repo, tag, asset) to file $4, checked against sha256 $5
-gh_asset      := 'gha() { curl -fL --retry 3 -o "$4" "https://github.com/$1/releases/download/$2/$3" && echo "$5  $4" | sha256sum -c -; }; gha'
+# (one command, not a function definition, so it works after `||` too)
+gh_asset      := "sh -c 'curl -fL --retry 3 -o \"$4\" \"https://github.com/$1/releases/download/$2/$3\" && echo \"$5  $4\" | sha256sum -c -' gh_asset"
 
 # List recipes
 default:
