@@ -32,7 +32,7 @@ ntpdemo_sha   := "350843388bde213b10101212fcd6e3f5affa3b4f25b74ea970b0b6ab85d14d
 # NTP sample-set modes built side by side (build/ntp/<mode>/): per-song (each song carries only
 # its own sounds, longer loops) and shared (one set for every song, like the MIDI Synth bank),
 # plus any trial variants ([modes.<name>] with a `base` in config/ntp.toml).
-ntp_modes     := "per-song shared per-song-hybrid shared-hybrid"
+ntp_modes     := "per-song shared"
 # Copy build/ntp/<mode>/*.ntp (typed $D5/$0008) into <dir>/<MODE>/, one folder per variant.
 # ProDOS names allow no "-": per-song -> PER.SONG, shared-avg -> SHARED.AVG.
 ntp_folders   := 'ntpf() { local m d f; for m in ' + ntp_modes + '; do d="$1/$(echo $m | tr a-z- A-Z.)"; for f in build/ntp/$m/*.ntp; do [ -f "$f" ] || continue; mkdir -p "$d"; cp "$f" "$d/$(basename "$f" .ntp | tr a-z A-Z).NTP#d50008"; done; done; }; ntpf'

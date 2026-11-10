@@ -409,7 +409,7 @@ What each option buys and costs, as measured. Sizes are totals over all 16 songs
 
 **Sampling**
 - **`pitch_plan`** (default on since 2026-11-09, both modes; `pitch_plan = false` restores the configured keys, e.g. as a trial mode with a `base`). Each sound's sampled key(s), up to `pitch_max_zones` key zones (each needing ≥ `pitch_zone_gain_db`; a lone sample moves only for ≥ `pitch_move_gain_db`) and short-loop rate, from the notes played ("Sampled pitch and rate"). *Gains:* the DOC-vs-Munt measure −21.5 → −26.1 dB per-song, −21.3 → −22.9 shared. Listening: MI152 "way way better"; after the Panpipes and Pipe Organ fixes, "everything else I've listened to sounds good". *Costs:* per-song `.NTP` +168 KB (+14 %); per-song steals 275 → 433 (MI160); extra zones take DOC RAM before loop growth.
-- **Hybrid trial** (`per-song-hybrid` / `shared-hybrid`: `pitch_zones = "hybrid"`, `drum_fill_block`, `sample_budget = "value"`; defaults `"weighted"`, false, `"zones"`). Free zone boundaries with every played key counted; drums at the highest rate their block holds; zones and drum blocks bought from one DOC budget by dB × exposure per page ("Hybrid key weights, drums and one value budget"). *Gains:* per-song pitch error better on both measures (coverage −24.3 → −25.2, weighted −26.0 → −26.2); drums −9.6 → −16.5/−21.6 dB (Kick) and similar; shared uses 17 idle pages on drums. *Costs:* per-song raw loops 26 × 16 KB → 12 (several steady sounds lose theirs); +33 samples, +36 KB. Not yet listened to.
+- **Hybrid planner** (default since 2026-11-09, both modes: `pitch_zones = "hybrid"`, `drum_fill_block = true`, `sample_budget = "value"`; the old planner is `"weighted"`, false, `"zones"`). Free zone boundaries with every played key counted; drums at the highest rate their block holds; zones and drum blocks bought from one DOC budget by dB × exposure per page down to `upgrade_min_db_per_page` (0.011) ("Hybrid key weights, drums and one value budget"). *Gains:* per-song pitch error better on both measures (coverage −24.3 → −25.2, weighted −26.0 → −26.2); drums −9.6 → −16.5/−21.6 dB (Kick) and similar; shared uses 17 idle pages on drums. Listening: "overall I think it sounds better"; with the 0.011 threshold, MI160's organ "Nailed it!". *Costs:* per-song raw loops fewer and shorter (several steady sounds lose theirs; MI160 Elec Organ kept by the threshold); more samples (+36 KB of `.NTP`).
 - **Raw-loop rate** (`raw_loop_tune_cents = 1.0`, `raw_loop_max_rate_drop = 0.1`; all modes). Raw loops take the highest in-tune rate instead of the closest tuning. *Gains:* per-song −20.2 → −21.5 dB (Elec Organ −19.8 → −23.6, Shakuhachi −20.9 → −24.8). *Costs:* per-song `.NTP` 1116 → 1201 KB; steals 284 → 275 (fewer). `raw_loop_tune_cents = 0` restores the closest tuning.
 
 **Envelope**
@@ -579,7 +579,7 @@ Main per-song gains come from the raw-loop rate alone; shared and shared-pitch h
 - **Side fix:** `_raw_tuning` treats a raw-loop size with no whole number of periods in its rate window as no fit. Even zones sampled Pipe Organ Lo2 at 37, a 34.4 Hz two-period cycle, and `best_tuning` raised.
 - Not listened to: replaced by the hybrid trial below. Equal widths were too rigid. Against the weighted plan, 13 per-song sounds were better on both measures, 15 worse on both, and 17 traded one for the other; where played keys cluster or leave gaps, a fixed cut splits a cluster or spends a zone on a gap.
 
-### Hybrid key weights, drums and one value budget (trial `per-song-hybrid` / `shared-hybrid`, 2026-11-09)
+### Hybrid key weights, drums and one value budget (trial `per-song-hybrid` / `shared-hybrid`, 2026-11-09; default since 2026-11-09)
 **Pitch plan (`pitch_zones = "hybrid"`, `ntpmod.key_weights`).**
 - The weighted plan's free zone boundaries (`pitchplan.plan`) are kept. Each played key weighs `pitch_key_share` (0.5) of an equal share per played key plus the rest by note seconds.
 - Every played key pulls on the zones, long notes pull harder, and unplayed keys never count.
@@ -633,6 +633,7 @@ Main per-song gains come from the raw-loop rate alone; shared and shared-pitch h
   - MI163 Sax loses its 2nd zone (+2.5 dB, little played);
   - MI151 Rim and MI161 Mute Conga keep their filled block instead of a doubling (+1.5, +1.6 dB);
   - shared-hybrid unchanged.
+- **Default (2026-11-09).** After listening ("Nailed it!"), `pitch_zones = "hybrid"`, `sample_budget = "value"` and `drum_fill_block = true` became the defaults for both modes, and the trial modes became `per-song` / `shared`. The measurements above name them `per-song-hybrid` / `shared-hybrid`; the old planner is a commented `[modes.per-song-weighted]` example in `config/ntp.toml`.
 
 ## Track allocation (`convert_song`; current rules, 2026-11-07)
 NTP has no voice allocation: each MOD track owns its oscillators for the whole song (`determine_osc_per_track`). So `convert_song` assigns every note to a track itself, once, in onset order.
