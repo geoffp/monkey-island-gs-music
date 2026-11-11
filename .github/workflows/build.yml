@@ -27,12 +27,15 @@ jobs:
       - uses: extractions/setup-just@v4
       # A stalled package mirror hung this step for 16+ minutes on 2026-11-11 (normally < 1):
       # fail it after 10 and let apt retry slow downloads instead of waiting forever.
+      # --no-install-recommends: without it, ffmpeg and fluidsynth pull in ~160 packages
+      # (264 MB: Qt 6, Qsynth, speech recognition, video drivers) that nothing here uses.
       - name: Host tools (Ubuntu)
         if: runner.os == 'Linux'
         timeout-minutes: 10
         run: |
           apt="-o Acquire::Retries=3 -o Acquire::http::Timeout=30"
-          sudo apt-get $apt update && sudo apt-get $apt install -y cmake g++ pkg-config libglib2.0-dev php-cli ffmpeg fluidsynth unzip
+          sudo apt-get $apt update
+          sudo apt-get $apt install -y --no-install-recommends cmake g++ pkg-config libglib2.0-dev php-cli ffmpeg fluidsynth unzip
       - name: Host tools (macOS)
         if: runner.os == 'macOS'
         timeout-minutes: 15
