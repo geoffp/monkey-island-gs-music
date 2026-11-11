@@ -243,19 +243,21 @@ fetch-docs:
 # GSSquared machine configs are generated into build/<game>/disks/<name>.gs2 by `gs2-config` (migs.gs2config),
 # keeping the id/battery RAM GSSquared saves on quit. Battery RAM is patched so the IIgs
 # boots straight from the right slot with the built-in 5.25" drives off (slot 6 = Your Card).
-# speed: 1.024mhz | 2.8mhz | 7.159mhz | 14.3mhz | ludicrous
+# speed: 1.024mhz | 2.8mhz | 7.159mhz | 14.3mhz | ludicrous. Default 7.159mhz (since 2026-11-11):
+# an accelerated IIgs (2.8 MHz is stock), rather than ludicrous's unlimited speed.
+emu_speed := "7.159mhz"
 seed_bram := "config/emu/default-bram.hex"
 
 # From the NTP disk (`just disk`) on a BazFast card, in GSSquared:
 # Boot the IIgs straight into SenseiPlay with our NinjaTrackerPlus songs
-emu speed="ludicrous": fetch-gssquared disk
+emu speed=emu_speed: fetch-gssquared disk
     uv run gs2-config {{out}}/disks/{{lowercase(prefix)}}-ntp.gs2 --name "{{label}} NinjaTrackerPlus (SenseiPlay)" --speed {{speed}} \
       --card 7=bazfast3 --disk 7:1={{prefix}}.NTP.PO --startup-slot 7 --your-card 6 --your-card 7 --seed {{seed_bram}}
     @[ -x "{{gs2}}" ] || { echo "no GSSquared for {{platform}}"; exit 1; }
     "{{gs2}}" "$PWD/{{out}}/disks/{{lowercase(prefix)}}-ntp.gs2"
 
 # Experimental aside: boot System 6 + synthLAB with the MIDI Synth sequences (`just synthlab-disk`)
-emu-synthlab speed="ludicrous": fetch-gssquared synthlab-disk
+emu-synthlab speed=emu_speed: fetch-gssquared synthlab-disk
     uv run gs2-config {{out}}/disks/{{lowercase(prefix)}}-synthlab.gs2 --name "{{label}} synthLAB (experimental, BazFast HD)" --speed {{speed}} \
       --card 7=bazfast3 --disk 7:1={{prefix}}.SYNTHLAB.PO --startup-slot 7 --your-card 6 --your-card 7 --seed {{seed_bram}}
     @[ -x "{{gs2}}" ] || { echo "no GSSquared for {{platform}}"; exit 1; }
@@ -412,7 +414,7 @@ midisynth-tunetest:
 
 # Boot the NTP disk and sample the DOC oscillators to build/<game>/disks/docscope.jsonl while you play something
 docscope seconds="240": fetch-gssquared fetch-mcp disk
-    uv run gs2-config {{out}}/disks/{{lowercase(prefix)}}-ntp.gs2 --name "{{label}} NinjaTrackerPlus (SenseiPlay)" --speed ludicrous \
+    uv run gs2-config {{out}}/disks/{{lowercase(prefix)}}-ntp.gs2 --name "{{label}} NinjaTrackerPlus (SenseiPlay)" --speed {{emu_speed}} \
       --card 7=bazfast3 --disk 7:1={{prefix}}.NTP.PO --startup-slot 7 --your-card 6 --your-card 7 --seed {{seed_bram}}
     uv run gs2-docscope --config {{out}}/disks/{{lowercase(prefix)}}-ntp.gs2 --seconds {{seconds}} --log {{out}}/disks/docscope.jsonl
 

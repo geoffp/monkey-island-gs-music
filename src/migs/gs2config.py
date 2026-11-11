@@ -97,7 +97,7 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("gs2", type=Path)
     ap.add_argument("--name", required=True)
-    ap.add_argument("--speed", default="ludicrous", choices=SPEEDS)
+    ap.add_argument("--speed", default="7.159mhz", choices=SPEEDS)
     ap.add_argument("--card", type=_card, action="append", default=[], metavar="SLOT=TYPE",
                     help="e.g. 7=bazfast3")
     ap.add_argument("--disk", type=_disk, action="append", default=[], metavar="SLOT:DRIVE=IMAGE",

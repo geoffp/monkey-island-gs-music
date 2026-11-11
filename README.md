@@ -79,7 +79,7 @@ Then:
 just setup    # checks tools, fetches the ScummVM submodule, builds the Python env, fetches and builds everything in vendor/
 just          # list all recipes
 just emu      # build the NTP songs and boot straight into SenseiPlay in GSSquared
-              # (unlimited speed; `just emu 2.8mhz` for stock)
+              # (at 7.159 MHz; `just emu 2.8mhz` for stock, `just emu ludicrous` for unlimited)
 just emu-synthlab  # experimental aside: System 6 + synthLAB + the MIDI Synth sequences
 ```
 `just setup` fetches into the gitignored `vendor/`. Every download is pinned to a sha256, and the unversioned ones fall back to an identical Internet Archive copy:
