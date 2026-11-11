@@ -406,6 +406,24 @@ synthlab-disk: fetch-system6 seq drum-audition tunetest
     "$cp2" catalog "$img" | grep -E '^Disk|blocks free'
     "$cp2" list "$img" | grep -c . | sed 's/^/files: /'
 
+# Catches what works here only because vendor/ and build/ already exist: in a clean clone of
+# HEAD (committed work only) with your original files linked in, run `just setup`, the tests,
+# then `target` twice; the second run must rewrite nothing.
+# Build from scratch in build/selftest/ to check a fresh checkout works
+selftest target="disk":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    [ -z "$(git status --porcelain)" ] || echo "note: uncommitted changes are not part of the self-test"
+    d="$PWD/build/selftest"; rm -rf "$d"
+    git clone -q . "$d"
+    for f in "original files"/*; do [ "$f" = "original files/README.md" ] || ln -s "$PWD/$f" "$d/$f"; done
+    cd "$d"
+    just setup && just test -q && just {{target}}
+    touch .mark && just {{target}}
+    changed=$(find build vendor -type f -newer .mark ! -name '*.log')
+    [ -z "$changed" ] || { echo "selftest: the second run rewrote:"; echo "$changed"; exit 1; }
+    echo "selftest: OK ($d)"
+
 # Run the unit tests
 test *args:
     uv run pytest {{args}}
