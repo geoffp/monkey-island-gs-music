@@ -7,14 +7,13 @@ set windows-shell := ["powershell.exe", "-NoLogo", "-Command"]
 game     := "original files/The Secret of Monkey Island (Floppy DOS VGA)"
 roms     := "original files/mt-32 roms"
 vendor   := "vendor"
-# Platform: linux, macos, freebsd, ... and x86_64, aarch64. Prebuilt tools exist for some only:
-# GSSquared for Linux x86_64 (AppImage) and macOS (universal app); CiderPress II self-contained
-# for Linux x86_64 and macOS (x86_64 only: Rosetta 2 on Apple silicon), elsewhere as x86_64 .NET 8
-# code run by the host's `dotnet` (so not on ARM Linux or BSD); gs2-mcp for Linux and macOS.
+# Platform: os() linux or macos, arch() x86_64 or aarch64. The prebuilt tools: GSSquared for
+# Linux x86_64 (AppImage) and macOS (universal app); CiderPress II for Linux x86_64 and macOS
+# (x86_64 only: Rosetta 2 on Apple silicon); gs2-mcp for Linux and macOS.
 platform := os() + "-" + arch()
 gs2      := if os() == "macos" { vendor / "gssquared/GSSquared.app/Contents/MacOS/GSSquared" } else { vendor / "gssquared/GSSquared-x86_64.AppImage" }
 cp2      := vendor / "cp2/cp2"
-cp2_zip  := if platform == "linux-x86_64" { "linux-x64_sc" } else if os() == "macos" { "osx-x64_sc" } else { "linux-x64_fd" }
+cp2_zip  := if platform == "linux-x86_64" { "linux-x64_sc" } else if os() == "macos" { "osx-x64_sc" } else { "" }
 smf2wav  := vendor / "munt/bin/mt32emu-smf2wav"
 sf2      := vendor / "soundfonts/GeneralUser-GS.sf2"
 
@@ -27,7 +26,7 @@ gs2_sha       := "a4ca6e0a5de1bbc4c93150dd7fd11a7c9a2e68a949101e3b9925136e444977
 gs2_dmg       := "gssquared-1.0.1953-Darwin.dmg"
 gs2_dmg_sha   := "96d476f15291bd92f6b676b4089e642327320f2eaaab975ef30777c43b9fc15b"
 cp2_ver       := "1.2.0"    # fadden/CiderPress2 (no published checksums: pinned here)
-cp2_sha       := if cp2_zip == "linux-x64_sc" { "8c8748a0b484b4a778354146ffe4b6b44527f066b440a2e7bccebf4050948981" } else if cp2_zip == "osx-x64_sc" { "a1b9d98adb7ca020d103a271eea67025e2eb03f7aa132907d5b8d4471ddc93c6" } else { "215629827edaf66faff640bb84c3f680e595fd50b03f7d7f23e8a2401fddb6ec" }
+cp2_sha       := if cp2_zip == "linux-x64_sc" { "8c8748a0b484b4a778354146ffe4b6b44527f066b440a2e7bccebf4050948981" } else { "a1b9d98adb7ca020d103a271eea67025e2eb03f7aa132907d5b8d4471ddc93c6" }
 munt_tag      := "munt_2_8_3"
 munt_sha      := "a9baa120bbcdd9e5af7ed0878a32c59b378b730612459851b9acafcd76519b72"
 sf2_rev       := "684543d5e5efaef08d02be50dcda8d552478fa60"   # mrbumpy409/GeneralUser-GS
@@ -100,7 +99,6 @@ doctor:
     #!/usr/bin/env bash
     missing=()
     need="git uv python3 curl unzip tar cmake c++ pkg-config php"
-    [ "{{cp2_zip}}" != linux-x64_fd ] || need="$need dotnet"       # CiderPress II's .NET build
     for c in $need; do command -v "$c" >/dev/null || missing+=("$c"); done
     pkg-config --exists glib-2.0 2>/dev/null || missing+=("glib2 (development files, for Munt)")
     if [ "{{platform}}" = macos-aarch64 ] && ! arch -x86_64 /usr/bin/true 2>/dev/null; then
@@ -110,7 +108,6 @@ doctor:
       printf 'missing: %s\n' "${missing[@]}"
       case "{{os()}}" in
         macos)   echo "macOS (Homebrew): brew install uv cmake pkg-config glib php ffmpeg fluid-synth";;
-        freebsd) echo "FreeBSD: pkg install git uv curl cmake pkgconf glib php84 dotnet ffmpeg fluidsynth gcc openblas (gcc and openblas: uv builds scipy from source)";;
         *) if command -v dnf >/dev/null; then echo "Fedora: sudo dnf install git uv curl unzip cmake gcc-c++ pkgconf glib2-devel php-cli ffmpeg fluidsynth"
            elif command -v apt-get >/dev/null; then echo "Debian/Ubuntu: sudo apt install git curl unzip cmake g++ pkg-config libglib2.0-dev php-cli ffmpeg fluidsynth (uv: https://docs.astral.sh/uv/)"
            fi;;
@@ -170,14 +167,11 @@ fetch-cp2:
     #!/usr/bin/env bash
     set -euo pipefail
     [ -x "{{cp2}}" ] && exit 0
+    [ -n "{{cp2_zip}}" ] || { echo "CiderPress II: no build for {{platform}} (the disk recipes won't run)"; exit 0; }
     zip=cp2_{{cp2_ver}}_{{cp2_zip}}.zip
     mkdir -p "{{vendor}}/cp2"
     {{fresh}} get {{gh}}/fadden/CiderPress2/releases/download/v{{cp2_ver}}/$zip "{{vendor}}/$zip" {{cp2_sha}}
     unzip -q -o "{{vendor}}/$zip" -d "{{vendor}}/cp2" && rm "{{vendor}}/$zip"
-    # the .NET build: cp2.dll run by the host's dotnet (8 or newer)
-    if [ "{{cp2_zip}}" = linux-x64_fd ]; then
-      printf '#!/bin/sh\nDOTNET_ROLL_FORWARD=Major exec dotnet "$(dirname "$0")/cp2.dll" "$@"\n' > "{{cp2}}"
-    fi
     chmod 755 "{{cp2}}"
 
 # GeneralUser GS soundfont (General MIDI listening tests)

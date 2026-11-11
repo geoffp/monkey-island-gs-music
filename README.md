@@ -59,7 +59,7 @@ build/             everything generated, not in git (`just clean`, `just clean-a
 
 
 ## Setup
-Host tools: [just](https://github.com/casey/just), [uv](https://github.com/astral-sh/uv), git, curl, unzip, cmake, a C++ compiler, glib2 headers, FluidSynth, ffmpeg (with libopenmpt, for MOD previews), and PHP CLI (for Ninjaforce's MOD → NTP converter). `just doctor` checks them and prints the install command for Fedora, Debian/Ubuntu, macOS (Homebrew) or FreeBSD. On Fedora:
+Host tools: [just](https://github.com/casey/just), [uv](https://github.com/astral-sh/uv), git, curl, unzip, cmake, a C++ compiler, glib2 headers, FluidSynth, ffmpeg (with libopenmpt, for MOD previews), and PHP CLI (for Ninjaforce's MOD → NTP converter). `just doctor` checks them and prints the install command for Fedora, Debian/Ubuntu or macOS (Homebrew). On Fedora:
 ```sh
 sudo dnf install just uv git curl unzip cmake gcc-c++ pkgconf glib2-devel fluidsynth ffmpeg php-cli
 ```
@@ -83,10 +83,10 @@ just emu-synthlab  # experimental aside: System 6 + synthLAB + the MIDI Synth se
 ### Platforms
 - **Linux** (x86_64) is the base: everything works.
 - **macOS** is supported. CiderPress II's macOS build is x86_64, so Apple silicon needs Rosetta 2 (`just doctor` checks).
-- **FreeBSD** is a stretch goal. The build should work there, but GSSquared has no FreeBSD build, so `just emu` won't run. uv builds scipy from source, which needs gfortran (`pkg install gcc openblas`).
+- **BSDs** aren't supported: PyPI has no numpy or scipy wheels for them, and GSSquared and CiderPress II have no BSD builds.
 - **Windows**: maybe someday.
 
-CI (`.github/workflows/build.yml`) runs `setup`, the tests and `just smoke` on Ubuntu, macOS and FreeBSD, on every push and weekly. `just selftest` builds the whole disk from a clean clone with your game data.
+CI (`.github/workflows/build.yml`) runs `setup`, the tests and `just smoke` on Ubuntu and macOS, on every push and weekly. `just selftest` builds the whole disk from a clean clone with your game data.
 
 **Reproducibility:** a build is byte-for-byte reproducible on the same CPU architecture. Across architectures, floating-point rounding can differ in the last bit: numpy's arm64 builds fuse multiply-adds. So songs built on Apple silicon may differ from x86_64 builds in a few sample bytes. That's inaudible, and accepted rather than fixed.
 
