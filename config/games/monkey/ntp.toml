@@ -87,10 +87,14 @@ drum_max_rate = 26000   # bandwidth, trading length for it (hats, shakers need ~
 drum_floor_lsb = 1.5    # drums end at the 8-bit floor (drum_end: junk near the floor after
                         # the decay is cut too); 0 = the old -46 dB length
 
-# Per-mode overrides of [defaults]. The shared set (every sound for every song) needs 254 of
-# 256 pages with 512 B loops; to keep the 16-page sound-effect reserve, the four sounds whose
-# attacks shorten at the least measured cost (log-spectral distance vs Munt, first 0.6 s:
-# Elec Organ -0.28 dB, Sax -0.10, Acou Bass +0.04, Vibes +0.06) get 1016 B attacks (-16 pages).
+# Per-mode overrides of [defaults].
+# Shared set (every sound for every song): shorten these sounds' attacks to 1016 B so the set
+# fits below the 16-page sound-effect reserve. A decision, checked by the build (ntpmod
+# check_fit): it fails, naming the pages missing, when the cuts aren't enough, and logs a cut
+# the set no longer needs to fit (2026-11-11: none of the four; the 16 pages they free go to
+# zones, loops and drums, so undoing them is a sound change: a trial). Chosen 2026-11 as the attacks that shorten at the least measured
+# cost (log-spectral distance vs Munt, first 0.6 s: Elec Organ -0.28 dB, Sax -0.10, Acou Bass
+# +0.04, Vibes +0.06), when the set needed 254 of 256 pages at its smallest.
 [modes.shared]
 ntp_attack_bytes = { "Elec Organ" = 1016, "Sax" = 1016, "Acou Bass" = 1016, "Vibes" = 1016 }
 

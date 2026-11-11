@@ -13,6 +13,7 @@ dependencies = [
 ]
 
 [project.scripts]
+disk-readme = "migs.diskreadme:main"
 extract-music = "migs.extract_music:main"
 mid2seq = "migs.mid2seq:main"
 midisynth-audition = "migs.midisynth_audition:main"

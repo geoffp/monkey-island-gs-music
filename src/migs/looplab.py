@@ -31,7 +31,7 @@ import numpy as np
 from scipy.io import wavfile
 from scipy.signal import resample, resample_poly
 
-from . import audio, games, ntpmod, ntpsamples as smp
+from . import audio, games, ntpmod, sounds, ntpsamples as smp
 from .audio import interp_at
 from .docram import DOC_RATE
 from .loopbuild import (Settle, Sound, analyse, attack_error_db, cycle_at_rate, join_aligned,
@@ -507,9 +507,10 @@ def main(argv: list[str] | None = None) -> int:
     cfg = {**conf["defaults"], **conf.get("modes", {}).get(args.samples, {})}
     spec = ntpmod.ntp_spec(tomllib.loads(args.spec.read_text()), conf, args.samples)
     spec = ntpmod.with_attack_bytes(spec, cfg)
+    songs = [read_notes(p)[:2] for p in args.inputs]
+    spec = sounds.complete(spec, songs, log=print)
     tables = smp.period_tables(args.make_tables)
     munt = Munt(args.smf2wav, args.roms, args.cache)
-    songs = [read_notes(p)[:2] for p in args.inputs]
     # every melodic sound looped (the build's one-shot decision is reported separately)
     samples, _, _ = ntpmod.sample_set(spec, {**cfg, "one_shots": False}, songs, 255 - cfg.get("reserve_pages", 16),
                                       tables, munt)

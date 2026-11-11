@@ -1,6 +1,13 @@
-# The MT-32 sounds we sample through Munt, and which MT-32 programs / rhythm keys each covers.
-# Read by the NinjaTrackerPlus build (ntpmod / ntpsamples, with ntp.toml's NTP-only
-# settings), the loop lab, and the MIDI Synth MI1 bank (src/migs/mt32bank.py, `just mt32bank`).
+# How to sample the MT-32 sounds the songs play, through Munt. Read by the NinjaTrackerPlus
+# build (ntpmod / ntpsamples, with ntp.toml's NTP-only settings), the loop lab, and the MIDI
+# Synth MI1 bank (src/migs/mt32bank.py, `just mt32bank`).
+#
+# The songs decide which sounds there are; each entry here is a decision about one: which MT-32
+# programs / rhythm keys share its sample (`covers`), its name, sampled key and sizes. A program
+# or rhythm key the songs play that no entry covers gets a default sound (src/migs/sounds.py:
+# the program alone, named by its preset, at the median key played; a drum of 2 KB), and the
+# build says so. A new game can start with no entries. Every sound Monkey Island plays is
+# listed, so it uses no defaults.
 #
 # MI1 bank settings: one shared bank (16 slots, 64 KB DOC RAM) loaded once for every song.
 # Melodic slot = attack sample (one-shot, `attack_bytes`) + one sustain cycle looped (256 B),

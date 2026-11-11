@@ -23,12 +23,13 @@ from pathlib import Path
 import numpy as np
 from scipy.signal import resample
 
-from . import games
+from . import games, sounds
 from . import midisynth_tuning as dt
 from .audio import one_cycle, onset, pitch_offset, refine_period, rising_zero, rms_envelope
 from .docram import SILENCE, Wave, allocate, ram_image, to_doc
 from .midisynth import INSTRUMENT_SIZE, INSTRUMENTS, WAVELISTS, Bank, Instrument, WaveBank, envelope, wavelist
 from .munt import SR, render
+from .ntpsong import read_notes
 
 LOOP_BYTES = 256
 FIRST_PAGE = 2                  # pages $00-$01: synthLAB metronome woodblock
@@ -228,6 +229,9 @@ def build(spec: dict, smf2wav: Path, roms: Path, cache: Path, log=print):
     """(Bank, WaveBank, MT-32 program -> slot, rhythm key -> [slot, key])."""
     render_note = lambda **kw: render(smf2wav, roms, cache, **kw)
     hold = spec.get("hold_seconds", 2.0)
+    if over := [f"{m['name']} (slot {m['slot']})" for m in spec["melodic"] if not 0 <= m["slot"] < INSTRUMENTS]:
+        raise ValueError(f"no MIDI Synth bank slot for {', '.join(over)}: the bank has {INSTRUMENTS}; merge "
+                         "them into other sounds (`covers` in mt32sounds.toml)")
     melodic: dict[int, Melodic] = {}
     for m in spec["melodic"]:
         s = melodic[m["slot"]] = sample_melodic(m, render_note, hold)
@@ -285,6 +289,8 @@ def map_toml(spec_path: Path, programs: dict[int, int], drums: dict[int, list[in
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     games.add_argument(ap)
+    ap.add_argument("inputs", nargs="*", type=Path,
+                    help="the game's MT-32 MIDI files: sounds they play that the spec doesn't cover get defaults")
     ap.add_argument("--spec", type=Path, help="MT-32 sounds (default the game's mt32sounds.toml)")
     ap.add_argument("--smf2wav", type=Path, default=Path("vendor/munt/bin/mt32emu-smf2wav"))
     ap.add_argument("--roms", type=Path, default=Path("original files/mt-32 roms"))
@@ -295,6 +301,7 @@ def main(argv: list[str] | None = None) -> int:
     args.spec = args.spec or game.config("mt32sounds.toml")
     args.out_dir = args.out_dir or game.build_dir / "seq/mt32"
     spec = tomllib.loads(args.spec.read_text())
+    spec = sounds.complete(spec, [read_notes(p)[:2] for p in args.inputs], log=print)
     print(f"sampling MT-32 per {args.spec}")
     bank, wb, programs, drums = build(spec, args.smf2wav, args.roms, args.cache)
     args.out_dir.mkdir(parents=True, exist_ok=True)

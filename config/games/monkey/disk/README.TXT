@@ -1,3 +1,9 @@
+# Template for the NTP disk's README.TXT (`just disk` fills it in: src/migs/diskreadme.py).
+# Lines starting with "#" are dropped. Fields come from the build: {songs} (songs per
+# variant folder), {first} and {last} (their file names), {gaps} (SenseiPlay's placeholder
+# files). [[...]] is left out when a field in it is empty. A paragraph with a field is
+# re-wrapped to 70 columns once filled in. The rest is written by hand: keep the variant
+# folders in step with the justfile's ntp_modes. ProDOS text: plain 7-bit ASCII.
 THE SECRET OF MONKEY ISLAND - MT-32 SOUNDTRACK FOR THE APPLE IIGS
 =================================================================
 
@@ -5,7 +11,7 @@ The Roland MT-32 soundtrack of The Secret of Monkey Island, sampled
 from the MT-32 and arranged as NinjaTrackerPlus songs for the IIGS's
 Ensoniq DOC. The disk boots into SenseiPlay; the songs are in /SONGS.
 
-/SONGS holds the same 16 songs built two ways:
+/SONGS holds the same {songs} songs built two ways:
 
 INST.PER.SONG  Each song carries its own instrument samples, chosen
                for the notes that song plays, with all of the sound
@@ -18,6 +24,6 @@ INST.SHARED    Every song uses one common set of instrument samples,
                the instruments of all the songs, so samples are
                shorter and coarser.
 
-The file names (MI150 to MI168) are the game's sound numbers.  GAP.13
+The file names ({first} to {last}) are the game's sound numbers.[[  {gaps}
 is a placeholder that SenseiPlay appears to need in long folders;
-ignore it.
+ignore it.]]

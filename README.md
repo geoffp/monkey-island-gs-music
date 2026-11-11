@@ -41,9 +41,9 @@ config/            hand-maintained settings
   games/<id>/        one folder per game (games/monkey/ for Monkey Island 1):
     game.toml          what and where the game is (data folder, md5s) and its output names
     ntp.toml           MOD/NTP conversion (timing, sample sizes, build variants, per-song overrides)
-    mt32sounds.toml    the MT-32 sounds to sample (NTP and the MIDI Synth bank)
+    mt32sounds.toml    how to sample the MT-32 sounds the songs play (NTP and the MIDI Synth bank)
     midisynth.toml     MIDI Synth export profiles: channel -> bank slot / drum keys
-    disk/README.TXT    the NTP disk's README
+    disk/README.TXT    template for the NTP disk's README (song count and names filled in by `just disk`)
     song_names.toml    names for sound ids (optional; not present yet)
   emu/default-bram.hex  battery-RAM seed for the emulator configs
 original files/    YOUR copies of the game and MT-32 ROMs; not distributable, not in git (see its README.md)

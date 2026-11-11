@@ -270,7 +270,7 @@ disk: ntp
     songs=(); for m in {{ntp_modes}}; do songs+=({{out}}/ntp/$m/*.ntp); done
     v={{prefix}}.NTP
     {{fresh}} run {{out}}/disks/$v.inputs --out {{out}}/disks/$v.PO --out {{out}}/dist/$v.zip --out {{out}}/dist/$v.SHK \
-      "${songs[@]}" "{{vendor}}/ntp/senseiplay800.2mg" {{gconf}}/disk/README.TXT "text:{{ntp_modes}}" -- just _disk
+      "${songs[@]}" "{{vendor}}/ntp/senseiplay800.2mg" {{gconf}}/disk/README.TXT py:src/migs/diskreadme.py "text:{{ntp_modes}}" -- just _disk
 
 _disk:
     #!/usr/bin/env bash
@@ -280,11 +280,16 @@ _disk:
     "$cp2" extract --preserve=naps --overwrite --exdir="$st" "{{vendor}}/ntp/senseiplay800.2mg" \
       PRODOS sensei.system ntpplayer dgr.radio.dgr >/dev/null
     {{ntp_folders}} "$st/songs"
-    # what the variant folders are: ProDOS TXT, CR line ends
-    ! LC_ALL=C grep -n '[^ -~]' {{gconf}}/disk/README.TXT || { echo "{{gconf}}/disk/README.TXT: only printable 7-bit ASCII (no tabs, no accents or curly quotes)"; exit 1; }
-    tr '\n' '\r' < {{gconf}}/disk/README.TXT > "$st/README.TXT#040000"
+    # what the variant folders are: the game's template, filled in from the staged songs
+    # (count, file names, placeholders); ProDOS TXT, CR line ends
+    r=$(uv run disk-readme --game {{game}} "$st/songs" "$st/README.lf"); echo "$r"
+    ! LC_ALL=C grep -n '[^ -~]' "$st/README.lf" || { echo "{{gconf}}/disk/README.TXT: only printable 7-bit ASCII (no tabs, no accents or curly quotes)"; exit 1; }
+    tr '\n' '\r' < "$st/README.lf" > "$st/README.TXT#040000"; rm "$st/README.lf"
     # songs first on the disk, so it's the first entry in SenseiPlay
     {{fit_image}} "$img" {{prefix}}.NTP "$st" '{{p8_tree}} "$cp2" "$img" songs; "$cp2" add "$img" README.TXT* PRODOS* sensei.system* ntpplayer* dgr.radio.dgr*'
+    # the README names the placeholders p8_tree made (diskreadme.gap_names follows its rule)
+    want=$(echo "$r" | sed -n 's/^placeholders: //p'); got=$("$cp2" list "$img" | sed -n 's/.*:\(GAP\.[0-9]*\)$/\1/p' | sort -u -t. -k2n | tr '\n' ' ' | sed 's/ $//')
+    [ "${got:-none}" = "$want" ] || { echo "README names placeholders '$want', the image has '${got:-none}'"; exit 1; }
     rm -rf "$st"
     {{dist_pack}} "$img"
     "$cp2" catalog "$img" | head -12
@@ -337,8 +342,8 @@ seq: stock-banks mt32bank
     rm -f {{out}}/seq/mt32/{{prefix}}[0-9]*.SEQ && uv run mid2seq --game {{game}} {{out}}/extracted/midi/mt32/*.mid -p mt32 -o {{out}}/seq/mt32 -b {{out}}/seq/mt32
 
 # Sample the MT-32 (Munt) into the game's bank (MI1) per its mt32sounds.toml -> build/<game>/seq/mt32/MI1.{BNK,WAV,map.toml}
-mt32bank: fetch-munt
-    uv run mt32bank --game {{game}} -o {{out}}/seq/mt32
+mt32bank: extract fetch-munt
+    uv run mt32bank --game {{game}} {{out}}/extracted/midi/mt32/*.mid -o {{out}}/seq/mt32
 
 # Estimated MIDI Synth voice pressure per sequence (voices free only when envelopes reach 0)
 midisynth-voices: seq

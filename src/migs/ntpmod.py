@@ -28,7 +28,7 @@ from pathlib import Path
 
 import numpy as np
 
-from . import audio, docram, games, pitchplan
+from . import audio, docram, games, pitchplan, sounds
 from .docsim import NoteError, key_hz
 from .modfile import mod_file
 from .munt import Munt
@@ -344,6 +344,7 @@ def sample_set(spec: dict, cfg: dict, songs: list[tuple[list[Note], dict]], last
     if plans:
         song_spec = planned({name: 1 for name in plans})
     samples, programs, drums = build(song_spec, {**cfg, "one_shots": False})
+    check_fit(samples, cfg, last_page, log)
     if cfg.get("sample_budget", "zones") == "value":
         count, drum_bytes = _budget(plans, samples, song_spec, unplanned, songs, usage_notes, cfg, last_page,
                                     tables, munt, log)
@@ -375,6 +376,44 @@ def sample_set(spec: dict, cfg: dict, songs: list[tuple[list[Note], dict]], last
                                               for m in song_spec["melodic"]]}
         samples, programs, drums = build(song_spec)
     return samples, programs, drums
+
+
+def check_fit(samples: list[ModSample], cfg: dict, last_page: int, log=lambda *a: None) -> int:
+    """Pages a sample set takes at its smallest (before extra zones and loop growth), checked
+    against `last_page`. `ntp_attack_bytes` (by sound name, e.g. [modes.shared]) is a decision to
+    shorten those attacks so the set fits: the build fails, naming the pages missing and the sounds
+    still at full length, when the cuts are not enough, and says so when a cut is no longer needed
+    (the set fits with that attack at full length)."""
+    def blocks(full: str | None = None) -> list[int]:
+        out = []
+        for s in samples:
+            b = s.ntp_blocks()
+            if s.name == full and s.loop_start:
+                b = [ntp_block(cfg["attack_bytes"]), *b[1:]]
+            out += b
+        return out
+
+    def fits(b: list[int]) -> bool:
+        try:
+            docram.allocate([docram.Wave(f"b{i}", bytes(n)) for i, n in enumerate(b)], 0, last_page)
+            return True
+        except ValueError:
+            return False
+
+    need = sum(blocks()) // docram.PAGE
+    cuts = [n for n in cfg.get("ntp_attack_bytes", {}) if any(s.name == n for s in samples)]
+    if not fits(blocks()):
+        full = [s.name for s in samples if s.kind == "melodic" and s.loop_start >= cfg["attack_bytes"]]
+        raise ValueError(f"the sounds need {need} DOC pages at their smallest, {last_page + 1} are free "
+                         f"(reserve_pages {255 - last_page}): shorten more attacks (`ntp_attack_bytes`; at full "
+                         f"length: {', '.join(full) or 'none'}) or merge sounds (`covers`)")
+    for n in cuts:
+        if fits(blocks(full=n)):
+            log(f"  attack cut {n} isn't needed to fit: the set fits with its {cfg['attack_bytes']} B attack "
+                "(the pages it frees go to zones, loops and drums)")
+    if cuts:
+        log(f"  smallest: {need} of {last_page + 1} DOC pages with the attack cuts ({', '.join(cuts)})")
+    return need
 
 
 def resolve_mode(conf: dict, variant: str) -> tuple[str, dict]:
@@ -503,7 +542,10 @@ def main(argv: list[str] | None = None) -> int:
     args.spec = args.spec or game.config("mt32sounds.toml")
     conf = tomllib.loads(args.config.read_text())
     mode, cfg = resolve_mode(conf, args.samples or conf["defaults"].get("samples", "per-song"))
+    songs = [_Song(p, *read_notes(p)[:2]) for p in args.inputs]
+    # the songs decide which sounds; mt32sounds.toml (and ntp.toml's [[melodic]]) how
     spec = with_attack_bytes(ntp_spec(tomllib.loads(args.spec.read_text()), conf, mode), cfg)
+    spec = sounds.complete(spec, [(s.notes, s.programs) for s in songs], log=print)
     tables = period_tables(args.make_tables)
     munt = Munt(args.smf2wav, args.roms, args.cache)
     cc7 = cc7_curve(munt)
@@ -512,7 +554,6 @@ def main(argv: list[str] | None = None) -> int:
     last_page = 255 - cfg.get("reserve_pages", 16)
     reserve = 255 - last_page
     args.out_dir.mkdir(parents=True, exist_ok=True)
-    songs = [_Song(p, *read_notes(p)[:2]) for p in args.inputs]
     shared, bank = None, {}
     if mode == "shared":
         shared = sample_set(spec, cfg, [(s.notes, s.programs) for s in songs], last_page, tables, munt, log=print)

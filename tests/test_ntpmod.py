@@ -104,3 +104,27 @@ def test_a_missing_midi_file_stops_with_a_hint_to_extract(tmp_path, monkeypatch)
     monkeypatch.setenv("MIGS_GAME", "nosuch")
     with pytest.raises(SystemExit, match="just extract"):
         nm.main([str(tmp_path / "*.mid"), "-o", str(tmp_path / "out")])
+
+
+def _att(name, attack):
+    import numpy as np
+    from migs import ntpsamples as smp
+    return smp.ModSample(name, np.zeros(attack + 512), loop_start=attack, loop_len=512)
+
+
+def test_attack_cuts_are_a_decision_the_build_checks():
+    """`ntp_attack_bytes` shortens attacks so a set fits (ntp.toml [modes.shared]): the build
+    fails when the cuts aren't enough and logs a cut that is no longer needed. A 2040 B attack
+    takes a 2 KB block, a 1016 B one 1 KB; each loop here 512 B."""
+    import pytest
+    cfg = {"attack_bytes": 2040, "ntp_attack_bytes": {"C": 1016}}
+    cut = [_att("A", 2040), _att("B", 2040), _att("C", 1016)]          # 8+2, 8+2, 4+2 pages
+    lines = []
+    assert nm.check_fit(cut, cfg, 25, lines.append) == 26             # 26 pages free: fits, cut needed
+    assert lines == ["  smallest: 26 of 26 DOC pages with the attack cuts (C)"]
+    lines.clear()
+    nm.check_fit(cut, cfg, 29, lines.append)                          # 30 free: C fits at full length
+    assert lines[0].startswith("  attack cut C isn't needed to fit: the set fits with its 2040 B attack")
+    with pytest.raises(ValueError, match=r"need 26 DOC pages at their smallest, 24 are free .*at full length: A, B"):
+        nm.check_fit(cut, cfg, 23)
+    assert nm.check_fit(cut[:2], {"attack_bytes": 2040}, 25, lines.append) == 20   # no cuts: nothing to say
