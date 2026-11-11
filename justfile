@@ -197,7 +197,7 @@ _build-munt:
     cmake -S "$d/src" -B "$d/build" -DCMAKE_BUILD_TYPE=Release \
       -Dmunt_WITH_MT32EMU_QT=OFF -Dmunt_WITH_MT32EMU_SMF2WAV=ON \
       -DCMAKE_INSTALL_PREFIX="$PWD/$d"
-    cmake --build "$d/build" -j
+    cmake --build "$d/build" -j {{num_cpus()}}   # a bare -j is GNU make only
     cmake --install "$d/build"
 
 # synthfile 1.5 (Dave Tribby): MIDI Synth file-format reference source

@@ -46,7 +46,7 @@ Pipeline:
 
 ## Conventions
 - **Cross-platform.** We value builds that work on other people's machines. Linux is the base: everything must work there. macOS is a goal: keep it working. The BSDs (FreeBSD first) are a stretch goal: don't break them needlessly, and accept that the emulator recipes may not run there. Windows is a maybe-someday. In practice:
-  - write recipes for POSIX tools, not GNU-only flags (no `nproc`, `stat -c`, `sed -i`, `xargs -d`, `sha256sum`; use `num_cpus()`, `wc -c`, `tools/fresh.py`);
+  - write recipes for POSIX tools, not GNU-only flags (no `nproc`, `stat -c`, `sed -i`, `xargs -d`, `sha256sum`, bare `make -j`; use `num_cpus()`, `wc -c`, `tools/fresh.py`);
   - expect bash 3.2 (macOS);
   - choose downloads by `os()`/`arch()`, and when a tool has no build for a platform, say so and carry on rather than fail;
   - `just selftest` checks a clean-clone build (with your game data); `just smoke` checks the fetched tools run; CI (`.github/workflows/build.yml`) runs setup, tests and smoke on Ubuntu, macOS and FreeBSD (allowed to fail), weekly too, to catch downloads that break.
