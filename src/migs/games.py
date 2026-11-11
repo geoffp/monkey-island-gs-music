@@ -23,6 +23,8 @@ CONFIG = Path("config/games")
 BUILD = Path("build")
 ORIGINAL = Path("original files")
 ENGINES = ("scumm-v4",)
+# build/ folders that aren't games: a game with one of these ids would mix its output into them
+RESERVED_IDS = ("cache", "selftest")
 # ProDOS names: 15 characters, letters/digits/periods, starting with a letter. The longest name
 # built from the prefix is the synthLAB disk's volume, <prefix>.SYNTHLAB.
 _PREFIX = re.compile(r"[A-Z][A-Z0-9]{0,5}")
@@ -104,6 +106,8 @@ def parse(game_id: str, text: str, root: Path = Path(".")) -> GameInfo:
 def load(game_id: str | None = None, root: Path = Path(".")) -> GameInfo:
     """The game's settings from config/games/<id>/game.toml."""
     game_id = game_id or default_id()
+    if game_id in RESERVED_IDS:
+        raise SystemExit(f"{game_id!r} can't be a game id: build/{game_id}/ is shared ({', '.join(RESERVED_IDS)})")
     path = root / CONFIG / game_id / "game.toml"
     if not path.is_file():
         known = sorted(p.parent.name for p in (root / CONFIG).glob("*/game.toml"))

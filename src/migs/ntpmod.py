@@ -403,7 +403,9 @@ def check_fit(samples: list[ModSample], cfg: dict, last_page: int, log=lambda *a
     need = sum(blocks()) // docram.PAGE
     cuts = [n for n in cfg.get("ntp_attack_bytes", {}) if any(s.name == n for s in samples)]
     if not fits(blocks()):
-        full = [s.name for s in samples if s.kind == "melodic" and s.loop_start >= cfg["attack_bytes"]]
+        cut = ntp_block(min(cfg.get("ntp_attack_bytes", {}).values(), default=cfg["attack_bytes"]))
+        full = [s.name for s in samples if s.kind == "melodic" and s.loop_start
+                and s.name not in cfg.get("ntp_attack_bytes", {}) and ntp_block(s.loop_start) > min(cut, 1024)]
         raise ValueError(f"the sounds need {need} DOC pages at their smallest, {last_page + 1} are free "
                          f"(reserve_pages {255 - last_page}): shorten more attacks (`ntp_attack_bytes`; at full "
                          f"length: {', '.join(full) or 'none'}) or merge sounds (`covers`)")
@@ -544,7 +546,7 @@ def main(argv: list[str] | None = None) -> int:
     mode, cfg = resolve_mode(conf, args.samples or conf["defaults"].get("samples", "per-song"))
     songs = [_Song(p, *read_notes(p)[:2]) for p in args.inputs]
     # the songs decide which sounds; mt32sounds.toml (and ntp.toml's [[melodic]]) how
-    spec = with_attack_bytes(ntp_spec(tomllib.loads(args.spec.read_text()), conf, mode), cfg)
+    spec = with_attack_bytes(ntp_spec(sounds.load(args.spec), conf, mode), cfg)
     spec = sounds.complete(spec, [(s.notes, s.programs) for s in songs], log=print)
     tables = period_tables(args.make_tables)
     munt = Munt(args.smf2wav, args.roms, args.cache)

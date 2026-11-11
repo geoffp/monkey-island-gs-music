@@ -104,8 +104,8 @@ class Report:
 
 def load_config(path: Path, song_id: str | None, profile: str,
                 build_dir: Path) -> tuple[BankMap, dict[int, int]]:
-    """`build_dir` is the game's build directory, which a bank's `map_file` is relative to."""
-    """The profile's bank for a song, and the song's channel -> slot overrides (0-based)."""
+    """The profile's bank for a song, and the song's channel -> slot overrides (0-based).
+    `build_dir` is the game's build directory, which a bank's `map_file` is relative to."""
     cfg = tomllib.loads(path.read_text())
     prof = cfg["profiles"][profile]
     song = cfg.get("songs", {}).get(song_id or "", {})

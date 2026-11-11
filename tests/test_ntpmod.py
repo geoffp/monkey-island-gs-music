@@ -128,3 +128,6 @@ def test_attack_cuts_are_a_decision_the_build_checks():
     with pytest.raises(ValueError, match=r"need 26 DOC pages at their smallest, 24 are free .*at full length: A, B"):
         nm.check_fit(cut, cfg, 23)
     assert nm.check_fit(cut[:2], {"attack_bytes": 2040}, 25, lines.append) == 20   # no cuts: nothing to say
+    organ = _att("Organ", 1016)                         # its own short attack (ntp.toml [[melodic]]): not a candidate
+    with pytest.raises(ValueError, match=r"at full length: A\)"):
+        nm.check_fit([_att("A", 2040), organ, cut[2]], cfg, 10)

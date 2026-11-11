@@ -279,9 +279,8 @@ def patch_notes(song: Song) -> str:
 
 def load_songs(game: Game, names: dict[str, str], warn: Callable[[str], None] | None = None, *,
                label: str) -> list[Song]:
-    """`label` is the game's (game.toml), for titles: "MI1 sound 150"."""
     """Every distinct RO sound in the game, by sound id; byte-identical copies are listed as
-    the first one's `duplicates`."""
+    the first one's `duplicates`. `label` is the game's (game.toml), for titles: "MI1 sound 150"."""
     by_hash: dict[str, Song] = {}
     unresolved = []
     for sid, (room, _) in enumerate(game.index.sounds):

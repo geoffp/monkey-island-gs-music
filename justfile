@@ -67,8 +67,9 @@ ntp_folders   := 'ntpf() { local m d f; for m in ' + ntp_modes + '; do d="$1/$(e
 # `cp2 add` sorts the files of one call, so each run between placeholders is its own call.
 p8_tree       := 'p8t() { local cp2=$1 img=$2 d f k g fs; for d in $(find "$3" -type d | sort); do "$cp2" mkdir "$img" "$d" >/dev/null; done; for d in $(find "$3" -type d | sort); do k=$(find "$d" -mindepth 1 -maxdepth 1 -type d | wc -l); fs=(); for f in $(find "$d" -maxdepth 1 -type f | sort); do if [ $k -ge 12 ] && [ $(( (k - 12) % 13 )) -eq 0 ]; then g="$d/GAP.$((k + 1))#040000"; echo "Placeholder: SenseiPlay v2.0 skips the first entry of each later directory block." > "$g"; [ ${#fs[@]} -eq 0 ] || "$cp2" add "$img" "${fs[@]}" >/dev/null; "$cp2" add "$img" "$g" >/dev/null; fs=(); k=$((k + 1)); fi; fs+=("$f"); k=$((k + 1)); done; [ ${#fs[@]} -eq 0 ] || "$cp2" add "$img" "${fs[@]}" >/dev/null; done; }; p8t'
 # What an NTP build reads (`ntpmod` adds the variant name): ntpmod and the migs modules it
-# imports, the game's config, the MT-32 MIDI, the PHP period tables, the Munt binary and the lockfile.
-ntp_inputs    := "py:src/migs/ntpmod.py " + gconf + " " + out + "/extracted/midi/mt32 " + vendor + "/ntp/src " + smf2wav + " pyproject.toml uv.lock"
+# imports, the game's settings it reads (game.toml: names; ntp.toml; mt32sounds.toml), the MT-32 MIDI,
+# the PHP period tables, the Munt binary and the lockfile. (Not the disk README or midisynth.toml.)
+ntp_inputs    := "py:src/migs/ntpmod.py " + gconf + "/game.toml " + gconf + "/ntp.toml opt:" + gconf + "/mt32sounds.toml " + out + "/extracted/midi/mt32 " + vendor + "/ntp/src " + smf2wav + " pyproject.toml uv.lock"
 # Build ProDOS image $1 (volume $2) from staging dir $3 at the smallest power-of-two size that
 # holds it (1, 2, ... 32 MB, the ProDOS limit): `eval $4` (run in $3) fills it; an attempt counts
 # when every staged entry is on the image (bash ignores errexit inside conditions, so the count

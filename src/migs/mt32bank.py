@@ -15,7 +15,6 @@ import argparse
 import hashlib
 import math
 import sys
-import tomllib
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -229,9 +228,14 @@ def build(spec: dict, smf2wav: Path, roms: Path, cache: Path, log=print):
     """(Bank, WaveBank, MT-32 program -> slot, rhythm key -> [slot, key])."""
     render_note = lambda **kw: render(smf2wav, roms, cache, **kw)
     hold = spec.get("hold_seconds", 2.0)
-    if over := [f"{m['name']} (slot {m['slot']})" for m in spec["melodic"] if not 0 <= m["slot"] < INSTRUMENTS]:
+    entries = [*spec["melodic"], *spec["drum"]]
+    if over := [f"{e['name']} (slot {e['slot']})" for e in entries
+                if not isinstance(e["slot"], int) or not 0 <= e["slot"] < INSTRUMENTS]:
         raise ValueError(f"no MIDI Synth bank slot for {', '.join(over)}: the bank has {INSTRUMENTS}; merge "
                          "them into other sounds (`covers` in mt32sounds.toml)")
+    kit_slots = {d["slot"] for d in spec["drum"]}
+    if clash := sorted({m["slot"] for m in spec["melodic"]} & kit_slots):
+        raise ValueError(f"bank slot(s) {clash} hold both a melodic sound and a drum kit")
     melodic: dict[int, Melodic] = {}
     for m in spec["melodic"]:
         s = melodic[m["slot"]] = sample_melodic(m, render_note, hold)
@@ -300,7 +304,7 @@ def main(argv: list[str] | None = None) -> int:
     game = games.load(args.game)
     args.spec = args.spec or game.config("mt32sounds.toml")
     args.out_dir = args.out_dir or game.build_dir / "seq/mt32"
-    spec = tomllib.loads(args.spec.read_text())
+    spec = sounds.load(args.spec, bank=game.label)
     spec = sounds.complete(spec, [read_notes(p)[:2] for p in args.inputs], log=print)
     print(f"sampling MT-32 per {args.spec}")
     bank, wb, programs, drums = build(spec, args.smf2wav, args.roms, args.cache)

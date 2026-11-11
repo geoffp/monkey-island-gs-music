@@ -38,6 +38,9 @@ def main(argv: list) -> int:
         print(__doc__, file=sys.stderr)
         return 2
     game, key = argv
+    if game in ("cache", "selftest"):            # migs.games.RESERVED_IDS: shared build/ folders
+        print(f"{game!r} can't be a game id: build/{game}/ is shared", file=sys.stderr)
+        return 1
     path = Path("config/games") / game / "game.toml"
     if not path.is_file():
         known = sorted(p.parent.name for p in Path("config/games").glob("*/game.toml"))

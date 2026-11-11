@@ -37,7 +37,7 @@ def test_an_uncovered_program_gets_a_default_sound():
 def test_defaults_take_free_bank_slots_then_slots_past_the_bank():
     """MIDI Synth melodic slots are 1-15 except 9 (a drum kit); NTP only needs them unique."""
     full = {**SPEC, "melodic": [{"slot": s, "name": f"S{s}", "program": s, "covers": [s], "key": 60}
-                                for s in sounds.BANK_SLOTS if s != 9]}
+                                for s in range(1, 16) if s != 9]}
     song = ([note(1, 60), note(2, 60)], {1: 100, 2: 101})
     out = sounds.complete(full, [song])
     assert [m["slot"] for m in out["melodic"][-2:]] == [200, 201]
@@ -69,4 +69,42 @@ def test_the_midisynth_bank_refuses_sounds_past_its_slots(tmp_path):
     from migs import mt32bank
     spec = {**SPEC, "melodic": [{**SPEC["melodic"][0], "slot": 200}]}
     with pytest.raises(ValueError, match="no MIDI Synth bank slot for Bass"):
+        mt32bank.build(spec, tmp_path / "none", tmp_path, tmp_path)
+
+
+def test_an_empty_sound_list_builds_every_sound_from_defaults(tmp_path):
+    """A new game's mt32sounds.toml can hold no entries (or be absent): every program and MT-32
+    rhythm key the songs play still gets a sound, and the NTP spec layering accepts it."""
+    from migs import ntpmod
+    (tmp_path / "s.toml").write_text("hold_seconds = 2.0\n")
+    for path in (tmp_path / "s.toml", tmp_path / "none.toml"):
+        spec = sounds.load(path, bank="TG1")
+        assert spec["bank"] == "TG1" and spec["melodic"] == [] and spec["drum"] == []
+        spec = ntpmod.ntp_spec(spec, {}, "per-song")
+        out = sounds.complete(spec, [([note(1, 60), note(9, 36), note(9, 38)], {1: 9})])
+        assert [m["program"] for m in out["melodic"]] == [9] and out["melodic"][0]["slot"] == 1
+        assert [(d["key"], d["slot"]) for d in out["drum"]] == [(36, 9), (38, 9)]
+
+
+def test_defaults_never_share_a_slot_with_a_kit_or_a_name_with_an_entry():
+    spec = {"melodic": [{"slot": 1, "name": "Marimba", "program": 103, "covers": [103], "key": 60}],
+            "drum": [{"slot": 2, "name": "Kick", "key": 36, "covers": [36], "bytes": 2048}]}
+    out = sounds.complete(spec, [([note(1, 60), note(2, 60), note(9, 38)], {1: 104, 2: 50})])
+    melodic = out["melodic"][1:]
+    assert [m["slot"] for m in melodic] == [3, 4]                     # not 1 (melodic), 2 (a kit), 9 or 0
+    assert melodic[1]["name"] == "Marimba (program 104)" and mt32.MT32_PRESET_NAMES[104] == "Marimba"
+    assert out["drum"][-1]["slot"] == 2                                # into the existing kit
+
+
+def test_a_full_kit_sends_default_drums_past_the_bank():
+    spec = {"melodic": [], "drum": [{"slot": 9, "name": f"D{k}", "key": k, "covers": [k], "bytes": 512}
+                                    for k in range(35, 43)]}
+    out = sounds.complete(spec, [([note(9, 45)], {})])
+    assert out["drum"][-1]["slot"] >= sounds.EXTRA_SLOT
+
+
+def test_the_midisynth_bank_refuses_a_slot_used_by_a_sound_and_a_kit(tmp_path):
+    from migs import mt32bank
+    spec = {**SPEC, "drum": [{**SPEC["drum"][0], "slot": 1}]}
+    with pytest.raises(ValueError, match=r"slot\(s\) \[1\] hold both"):
         mt32bank.build(spec, tmp_path / "none", tmp_path, tmp_path)

@@ -505,7 +505,7 @@ def main(argv: list[str] | None = None) -> int:
 
     conf = tomllib.loads(args.config.read_text())
     cfg = {**conf["defaults"], **conf.get("modes", {}).get(args.samples, {})}
-    spec = ntpmod.ntp_spec(tomllib.loads(args.spec.read_text()), conf, args.samples)
+    spec = ntpmod.ntp_spec(sounds.load(args.spec), conf, args.samples)
     spec = ntpmod.with_attack_bytes(spec, cfg)
     songs = [read_notes(p)[:2] for p in args.inputs]
     spec = sounds.complete(spec, songs, log=print)

@@ -140,3 +140,11 @@ def test_the_justfile_reader_fails_clearly():
     assert r.returncode == 1 and "no game 'nosuch'" in r.stderr
     r = _tool("monkey", "md5")
     assert r.returncode == 1 and "no top-level string" in r.stderr
+
+
+@pytest.mark.parametrize("gid", games.RESERVED_IDS)
+def test_shared_build_folders_cant_be_game_ids(gid):
+    with pytest.raises(SystemExit, match="can't be a game id"):
+        games.load(gid, ROOT)
+    r = _tool(gid, "data")
+    assert r.returncode == 1 and "can't be a game id" in r.stderr

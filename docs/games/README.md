@@ -7,7 +7,7 @@ One page per game, named by its game id: what is true of that game's data only (
 | `monkey` | The Secret of Monkey Island (DOS VGA floppy) | scumm-v4 | `monkey.md` |
 
 ## How a game is set up (since 2026-11-11)
-- **Id:** ScummVM's game id (`ref/scummvm/engines/scumm/detection_tables.h`: `monkey`, `monkey2`, `loom`, `indy3`, ...).
+- **Id:** ScummVM's game id (`ref/scummvm/engines/scumm/detection_tables.h`: `monkey`, `monkey2`, `loom`, `indy3`, ...). Not `cache` or `selftest`: those `build/` folders are shared.
 - **Settings:** `config/games/<id>/`, read by `src/migs/games.py`:
   - `game.toml`: `name`, `engine`, `data` (the folder under `original files/`), `prefix`, `label`, and `[md5]` for the release the settings were tuned on;
   - the build configs, as they were for Monkey Island 1 before there was a second game: `ntp.toml`, `mt32sounds.toml`, `midisynth.toml`, `disk/README.TXT` (a template), optionally `song_names.toml`.

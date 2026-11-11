@@ -14,15 +14,25 @@ Rhythm keys the MT-32 has no sound for are skipped (they are silent on the MT-32
 
 from __future__ import annotations
 
+import tomllib
 from collections.abc import Callable, Iterable
+from pathlib import Path
 
 from . import mt32
+from .ntpsong import RHYTHM as RHYTHM_CHANNEL     # 0-based (MIDI channel 10)
 
 DRUM_BYTES = 2048
-RHYTHM_CHANNEL = 9                # 0-based (MIDI channel 10)
-BANK_SLOTS = range(1, 16)         # MIDI Synth bank slots for melodic sounds; 0 and 9 are drum kits
-DEFAULT_DRUM_SLOT = 9
+BANK_SLOTS = range(16)            # MIDI Synth bank slots (instruments)
+KIT_SLOTS = (9, 0)                # where default drums go: a drum kit holds up to KIT_ZONES sounds
+KIT_ZONES = 8                     # midisynth.WAVELISTS
 EXTRA_SLOT = 200                  # slots for defaults past the 16-slot MIDI Synth bank (NTP only)
+
+
+def load(path: Path, bank: str = "") -> dict:
+    """A game's mt32sounds.toml, which may hold no entries at all; `bank` names the MIDI Synth
+    bank when the file doesn't."""
+    spec = tomllib.loads(path.read_text()) if path.is_file() else {}
+    return {"bank": bank, **spec, "melodic": spec.get("melodic", []), "drum": spec.get("drum", [])}
 
 
 def played(songs: Iterable[tuple[list, dict]]) -> tuple[dict[int, list[int]], dict[int, int]]:
@@ -55,14 +65,31 @@ def complete(spec: dict, songs: Iterable[tuple[list, dict]],
     programs, rhythm = played(songs)
     covered = {p for m in spec["melodic"] for p in m["covers"]}
     covered_keys = {k for d in spec["drum"] for k in d["covers"]}
-    used_slots = {m["slot"] for m in spec["melodic"]}
-    free = [s for s in BANK_SLOTS if s != DEFAULT_DRUM_SLOT and s not in used_slots]
-    extra = iter(range(max([EXTRA_SLOT - 1, *used_slots]) + 1, 10 ** 6))
+    melodic_slots = {m["slot"] for m in spec["melodic"]}
+    kits: dict = {}
+    for d in spec["drum"]:
+        kits[d["slot"]] = kits.get(d["slot"], 0) + 1
+    names = {e["name"] for e in [*spec["melodic"], *spec["drum"]]}
+    missing_keys = [k for k in sorted(set(rhythm) - covered_keys) if k in mt32.MT32_RHYTHM_KEYS]
+    for s in KIT_SLOTS:                   # a game with no drum entries: its default drums need a kit
+        if missing_keys and not kits and s not in melodic_slots:
+            kits[s] = 0
+    # melodic defaults take bank slots no sound or kit uses, then slots past the bank
+    free = [s for s in range(1, len(BANK_SLOTS)) if s not in melodic_slots and s not in kits and s not in KIT_SLOTS]
+    numbered = [s for s in [*melodic_slots, *kits] if isinstance(s, int)]
+    extra = iter(range(max([EXTRA_SLOT - 1, *numbered]) + 1, 10 ** 6))
+
+    def unique(name: str, what: str) -> str:
+        """Names are lookup keys (pitch plans, loop sizes, ntp_attack_bytes): never share one."""
+        out = name if name not in names else f"{name} ({what})"
+        names.add(out)
+        return out
+
     melodic, drum = [], []
     for p in sorted(set(programs) - covered):
         slot = free.pop(0) if free else next(extra)
-        m = {"slot": slot, "name": mt32.MT32_PRESET_NAMES[p], "program": p, "covers": [p],
-             "key": _median(programs[p]), "default": True}
+        m = {"slot": slot, "name": unique(mt32.MT32_PRESET_NAMES[p], f"program {p}"), "program": p,
+             "covers": [p], "key": _median(programs[p]), "default": True}
         melodic.append(m)
         log(f"sounds: default for MT-32 program {p} ({m['name']}, {_notes(len(programs[p]))}): "
             f"sampled at key {m['key']}, slot {slot}")
@@ -70,7 +97,10 @@ def complete(spec: dict, songs: Iterable[tuple[list, dict]],
         if k not in mt32.MT32_RHYTHM_KEYS:
             log(f"sounds: rhythm key {k} ({_notes(rhythm[k])}) is silent on the MT-32: skipped")
             continue
-        d = {"slot": DEFAULT_DRUM_SLOT, "name": mt32.GM_DRUM_NAMES.get(k, f"Rhythm {k}"), "key": k,
+        roomy = [s for s, n in sorted(kits.items(), key=lambda kv: kv[1]) if n < KIT_ZONES]
+        slot = roomy[0] if roomy else next(extra)       # past the bank: mt32bank names it
+        kits[slot] = kits.get(slot, 0) + 1
+        d = {"slot": slot, "name": unique(mt32.GM_DRUM_NAMES.get(k, f"Rhythm {k}"), f"key {k}"), "key": k,
              "covers": [k], "bytes": DRUM_BYTES, "default": True}
         drum.append(d)
         log(f"sounds: default for rhythm key {k} ({d['name']}, {_notes(rhythm[k])})")
