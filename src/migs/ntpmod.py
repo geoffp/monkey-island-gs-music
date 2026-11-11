@@ -21,6 +21,7 @@ import math
 import os
 import sys
 import tomllib
+import traceback
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
@@ -445,24 +446,35 @@ def _print_reports(reports: list) -> None:
 
 def _build_song(job) -> tuple[str, object, str, str | None]:
     """One song's samples (unless shared), track plan and MOD file: (sid, report, its log,
-    error or None). Runs in a worker process; the log is printed by the caller, in order."""
-    song, song_cfg, spec, cfg, shared, last_page, tables, munt, cc7, out_dir = job
-    buf, reserve = io.StringIO(), 255 - last_page
+    error or None). Runs in a worker process; the log is printed by the caller, in order. An
+    exception comes back as the error (with its traceback), so the song's log is kept."""
+    buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
-        if shared:
-            samples, programs, drums = shared
-        else:
-            samples, programs, drums = sample_set(spec, cfg, [(song.notes, song.programs)], last_page, tables, munt,
-                                                  log=lambda line: print(f"MI{song.sid}{line}"))
-            if bad := loop_problems(samples, cfg):
-                return song.sid, None, buf.getvalue(), f"MI{song.sid}: loops fail the tremolo/buzz check: " + "; ".join(bad)
-            print(f"MI{song.sid}: {len(samples)} samples, DOC {ntp_doc_pages(samples, last_page)}/256 pages "
-                  f"(reserve {reserve}); loops {loop_summary(samples, cfg)}")
-        grid, patterns, rep = plan_tracks(song.path, samples, programs, drums, cfg, song_cfg, cc7)
-        if ntp_oscillators([2 if k == "melodic" else 1 for k in rep.track_kinds]) is None:
-            return song.sid, None, buf.getvalue(), f"MI{song.sid}: NTP's converter can't assign oscillators to these tracks"
-        (out_dir / f"MI{song.sid}.mod").write_bytes(mod_file(f"MI1 {song.sid}", samples, grid, patterns, tables))
-    return song.sid, rep, buf.getvalue(), None
+        try:
+            rep, err = _build_song_quiet(job)
+        except Exception:
+            rep, err = None, f"MI{job[0].sid}: build failed\n{traceback.format_exc()}"
+    return job[0].sid, rep, buf.getvalue(), err
+
+
+def _build_song_quiet(job) -> tuple[object, str | None]:
+    """_build_song's work: (report, error or None)."""
+    song, song_cfg, spec, cfg, shared, last_page, tables, munt, cc7, out_dir = job
+    reserve = 255 - last_page
+    if shared:
+        samples, programs, drums = shared
+    else:
+        samples, programs, drums = sample_set(spec, cfg, [(song.notes, song.programs)], last_page, tables, munt,
+                                              log=lambda line: print(f"MI{song.sid}{line}"))
+        if bad := loop_problems(samples, cfg):
+            return None, f"MI{song.sid}: loops fail the tremolo/buzz check: " + "; ".join(bad)
+        print(f"MI{song.sid}: {len(samples)} samples, DOC {ntp_doc_pages(samples, last_page)}/256 pages "
+              f"(reserve {reserve}); loops {loop_summary(samples, cfg)}")
+    grid, patterns, rep = plan_tracks(song.path, samples, programs, drums, cfg, song_cfg, cc7)
+    if ntp_oscillators([2 if k == "melodic" else 1 for k in rep.track_kinds]) is None:
+        return None, f"MI{song.sid}: NTP's converter can't assign oscillators to these tracks"
+    (out_dir / f"MI{song.sid}.mod").write_bytes(mod_file(f"MI1 {song.sid}", samples, grid, patterns, tables))
+    return rep, None
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -506,13 +518,16 @@ def main(argv: list[str] | None = None) -> int:
              tables, munt, cc7, args.out_dir) for song in songs]
     # songs are independent once the samples are known (per-song: each makes its own): one worker
     # each, logs printed in song order
-    jobs = min(args.jobs or max(1, (os.cpu_count() or 2) // 2), len(work))
+    cpus = getattr(os, "process_cpu_count", os.cpu_count)() or 2   # 3.13+: honours CPU affinity
+    jobs = min(args.jobs or max(1, cpus // 2), len(work))
     with ProcessPoolExecutor(jobs) if jobs > 1 else contextlib.nullcontext() as pool:
         results = pool.map(_build_song, work) if pool else map(_build_song, work)
         reports = []
         for sid, rep, log, err in results:
             print(log, end="")
             if err:
+                if pool:
+                    pool.shutdown(cancel_futures=True)      # don't build the songs still queued
                 raise SystemExit(err)
             reports.append((sid, rep))
     _print_reports(reports)

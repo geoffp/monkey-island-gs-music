@@ -48,12 +48,12 @@ ntp_folders   := 'ntpf() { local m d f; for m in ' + ntp_modes + '; do d="$1/$(e
 # `cp2 add` sorts the files of one call, so each run between placeholders is its own call.
 p8_tree       := 'p8t() { local cp2=$1 img=$2 d f k g fs; for d in $(find "$3" -type d | sort); do "$cp2" mkdir "$img" "$d" >/dev/null; done; for d in $(find "$3" -type d | sort); do k=$(find "$d" -mindepth 1 -maxdepth 1 -type d | wc -l); fs=(); for f in $(find "$d" -maxdepth 1 -type f | sort); do if [ $k -ge 12 ] && [ $(( (k - 12) % 13 )) -eq 0 ]; then g="$d/GAP.$((k + 1))#040000"; echo "Placeholder: SenseiPlay v2.0 skips the first entry of each later directory block." > "$g"; [ ${#fs[@]} -eq 0 ] || "$cp2" add "$img" "${fs[@]}" >/dev/null; "$cp2" add "$img" "$g" >/dev/null; fs=(); k=$((k + 1)); fi; fs+=("$f"); k=$((k + 1)); done; [ ${#fs[@]} -eq 0 ] || "$cp2" add "$img" "${fs[@]}" >/dev/null; done; }; p8t'
 # Fingerprint of everything an NTP build of mode $1 reads (file names + contents): the code,
-# config/, the lockfile, the MT-32 MIDI, the PHP converter, and the ntpmod recipe's source
-# (`just --show`: how it runs the build), not the whole justfile, so unrelated edits don't
-# rebuild the songs. `ntpmod` skips a mode
+# config/, the lockfile, the MT-32 MIDI, the PHP converter, and the source of the ntpmod and
+# fetch-munt recipes (`just --show`: how the build runs, and which Munt), not the whole
+# justfile, so unrelated edits don't rebuild the songs. `ntpmod` skips a mode
 # whose build/ntp/<mode>/.inputs matches, and writes it only after a successful build.
 # Deliberately broad: an extra rebuild is cheap, a stale one isn't. Munt renders are cached by spec.
-ntp_inputs    := 'ntpi() { { find src/migs config "' + vendor + '/ntp/src" build/music/midi/mt32 -name __pycache__ -prune -o -type f -print; printf "%s\\n" pyproject.toml uv.lock; } | LC_ALL=C sort | xargs -d "\\n" sha256sum | { echo "mode $1"; cat; "' + just_executable() + '" --justfile "' + justfile() + '" --show ntpmod; } | sha256sum | cut -d" " -f1; }; ntpi'
+ntp_inputs    := 'ntpi() { { find src/migs config "' + vendor + '/ntp/src" build/music/midi/mt32 -name __pycache__ -prune -o -type f -print; printf "%s\\n" pyproject.toml uv.lock; } | LC_ALL=C sort | xargs -d "\\n" sha256sum | { echo "mode $1"; cat; "' + just_executable() + '" --justfile "' + justfile() + '" --show ntpmod; "' + just_executable() + '" --justfile "' + justfile() + '" --show fetch-munt; } | sha256sum | cut -d" " -f1; }; ntpi'
 # Fingerprint of what `extract` reads: the game data, the extractor and the modules it imports,
 # the optional song names, and the lockfile (mido). `extract` skips itself when
 # build/music/.inputs matches and its MIDI is there, and writes it only after a successful run.

@@ -60,12 +60,15 @@ def render(smf2wav: Path, roms: Path, cache: Path, *, program: int | None, key: 
     if not wav.exists():
         cache.mkdir(parents=True, exist_ok=True)
         mid = cache / f"{tag}.{os.getpid()}.mid"         # per process: builds run side by side
-        _note_file(program, key, hold, velocity, volume).save(mid)
         part = cache / f"{tag}.{os.getpid()}.part.wav"  # renamed when complete: an interrupted
-        subprocess.run([str(smf2wav), "--quiet", "-m", str(roms), "-f", "-o", str(part), str(mid)],
-                       check=True, stdout=subprocess.DEVNULL)
-        os.replace(part, wav)                           # render never poisons the cache
-        mid.unlink()
+        try:                                            # render never poisons the cache
+            _note_file(program, key, hold, velocity, volume).save(mid)
+            subprocess.run([str(smf2wav), "--quiet", "-m", str(roms), "-f", "-o", str(part), str(mid)],
+                           check=True, stdout=subprocess.DEVNULL)
+            os.replace(part, wav)
+        finally:                                        # nor leaves per-process files behind
+            mid.unlink(missing_ok=True)
+            part.unlink(missing_ok=True)
     rate, data = wavfile.read(wav)
     if rate != SR:
         raise ValueError(f"{wav}: expected {SR} Hz, got {rate}")
