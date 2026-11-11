@@ -38,12 +38,28 @@ jobs:
   freebsd:
     runs-on: ubuntu-latest
     continue-on-error: true         # stretch goal: report, don't block
+    env:
+      UV_CACHE_DIR: .uv-cache       # relative: the checkout, in the VM and on the runner
     steps:
       - uses: actions/checkout@v7
+      # scipy has no FreeBSD wheels: uv compiles it (~15 min). Keep uv's cache (with the built
+      # wheels) in the checkout, which the VM syncs in and back out, so only a uv.lock change
+      # rebuilds.
+      - uses: actions/cache/restore@v5
+        id: uv-cache
+        with:
+          path: .uv-cache
+          key: freebsd-uv-${{ hashFiles('uv.lock') }}
       - uses: vmactions/freebsd-vm@v1
         with:
           usesh: true
+          envs: UV_CACHE_DIR
           prepare: pkg install -y bash git just uv python3 curl cmake pkgconf glib php84 dotnet ffmpeg fluidsynth gcc openblas   # gcc: gfortran, for scipy's source build (no FreeBSD wheels)
           run: |
             git config --global --add safe.directory "$PWD"   # the VM's root runs on the runner's checkout
             just doctor && just setup && just test -rs && just smoke
+      - uses: actions/cache/save@v5   # saved even when a later step failed: the build is the slow part
+        if: always() && steps.uv-cache.outputs.cache-hit != 'true' && hashFiles('.uv-cache/**') != ''
+        with:
+          path: .uv-cache
+          key: freebsd-uv-${{ hashFiles('uv.lock') }}
