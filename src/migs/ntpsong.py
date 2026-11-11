@@ -169,6 +169,8 @@ class Report:
     sample_volumes: dict = field(default_factory=dict)  # sample index -> note-on volumes in this song
     dropped_by: dict = field(default_factory=dict)      # sound name -> notes dropped for lack of oscillators
     halted: int = 0             # releases ended with the silent "rest" one-shot
+    ghost_halts: int = 0        # halt_before_delayed: a still-sounding track halted the row before
+    ghost_moves: int = 0        # ... or, with no free row there, the delayed note moved onto a row
     tracks_used: int = 0
     oscillators: int = 0
     stolen: int = 0
@@ -417,6 +419,39 @@ class _Arranger:
 
     # --- cells
 
+    def sounding_before(self, tr: int, r: int, row_s: float) -> bool:
+        """Is a 2-oscillator track still sounding on the row before r? Its latest volume there
+        is above 0 (a release not yet at 0, or a note cut for this one), it isn't the rest, and a
+        one-shot (a borrowing drum, Xylophone) hasn't reached the end of its sample."""
+        t = self.tracks[tr]
+        if t.kind != "melodic" or r < 1 or not t.inst:
+            return False
+        s = self.samples[t.inst - 1]
+        if s.kind == "rest" or (not s.loop_len and t.oneshot_end <= (r - 1) * row_s):
+            return False
+        for rr in range(r - 1, -1, -1):
+            c = self.grid.cells[tr].get(rr)
+            if c is None:
+                continue
+            if c[0] and c[1] and self.samples[c[1] - 1].kind == "rest":
+                return False
+            if c[2] == FX_VOLUME:
+                return c[3] > 0
+            if c[0] and c[1]:
+                return self.samples[c[1] - 1].default_volume > 0
+        return False
+
+    def halt_before(self, tr: int, r: int) -> bool:
+        """Halt track tr on row r-1 (the rest + C00) so a delayed note at r finds nothing
+        sounding: NTP writes that note's default volume at tick 0, to whatever plays then (see
+        docs/ninjatrackerplus.md "Ghosts"). False when row r-1 starts a note (nothing to cut it with)."""
+        c = self.grid.cells[tr].get(r - 1)
+        if self.rest is None or (c is not None and c[0]):
+            return False
+        c = self.grid.get(tr, r - 1)
+        c[0], c[1], c[2], c[3] = self.samples[self.rest].base_note + 1, self.rest + 1, FX_VOLUME, 0
+        return True
+
     def preceding_silent(self, tr: int, s: ModSample, si: int, r: int, row_s: float) -> bool:
         """Can the cell before row r carry this note's velocity? Only on a one-shot track still
         holding this sample, silent by then (sample ended, no cells): a Cxx there changes
@@ -591,6 +626,7 @@ def convert_song(path: Path, samples: list[ModSample], programs: dict, drums: di
     hyst = arr.opt("volume_hysteresis", 0.75)
     max_rise_db = arr.opt("env_max_rise_db", 1.5)
     snap_db = arr.opt("delay_snap_db")
+    halt_ghosts = arr.opt("halt_before_delayed", False)
     flexible = arr.opt("melodic_one_shots", "any") == "any"
     onsets = {ch: np.array([m.t for m in notes if m.channel == ch]) for ch in {m.channel for m in notes}}
     speed, tick_s, row_s = timing.speed, timing.tick_s, timing.row_s
@@ -647,6 +683,20 @@ def convert_song(path: Path, samples: list[ModSample], programs: dict, drums: di
                 d = 0
                 err_sum += timing.error(r, 0, n.t)
                 rep.vel_snapped += 1
+        # A delayed note on a 2-oscillator track that is still sounding would raise the old note
+        # to its default volume for d ticks (a loud stray tone on the IIGS only). Halt the track
+        # on the row before; when that row starts a note, put this note on the nearest row.
+        if d and halt_ghosts and not arr.preceding_silent(tr, s, si, r, row_s) and arr.sounding_before(tr, r, row_s):
+            if arr.halt_before(tr, r):
+                rep.ghost_halts += 1
+            else:
+                move = speed - d if speed - d <= d else -d
+                err_sum -= timing.error(r, d, n.t)
+                if move > 0 and arr.grid.free(tr, r + 1):
+                    r += 1
+                d = 0
+                err_sum += timing.error(r, 0, n.t)
+                rep.ghost_moves += 1
         cell = arr.grid.get(tr, r)
         cell[0] = note_idx + 1
         silent_before = False

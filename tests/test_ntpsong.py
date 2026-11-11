@@ -452,3 +452,72 @@ def test_a_struck_key_sounds_once_as_on_the_mt32(tmp_path):
                              on(64), on(64), off(64, 60), off(64, 60)])             # twice at 3 s
     notes, _, _ = sg.read_notes(p)
     assert [(n.key, n.t, n.off) for n in notes] == [(60, 0.0, 1.0), (60, 1.0, 2.0), (64, 3.0, 3.25)]
+
+
+def _ghosts(grid, samples) -> int:
+    """Delayed notes (EDx) with an instrument on a track whose last volume is above 0 and isn't
+    the rest: NTP raises that old note to the new default volume at tick 0 (docs "Ghosts")."""
+    n = 0
+    for cells in grid.cells:
+        level, rest = 0, True
+        for row in sorted(cells):
+            note, inst, eff, par = cells[row]
+            if note and inst and eff == 0xE and par & 0xF and level > 0 and not rest:
+                n += 1
+            if note and inst:
+                rest = samples[inst - 1].kind == "rest"
+                level = samples[inst - 1].default_volume
+            if eff == 0xC:
+                level = par
+    return n
+
+
+def _ghost_song(tmp_path, b_at):
+    """One 2-oscillator track: note A (ch 1) releases over 1 s from tick 240; note B (ch 2)
+    starts at `b_at`, off the row grid (rows of 15 ticks, ticks of 5), so it is delayed."""
+    import mido
+    ev = [mido.Message("program_change", channel=ch, program=9) for ch in (1, 2)]
+    ev += [mido.Message("note_on", channel=1, note=60, velocity=110),
+           mido.Message("note_off", channel=1, note=60, time=240),
+           mido.Message("note_on", channel=2, note=64, velocity=60, time=b_at - 240),
+           mido.Message("note_off", channel=2, note=64, time=120)]
+    p = midi_song(tmp_path, ev)
+    s = fake_sample()
+    s.rel_g = np.linspace(1.0, 0.0, 101)                               # 1 s release ramp
+    return p, [s, smp.rest_sample()]
+
+
+def test_halt_before_delayed_leaves_nothing_sounding_for_a_delayed_note(tmp_path):
+    """A delayed note that takes a still-releasing track: NTP would raise the release to the new
+    note's default volume for d ticks (MI160 on the IIGS: +24 to +35 dB for 50-67 ms). With
+    halt_before_delayed the track is halted (rest + C00) on the row before."""
+    p, samples = _ghost_song(tmp_path, 307)
+    cfg = {"rows_per_unit": 2, "speed": 3, "quantize": 0.0, "oscillators": 2, "unit_ticks": 30, "phase_ticks": 0}
+    grid, _, rep = sg.convert_song(p, samples, {9: 0}, {}, cfg, dict(cfg))
+    assert rep.delayed == 1 and _ghosts(grid, samples) == 1                   # the old behaviour
+    on = {**cfg, "halt_before_delayed": True}
+    grid, _, rep = sg.convert_song(p, samples, {9: 0}, {}, on, dict(on))
+    assert _ghosts(grid, samples) == 0 and rep.ghost_halts == 1 and rep.ghost_moves == 0 and rep.delayed == 1
+    cells = grid.cells[0]
+    r = next(row for row, c in cells.items() if c[2] == 0xE)
+    assert cells[r - 1][1] == 2 and cells[r - 1][2:] == [0xC, 0]                # rest + C00 on the row before
+
+
+def test_halt_before_delayed_moves_the_note_when_the_row_before_starts_one(tmp_path):
+    """No free row to halt on (a note starts there): the delayed note goes onto a row instead."""
+    import mido
+    ev = [mido.Message("program_change", channel=ch, program=9) for ch in (1, 2)]
+    ev += [mido.Message("note_on", channel=1, note=60, velocity=110, time=0),
+           mido.Message("note_off", channel=1, note=60, time=285),             # A: rows 0-19, then releases
+           mido.Message("note_on", channel=1, note=62, velocity=110, time=0),  # row 19: A2 on the same track
+           mido.Message("note_off", channel=1, note=62, time=5),
+           mido.Message("note_on", channel=2, note=64, velocity=60, time=17),  # tick 307: row 20, delayed
+           mido.Message("note_off", channel=2, note=64, time=120)]
+    p = midi_song(tmp_path, ev)
+    s = fake_sample()
+    s.rel_g = np.linspace(1.0, 0.0, 101)
+    samples = [s, smp.rest_sample()]
+    cfg = {"rows_per_unit": 2, "speed": 3, "quantize": 0.0, "oscillators": 2, "unit_ticks": 30, "phase_ticks": 0,
+           "halt_before_delayed": True}
+    grid, _, rep = sg.convert_song(p, samples, {9: 0}, {}, cfg, dict(cfg))
+    assert rep.ghost_moves == 1 and rep.ghost_halts == 0 and _ghosts(grid, samples) == 0

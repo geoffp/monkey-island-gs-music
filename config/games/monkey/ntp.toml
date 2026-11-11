@@ -78,6 +78,10 @@ track_plan = true       # choose each song's 2-/1-oscillator track split for the
 halt_released_loops = true  # end each release with a silent looped rest that replaces the loop: NTP
                         # applies a delayed (EDx) cell's instrument volume at tick 0, which made
                         # the old loop audible until the note (docs/ninjatrackerplus.md "Ghosts")
+halt_before_delayed = false  # also halt a 2-oscillator track that is still sounding (a release not
+                        # yet at 0, a note cut for this one) on the row before a delayed note; with
+                        # no free row there, put the note on the nearest row. MI160: 352 tick-0
+                        # jumps of 6 dB or more on the IIGS (trial 2026-11-11: modes *-halt)
 one_shots = true        # decaying sounds that reach the 8-bit floor (`one_shot_floor_lsb` RMS in
 one_shot_floor_lsb = 1.5  # a peak-normalised sample) within the DOC RAM their attack + loop would
 one_shot_max_rate_drop = 0.1  # take become one-shots (1 oscillator, exact tuning), at most 10 %
@@ -104,6 +108,14 @@ ntp_attack_bytes = { "Elec Organ" = 1016, "Sax" = 1016, "Acou Bass" = 1016, "Vib
 base = "per-song"
 [modes.inst-shared]
 base = "shared"
+
+# Trial (branch halt-before-delayed): no tick-0 ghosts on still-sounding tracks.
+[modes.per-song-halt]
+base = "per-song"
+halt_before_delayed = true
+[modes.shared-halt]
+base = "shared"
+halt_before_delayed = true
 
 # Trial variants, built side by side for listening: a `base` sample-set mode plus overrides.
 # Add the name to `ntp_modes` in the justfile. E.g. the original loops next to `shared`:

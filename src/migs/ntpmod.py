@@ -480,6 +480,9 @@ def _print_reports(reports: list, prefix: str) -> None:
               f"{rep.delayed:5d} {rep.vel_in_cell:6d} {rep.vel_preceding:6d} {rep.vel_default:6d} "
               f"{rep.timing_err_ms:6.1f} {rep.halted:5d} {max(rep.stolen_levels, default=0):6d} {plan:>4} "
               f"{rep.vel_snapped:4d}")
+    if any(rep.ghost_halts or rep.ghost_moves for _, rep in reports):
+        print("halt_before_delayed: " + ", ".join(f"{prefix}{sid} {rep.ghost_halts} halts {rep.ghost_moves} moved"
+                                                for sid, rep in reports if rep.ghost_halts or rep.ghost_moves))
     for sid, rep in reports:
         if rep.dropped_by:
             print(f"{prefix}{sid} dropped (no oscillator): "
