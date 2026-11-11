@@ -110,7 +110,7 @@ doctor:
       printf 'missing: %s\n' "${missing[@]}"
       case "{{os()}}" in
         macos)   echo "macOS (Homebrew): brew install uv cmake pkg-config glib php ffmpeg fluid-synth";;
-        freebsd) echo "FreeBSD: pkg install git uv curl cmake pkgconf glib php84 dotnet ffmpeg fluidsynth";;
+        freebsd) echo "FreeBSD: pkg install git uv curl cmake pkgconf glib php84 dotnet ffmpeg fluidsynth gcc openblas (gcc and openblas: uv builds scipy from source)";;
         *) if command -v dnf >/dev/null; then echo "Fedora: sudo dnf install git uv curl unzip cmake gcc-c++ pkgconf glib2-devel php-cli ffmpeg fluidsynth"
            elif command -v apt-get >/dev/null; then echo "Debian/Ubuntu: sudo apt install git curl unzip cmake g++ pkg-config libglib2.0-dev php-cli ffmpeg fluidsynth (uv: https://docs.astral.sh/uv/)"
            fi;;

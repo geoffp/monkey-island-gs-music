@@ -32,7 +32,7 @@ jobs:
         run: brew install cmake pkg-config glib php ffmpeg fluid-synth
       - run: just doctor
       - run: just setup
-      - run: just test
+      - run: just test -rs                # -rs: list why tests skipped
       - run: just smoke
 
   freebsd:
@@ -43,7 +43,7 @@ jobs:
       - uses: vmactions/freebsd-vm@v1
         with:
           usesh: true
-          prepare: pkg install -y bash git just uv python3 curl cmake pkgconf glib php84 dotnet ffmpeg fluidsynth
+          prepare: pkg install -y bash git just uv python3 curl cmake pkgconf glib php84 dotnet ffmpeg fluidsynth gcc openblas   # gcc: gfortran, for scipy's source build (no FreeBSD wheels)
           run: |
             git config --global --add safe.directory "$PWD"   # the VM's root runs on the runner's checkout
-            just doctor && just setup && just test && just smoke
+            just doctor && just setup && just test -rs && just smoke

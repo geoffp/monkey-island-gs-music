@@ -26,7 +26,8 @@ def smooth(x: np.ndarray, n: int) -> np.ndarray:
 
 def interp_at(x: np.ndarray, pos: np.ndarray) -> np.ndarray:
     """x at fractional sample positions (linear interpolation, held at the ends): the same
-    arithmetic as np.interp(pos, arange(len(x)), x), but reading only the two neighbours of
+    arithmetic as np.interp(pos, arange(len(x)), x) (bit-identical on x86_64; on arm64 numpy's
+    fused multiply-add can differ in the last bit), but reading only the two neighbours of
     each position. np.interp scanned the whole render per call (1.2M calls on renders of
     ~300k samples were 40% of an NTP build)."""
     pos = np.asarray(pos, dtype=np.float64)

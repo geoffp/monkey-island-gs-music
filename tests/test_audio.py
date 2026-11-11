@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Analysis of rendered notes: pitch period, averaged cycle, relative pitch (audio)."""
 
+import platform
+
 import numpy as np
 import pytest
 
@@ -27,12 +29,19 @@ def test_pitch_offset_sign_lower_is_negative():
 
 
 def test_interp_at_is_np_interp_on_the_sample_grid():
-    """The fast form must give np.interp's exact values (MOD bytes depend on them), held at the ends."""
+    """The fast form gives np.interp's values, held at the ends: exactly on x86_64 (MOD bytes
+    depend on them), to the last bit elsewhere (arm64 builds of numpy fuse its multiply-add,
+    rounding once instead of twice)."""
     rng = np.random.default_rng(1)
+    exact = platform.machine().lower() in ("x86_64", "amd64")
     for n in (2, 3, 1000):
         x = rng.standard_normal(n)
         pos = np.concatenate([rng.uniform(-3, n + 3, 5000), np.arange(n, dtype=float), [n - 1, 0.0]])
-        assert np.array_equal(interp_at(x, pos), np.interp(pos, np.arange(n), x))
+        got, want = interp_at(x, pos), np.interp(pos, np.arange(n), x)
+        if exact:
+            assert np.array_equal(got, want)
+        else:
+            np.testing.assert_allclose(got, want, rtol=0, atol=4 * np.finfo(float).eps * np.abs(x).max())
 
 
 @pytest.mark.parametrize("n", [1, 160, 320, 321])
