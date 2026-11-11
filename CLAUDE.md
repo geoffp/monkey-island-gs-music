@@ -45,6 +45,11 @@ Pipeline:
 - Disk images and ShrinkIt archives: CiderPress II CLI at `vendor/cp2/cp2` (`just fetch-cp2`).
 
 ## Conventions
+- **Cross-platform.** We value builds that work on other people's machines. Linux is the base: everything must work there. macOS is a goal: keep it working. The BSDs (FreeBSD first) are a stretch goal: don't break them needlessly, and accept that the emulator recipes may not run there. Windows is a maybe-someday. In practice:
+  - write recipes for POSIX tools, not GNU-only flags (no `nproc`, `stat -c`, `sed -i`, `xargs -d`, `sha256sum`; use `num_cpus()`, `wc -c`, `tools/fresh.py`);
+  - expect bash 3.2 (macOS);
+  - choose downloads by `os()`/`arch()`, and when a tool has no build for a platform, say so and carry on rather than fail;
+  - `just selftest` checks a clean-clone build.
 - Tasks: `justfile` (run `just` to list). Key recipes:
   - `just test`: unit tests;
   - `just extract`: MT-32 + GM MIDI and patch notes into `build/music/`;

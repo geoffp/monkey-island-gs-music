@@ -3,8 +3,9 @@
 """Skip work whose inputs haven't changed (the justfile's freshness checks). Standard library
 only, so it runs before `uv sync`.
 
-  fresh.py get URL FILE SHA256
-      Download URL to FILE unless FILE is already there with that sha256; check the download.
+  fresh.py get URL FILE SHA256 [FALLBACK_URL]...
+      Download URL to FILE unless FILE is already there with that sha256. A download that fails
+      or has another hash is discarded and the next URL tried (an archived copy, a mirror).
 
   fresh.py run STAMP [--out PATH]... INPUT... -- COMMAND...
       Run COMMAND unless the inputs hash to what STAMP holds (and every --out PATH exists, a
@@ -136,7 +137,7 @@ def run(args: list[str]) -> int:
     return rc
 
 
-def get(url: str, file: str, want: str) -> int:
+def get(file: str, want: str, urls: list[str]) -> int:
     f = Path(file)
     if f.is_file():
         if sha256(f) == want:
@@ -144,20 +145,27 @@ def get(url: str, file: str, want: str) -> int:
         print(f"{f}: checksum mismatch, fetching again")
     f.parent.mkdir(parents=True, exist_ok=True)
     part = f.with_name(f.name + ".part")         # renamed only once it checks out
+    quiet = [] if sys.stderr.isatty() else ["-sS"]   # progress bars only on a terminal
     try:
-        if subprocess.run(["curl", "-fL", "--retry", "3", "-o", str(part), url]).returncode:
-            raise SystemExit(f"fresh: couldn't download {url}")
-        if (got := sha256(part)) != want:
-            raise SystemExit(f"fresh: {url}: sha256 {got}, expected {want}")
-        part.replace(f)
+        for i, url in enumerate(urls):
+            if i:
+                print(f"fresh: trying {url}", file=sys.stderr)
+            if subprocess.run(["curl", "-fL", "--retry", "3", "--connect-timeout", "20", *quiet,
+                               "-o", str(part), url]).returncode:
+                print(f"fresh: couldn't download {url}", file=sys.stderr)
+            elif (got := sha256(part)) != want:
+                print(f"fresh: {url}: sha256 {got}, expected {want}", file=sys.stderr)
+            else:
+                part.replace(f)
+                return 0
+        raise SystemExit(f"fresh: no good copy of {f.name}")
     finally:
         part.unlink(missing_ok=True)
-    return 0
 
 
 def main(argv: list[str]) -> int:
-    if argv[:1] == ["get"] and len(argv) == 4:
-        return get(*argv[1:])
+    if argv[:1] == ["get"] and len(argv) >= 4:
+        return get(argv[2], argv[3], [argv[1], *argv[4:]])
     if argv[:1] == ["run"]:
         return run(argv[1:])
     print(__doc__, file=sys.stderr)

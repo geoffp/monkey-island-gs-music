@@ -7,17 +7,26 @@ set windows-shell := ["powershell.exe", "-NoLogo", "-Command"]
 game     := "original files/The Secret of Monkey Island (Floppy DOS VGA)"
 roms     := "original files/mt-32 roms"
 vendor   := "vendor"
-gs2      := vendor / "gssquared/GSSquared-x86_64.AppImage"
+# Platform: linux, macos, freebsd, ... and x86_64, aarch64. Prebuilt tools exist for some only:
+# GSSquared for Linux x86_64 (AppImage) and macOS (universal app); CiderPress II self-contained
+# for Linux x86_64, elsewhere as .NET 8 code run by `dotnet`; gs2-mcp for Linux and macOS.
+platform := os() + "-" + arch()
+gs2      := if os() == "macos" { vendor / "gssquared/GSSquared.app/Contents/MacOS/GSSquared" } else { vendor / "gssquared/GSSquared-x86_64.AppImage" }
 cp2      := vendor / "cp2/cp2"
+cp2_zip  := if platform == "linux-x86_64" { "linux-x64_sc" } else { "linux-x64_fd" }
 smf2wav  := vendor / "munt/bin/mt32emu-smf2wav"
 sf2      := vendor / "soundfonts/GeneralUser-GS.sf2"
 
 # Pinned versions / checksums (sha256)
-mcp_ver       := "v0.1.4"   # jawaidbazyar2/gssquared-mcp (verified via release SHA256SUMS)
+mcp_ver       := "v0.1.4"   # jawaidbazyar2/gssquared-mcp (hashes from its release SHA256SUMS)
+mcp_asset     := if platform == "linux-x86_64" { "linux-amd64" } else if platform == "linux-aarch64" { "linux-arm64" } else if platform == "macos-x86_64" { "darwin-amd64" } else if platform == "macos-aarch64" { "darwin-arm64" } else { "" }
+mcp_sha       := if mcp_asset == "linux-amd64" { "20867888552a2e854287bd6dd3828f6ddfd76573d667d846f6c72c3b40ca5e27" } else if mcp_asset == "linux-arm64" { "98ce4b2f33b918de8c90c229889c29413eed547c6b4dbd5c8431e6ff1e18ab63" } else if mcp_asset == "darwin-amd64" { "9c43d88b664a19256d1ef6edc85132daf9a1703fab3d563795c1eefdcb2a5a18" } else { "adf40bb1d6439364fdaf11580df9ecc4d462e1f90207d98cd6568fd7b1220bc7" }
 gs2_ver       := "v1.0.0"   # jawaidbazyar2/gssquared
-gs2_sha       := "a4ca6e0a5de1bbc4c93150dd7fd11a7c9a2e68a949101e3b9925136e4449778d"
+gs2_sha       := "a4ca6e0a5de1bbc4c93150dd7fd11a7c9a2e68a949101e3b9925136e4449778d"   # AppImage
+gs2_dmg       := "gssquared-1.0.1953-Darwin.dmg"
+gs2_dmg_sha   := "96d476f15291bd92f6b676b4089e642327320f2eaaab975ef30777c43b9fc15b"
 cp2_ver       := "1.2.0"    # fadden/CiderPress2 (no published checksums: pinned here)
-cp2_sha       := "8c8748a0b484b4a778354146ffe4b6b44527f066b440a2e7bccebf4050948981"
+cp2_sha       := if cp2_zip == "linux-x64_sc" { "8c8748a0b484b4a778354146ffe4b6b44527f066b440a2e7bccebf4050948981" } else { "215629827edaf66faff640bb84c3f680e595fd50b03f7d7f23e8a2401fddb6ec" }
 munt_tag      := "munt_2_8_3"
 munt_sha      := "a9baa120bbcdd9e5af7ed0878a32c59b378b730612459851b9acafcd76519b72"
 sf2_rev       := "684543d5e5efaef08d02be50dcda8d552478fa60"   # mrbumpy409/GeneralUser-GS
@@ -60,7 +69,7 @@ fit_image     := 'fiti() { local img=$1 vol=$2 st=$3 fill=$4 size want got; for 
 # Distribution archives of image $1 in build/dist/: <volume>.zip holds the image itself (for
 # emulators, CFFA3000, Floppy Emu), <volume>.SHK the volume's files with their ProDOS types (to
 # unpack with ShrinkIt on a IIgs). cp2 makes .SDK (ShrinkIt disk) archives only of floppy sizes.
-dist_pack     := 'distp() { local img=$1 vol d="$PWD/build/dist"; vol=$(basename "$img" .PO); mkdir -p "$d"; rm -f "$d/$vol.zip" "$d/$vol.SHK"; "$cp2" create-file-archive "$d/$vol.zip" >/dev/null; (cd "$(dirname "$img")" && "$cp2" add "$d/$vol.zip" "$(basename "$img")" >/dev/null); "$cp2" create-file-archive "$d/$vol.SHK" >/dev/null; "$cp2" copy --recurse "$img" "*" "$d/$vol.SHK" >/dev/null; echo "build/dist/$vol.zip: $(( $(stat -c %s "$d/$vol.zip") / 1024 )) KB, build/dist/$vol.SHK: $(( $(stat -c %s "$d/$vol.SHK") / 1024 )) KB"; }; distp'
+dist_pack     := 'distp() { local img=$1 vol d="$PWD/build/dist"; vol=$(basename "$img" .PO); mkdir -p "$d"; rm -f "$d/$vol.zip" "$d/$vol.SHK"; "$cp2" create-file-archive "$d/$vol.zip" >/dev/null; (cd "$(dirname "$img")" && "$cp2" add "$d/$vol.zip" "$(basename "$img")" >/dev/null); "$cp2" create-file-archive "$d/$vol.SHK" >/dev/null; "$cp2" copy --recurse "$img" "*" "$d/$vol.SHK" >/dev/null; echo "build/dist/$vol.zip: $(( $(wc -c < "$d/$vol.zip") / 1024 )) KB, build/dist/$vol.SHK: $(( $(wc -c < "$d/$vol.SHK") / 1024 )) KB"; }; distp'
 sensei_ver    := "v2.0"     # digarok/senseiplay (no published checksums: pinned here)
 sensei_sha    := "0965c0f8d45314910f8d20f06ef395006415314fbc2cabedf4d0a221d184c07f"
 # Apple IIGS System 6.0.4 (community release, 2016-12-31), 800K ProDOS-order images from the
@@ -74,6 +83,9 @@ s6_files      := "System.Disk:496f8d80d524ded42398e7b24f62694a1562d4bbe5d933eacb
 #   fresh run STAMP [--out PATH]... INPUT... -- CMD   run CMD unless its inputs are unchanged
 fresh         := "python3 tools/fresh.py"
 gh            := "https://github.com"
+# Internet Archive copies (byte-identical to the pins), tried when an unversioned source fails
+# or changes. Add one with: curl "https://archive.org/wayback/available?url=URL"
+wb            := "https://web.archive.org/web"
 
 # List recipes
 default:
@@ -85,16 +97,26 @@ setup: doctor submodules sync fetch
 # Check host tools (installed via your package manager)
 doctor:
     #!/usr/bin/env bash
-    missing=0
-    for c in git uv python3 curl unzip tar sha256sum cmake c++ pkg-config fluidsynth ffmpeg php; do
-      command -v "$c" >/dev/null || { echo "missing: $c"; missing=1; }
-    done
-    pkg-config --exists glib-2.0 || { echo "missing: glib2 development files (for mt32emu-smf2wav)"; missing=1; }
-    if [ $missing = 1 ]; then
-      echo "Fedora: sudo dnf install git uv curl unzip cmake gcc-c++ pkgconf glib2-devel fluidsynth ffmpeg php-cli"
+    missing=()
+    need="git uv python3 curl unzip tar cmake c++ pkg-config php"
+    [ "{{cp2_zip}}" = linux-x64_sc ] || need="$need dotnet"       # CiderPress II's .NET build
+    for c in $need; do command -v "$c" >/dev/null || missing+=("$c"); done
+    pkg-config --exists glib-2.0 2>/dev/null || missing+=("glib2 (development files, for Munt)")
+    if [ ${#missing[@]} -gt 0 ]; then
+      printf 'missing: %s\n' "${missing[@]}"
+      case "{{os()}}" in
+        macos)   echo "macOS (Homebrew): brew install uv cmake pkg-config glib php dotnet ffmpeg fluid-synth";;
+        freebsd) echo "FreeBSD: pkg install git uv curl cmake pkgconf glib php84 dotnet ffmpeg fluidsynth";;
+        *) if command -v dnf >/dev/null; then echo "Fedora: sudo dnf install git uv curl unzip cmake gcc-c++ pkgconf glib2-devel php-cli ffmpeg fluidsynth"
+           elif command -v apt-get >/dev/null; then echo "Debian/Ubuntu: sudo apt install git curl unzip cmake g++ pkg-config libglib2.0-dev php-cli ffmpeg fluidsynth (uv: https://docs.astral.sh/uv/)"
+           fi;;
+      esac
       exit 1
     fi
     echo "host tools OK"
+    # optional: song previews and the General MIDI renders
+    ffmpeg -hide_banner -demuxers 2>/dev/null | grep -q libopenmpt || echo "note: no ffmpeg with libopenmpt: MOD previews (build/ntp/<mode>/wav/) are skipped"
+    command -v fluidsynth >/dev/null || echo "note: no fluidsynth: \`just render\` and \`just gm-wav\` won't run"
     [ -d "{{game}}" ] || echo "note: game data not found at '{{game}}' (see README)"
     [ -d "{{roms}}" ] || echo "note: no MT-32 ROMs at '{{roms}}' (needed only for MT-32 rendering)"
 
@@ -109,21 +131,29 @@ sync:
 # All downloaded/built dependencies
 fetch: fetch-gssquared fetch-mcp fetch-cp2 fetch-soundfont fetch-munt fetch-synthfile fetch-docs fetch-ntp fetch-system6
 
-# GSSquared emulator AppImage
+# GSSquared emulator (Linux x86_64 AppImage, macOS app; none for other platforms)
 fetch-gssquared:
-    @{{fresh}} get {{gh}}/jawaidbazyar2/gssquared/releases/download/{{gs2_ver}}/GSSquared-x86_64.AppImage "{{gs2}}" {{gs2_sha}}
-    @chmod 755 "{{gs2}}"
+    #!/usr/bin/env bash
+    set -euo pipefail
+    rel={{gh}}/jawaidbazyar2/gssquared/releases/download/{{gs2_ver}}
+    case "{{platform}}" in
+      linux-x86_64)
+        {{fresh}} get $rel/GSSquared-x86_64.AppImage "{{gs2}}" {{gs2_sha}}; chmod 755 "{{gs2}}";;
+      macos-*)
+        [ -x "{{gs2}}" ] && exit 0
+        d="{{vendor}}/gssquared"; {{fresh}} get $rel/{{gs2_dmg}} "$d/{{gs2_dmg}}" {{gs2_dmg_sha}}
+        m=$(mktemp -d); hdiutil attach -quiet -nobrowse -readonly -mountpoint "$m" "$d/{{gs2_dmg}}"
+        rm -rf "$d/GSSquared.app"; cp -R "$m/GSSquared.app" "$d/"; hdiutil detach -quiet "$m"; rm "$d/{{gs2_dmg}}";;
+      *) echo "GSSquared: no build for {{platform}} (the emulator recipes won't run; everything else does)";;
+    esac
 
 # gs2-mcp, the GSSquared MCP server used by .mcp.json
 fetch-mcp:
     #!/usr/bin/env bash
     set -euo pipefail
-    [ -x "{{vendor}}/bin/gs2-mcp" ] && exit 0
-    asset=gs2-mcp-linux-amd64-{{mcp_ver}}
-    mkdir -p "{{vendor}}/bin" && cd "{{vendor}}/bin"
-    for a in "$asset" SHA256SUMS; do curl -fL --retry 3 -o "$a" "https://github.com/jawaidbazyar2/gssquared-mcp/releases/download/{{mcp_ver}}/$a"; done
-    grep "$asset" SHA256SUMS | sha256sum -c -
-    mv "$asset" gs2-mcp && chmod 755 gs2-mcp && rm SHA256SUMS
+    [ -n "{{mcp_asset}}" ] || { echo "gs2-mcp: no build for {{platform}}"; exit 0; }
+    {{fresh}} get {{gh}}/jawaidbazyar2/gssquared-mcp/releases/download/{{mcp_ver}}/gs2-mcp-{{mcp_asset}}-{{mcp_ver}} "{{vendor}}/bin/gs2-mcp" {{mcp_sha}}
+    chmod 755 "{{vendor}}/bin/gs2-mcp"
 
 # Run gs2-mcp over stdio (.mcp.json launches this, so it needs no absolute paths).
 # No dependencies: stdout is the MCP channel and must carry nothing else.
@@ -136,10 +166,14 @@ fetch-cp2:
     #!/usr/bin/env bash
     set -euo pipefail
     [ -x "{{cp2}}" ] && exit 0
-    zip=cp2_{{cp2_ver}}_linux-x64_sc.zip
+    zip=cp2_{{cp2_ver}}_{{cp2_zip}}.zip
     mkdir -p "{{vendor}}/cp2"
     {{fresh}} get {{gh}}/fadden/CiderPress2/releases/download/v{{cp2_ver}}/$zip "{{vendor}}/$zip" {{cp2_sha}}
     unzip -q -o "{{vendor}}/$zip" -d "{{vendor}}/cp2" && rm "{{vendor}}/$zip"
+    # the .NET build: cp2.dll run by the host's dotnet (8 or newer)
+    if [ "{{cp2_zip}}" != linux-x64_sc ]; then
+      printf '#!/bin/sh\nDOTNET_ROLL_FORWARD=Major exec dotnet "$(dirname "$0")/cp2.dll" "$@"\n' > "{{cp2}}"
+    fi
     chmod 755 "{{cp2}}"
 
 # GeneralUser GS soundfont (General MIDI listening tests)
@@ -168,7 +202,7 @@ fetch-synthfile: fetch-cp2
     set -euo pipefail
     d="{{vendor}}/synthfile"; [ -d "$d/src" ] && exit 0
     mkdir -p "$d"
-    {{fresh}} get "{{synthfile_url}}" "$d/synthfile15.shk" {{synthfile_sha}}
+    {{fresh}} get "{{synthfile_url}}" "$d/synthfile15.shk" {{synthfile_sha}} "{{wb}}/20240709014101id_/{{synthfile_url}}"
     mkdir -p "$d/src"
     "$PWD/{{cp2}}" extract --exdir="$d/src" "$d/synthfile15.shk"
 
@@ -177,8 +211,9 @@ fetch-ntp:
     #!/usr/bin/env bash
     set -euo pipefail
     d="{{vendor}}/ntp"
-    {{fresh}} get http://www.ninjaforce.com/downloads/ntpsources.zip "$d/ntpsources.zip" {{ntpsrc_sha}}
-    {{fresh}} get http://www.ninjaforce.com/downloads/ntp.2mg "$d/ntp.2mg" {{ntpdemo_sha}}
+    nf=http://www.ninjaforce.com/downloads
+    {{fresh}} get $nf/ntpsources.zip "$d/ntpsources.zip" {{ntpsrc_sha}} "{{wb}}/20251219162829id_/$nf/ntpsources.zip"
+    {{fresh}} get $nf/ntp.2mg "$d/ntp.2mg" {{ntpdemo_sha}} "{{wb}}/20251101061135id_/$nf/ntp.2mg"
     {{fresh}} get {{gh}}/digarok/senseiplay/releases/download/{{sensei_ver}}/senseiplay800.2mg "$d/senseiplay800.2mg" {{sensei_sha}}
     [ -d "$d/src" ] || unzip -q -o "$d/ntpsources.zip" -d "$d/src"
 
@@ -193,7 +228,7 @@ fetch-system6:
 # Reference PDFs: MIDI Synth ERS and synthLAB manual (Brutal Deluxe scans)
 fetch-docs:
     @{{fresh}} get "{{ers_url}}" "{{vendor}}/docs/apda_midisynth_synthlab_ocr.pdf" {{ers_sha}}
-    @{{fresh}} get "{{manual_url}}" "{{vendor}}/docs/synthlab_usersmanual.pdf" {{manual_sha}}
+    @{{fresh}} get "{{manual_url}}" "{{vendor}}/docs/synthlab_usersmanual.pdf" {{manual_sha}} "{{wb}}/20260514232548id_/{{manual_url}}"
 
 # GSSquared machine configs are generated into build/disks/<name>.gs2 by `gs2-config` (migs.emu),
 # keeping the id/battery RAM GSSquared saves on quit. Battery RAM is patched so the IIgs
@@ -206,12 +241,14 @@ seed_bram := "config/emu/default-bram.hex"
 emu speed="ludicrous": fetch-gssquared disk
     uv run gs2-config build/disks/mi-ntp.gs2 --name "MI1 NinjaTrackerPlus (SenseiPlay)" --speed {{speed}} \
       --card 7=bazfast3 --disk 7:1=MI.NTP.PO --startup-slot 7 --your-card 6 --your-card 7 --seed {{seed_bram}}
+    @[ -x "{{gs2}}" ] || { echo "no GSSquared for {{platform}}"; exit 1; }
     "{{gs2}}" "$PWD/build/disks/mi-ntp.gs2"
 
 # Experimental aside: boot System 6 + synthLAB with the MIDI Synth sequences (`just synthlab-disk`)
 emu-synthlab speed="ludicrous": fetch-gssquared synthlab-disk
     uv run gs2-config build/disks/mi-synthlab.gs2 --name "MI1 synthLAB (experimental, BazFast HD)" --speed {{speed}} \
       --card 7=bazfast3 --disk 7:1=MI.SYNTHLAB.PO --startup-slot 7 --your-card 6 --your-card 7 --seed {{seed_bram}}
+    @[ -x "{{gs2}}" ] || { echo "no GSSquared for {{platform}}"; exit 1; }
     "{{gs2}}" "$PWD/build/disks/mi-synthlab.gs2"
 
 # ProDOS 8 image for BazFast, sized to the smallest power of two that holds it (4 MB in 2026-11):
@@ -316,9 +353,13 @@ _ntpmod-one mode:
     set -euo pipefail
     d="build/ntp/{{mode}}"; rm -rf "$d" && mkdir -p "$d/wav"
     uv run ntpmod build/music/midi/mt32/*.mid -o "$d" --samples "{{mode}}"
-    ls $d/*.mod | xargs -P "$(nproc)" -I{} sh -c \
-      'ffmpeg -hide_banner -loglevel error -y -f libopenmpt -i "$1" -ac 2 -ar 44100 "$2/wav/$(basename "$1" .mod).wav"' _ {} "$d"
-    echo "previews: $d/wav/"
+    if ffmpeg -hide_banner -demuxers 2>/dev/null | grep -q libopenmpt; then
+      ls $d/*.mod | xargs -P {{num_cpus()}} -I{} sh -c \
+        'ffmpeg -hide_banner -loglevel error -y -f libopenmpt -i "$1" -ac 2 -ar 44100 "$2/wav/$(basename "$1" .mod).wav"' _ {} "$d"
+      echo "previews: $d/wav/"
+    else
+      echo "previews: skipped (no ffmpeg with libopenmpt)"
+    fi
 
 # Rebuild the MODs even if their inputs are unchanged (so does `just clean`)
 ntpmod-force modes=ntp_modes:
@@ -335,10 +376,10 @@ looplab mode="shared": fetch-ntp fetch-munt
 ntp modes=ntp_modes: (ntpmod modes)
     #!/usr/bin/env bash
     set -euo pipefail
-    command -v php >/dev/null || { echo "php not found: sudo dnf install php-cli"; exit 1; }
+    command -v php >/dev/null || { echo "php not found (see just doctor)"; exit 1; }
     for m in {{modes}}; do
       # all cores; a failed conversion prints its log and stops the batch (xargs exit 255)
-      ls build/ntp/$m/*.mod | xargs -P "$(nproc)" -I{} sh -c \
+      ls build/ntp/$m/*.mod | xargs -P {{num_cpus()}} -I{} sh -c \
         '[ "${2%.mod}.ntp" -nt "$2" ] && exit 0; php "$1" "$2" STREAM_FORBIDDEN > "${2%.mod}.log" || { echo "$2:"; cat "${2%.mod}.log"; exit 255; }' \
         _ "{{vendor}}/ntp/src/ntpconverter.php" {}
       echo "$m: $(ls build/ntp/$m/*.ntp | wc -l) .NTP files in build/ntp/$m/"
@@ -418,8 +459,11 @@ selftest target="disk":
     git clone -q . "$d"
     for f in "original files"/*; do [ "$f" = "original files/README.md" ] || ln -s "$PWD/$f" "$d/$f"; done
     cd "$d"
-    just setup && just test -q && just {{target}}
-    touch .mark && just {{target}}
+    just setup                  # one command per line: `set -e` ignores failures inside a && chain
+    just test -q
+    just {{target}}
+    touch .mark
+    just {{target}}
     changed=$(find build vendor -type f -newer .mark ! -name '*.log')
     [ -z "$changed" ] || { echo "selftest: the second run rewrote:"; echo "$changed"; exit 1; }
     echo "selftest: OK ($d)"
