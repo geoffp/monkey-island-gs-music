@@ -24,6 +24,8 @@ from scipy.signal import resample
 from .audio import interp_at, onset, refine_period, smooth
 from .munt import SR
 
+DOC_RATE = 894886 / 34              # DOC output rate with 32 oscillators enabled (doc_tuning rounds it)
+
 
 @dataclass
 class Tracks:
@@ -341,3 +343,60 @@ def analyse(m: dict, render: Callable[[int, int, float], np.ndarray], hold: floa
     if not st.steady:
         hi = min(hi, lo + int(0.15 * SR))          # decays: stay near the handover
     return Sound(m["name"], m, x, a, period, st, tr, ref_amp, lo, hi)
+
+
+# ---------------------------------------------------------------------------
+# Playing a sample as the DOC does, and what its attack bytes buy
+
+def play(attack: np.ndarray, loop: np.ndarray, rate: float, seconds: float, semis: float = 0.0,
+         env: tuple[np.ndarray, np.ndarray] | None = None, out_rate: float = DOC_RATE) -> np.ndarray:
+    """The sample as the DOC plays it: a phase accumulator stepping rate*2^(semis/12)/out_rate
+    through attack then loop (no interpolation), with an optional smooth gain contour
+    (seconds, gain) applied after the attack, and a 30 ms release."""
+    n = int(seconds * out_rate)
+    pos = np.arange(n) * (rate * 2 ** (semis / 12) / out_rate)
+    A, L = len(attack), len(loop)
+    i = pos.astype(np.int64)
+    in_loop = loop[np.maximum(i - A, 0) % L]
+    y = in_loop if A == 0 else np.where(i < A, attack[np.minimum(i, A - 1)], in_loop)
+    if env is not None:
+        t = np.arange(n) / out_rate
+        t_att = A / (rate * 2 ** (semis / 12))
+        g = np.interp(t, *env)
+        g0 = float(np.interp(t_att, *env)) or 1.0
+        y = y * np.where(t < t_att, 1.0, g / g0)
+    r = int(0.03 * out_rate)
+    y[-r:] *= np.linspace(1, 0, r)
+    return y / 128.0
+
+
+def to_bytes(attack: np.ndarray, loop: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """8-bit as the MOD stores it (ModSample.mod_bytes): one scale for attack and loop."""
+    d = np.concatenate([attack, loop])
+    q = np.clip(np.round(d / (float(np.max(np.abs(d))) or 1.0) * 127), -128, 127)
+    return q[:len(attack)], q[len(attack):]
+
+
+def attack_error_db(snd: Sound, attack: np.ndarray, loop: np.ndarray, rate: float, window_s: float = 0.5) -> float:
+    """How far the played note's spectral shape is from the Munt source over the first
+    `window_s`: per frame, harmonic levels relative to the frame's total (dB), compared with
+    the source's, RMS over harmonics (weighted by the source's sustain shares) and frames
+    (weighted by the source frame's energy). Level is left to the Cxx envelope; this is
+    what the attack bytes buy."""
+    y = play(attack, loop, rate, window_s + 0.1, out_rate=SR)
+    tr_y = harmonic_tracks(y, 0, snd.period, end=len(y))
+    tr_x = harmonic_tracks(snd.x, snd.a, snd.period, end=snd.a + len(y))
+    T = min(tr_y.amp.shape[1], tr_x.amp.shape[1])
+    sel = tr_x.t[:T] <= window_s
+    H = min(tr_y.amp.shape[0], tr_x.amp.shape[0])
+
+    def shape(tr: Tracks) -> tuple[np.ndarray, np.ndarray]:
+        e = tr.amp[:H, :T][:, sel] ** 2
+        tot = e.sum(axis=0, keepdims=True)
+        return 10 * np.log10(np.maximum(e / np.maximum(tot, 1e-20), 1e-4)), tot[0]
+    sy, _ = shape(tr_y)
+    sx, ex = shape(tr_x)
+    w = snd.st.weights[:H] / (snd.st.weights[:H].sum() or 1.0)
+    per_frame = np.sqrt(np.sum(w[:, None] * (sy - sx) ** 2, axis=0))
+    fw = ex / (ex.sum() or 1.0)
+    return float(np.sum(fw * per_frame))

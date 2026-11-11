@@ -3,7 +3,7 @@
 
 A sample of a sound is the Munt render at its sampled key `k`, resampled to its rate `r` and
 rounded to 8 bits. The DOC plays key `n` by stepping through it `r * 2^((n - k)/12) / DOC_RATE`
-samples per output sample, without interpolation (looplab.play does the same). Two things go
+samples per output sample, without interpolation (loopbuild.play does the same). Two things go
 wrong away from the sampled key:
 
 - the sound's timbre is the MT-32's at `k`, transposed: the top end above `r/2` (moved with the
