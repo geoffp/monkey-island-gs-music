@@ -224,9 +224,10 @@ fetch-system6:
     done
 
 # Reference PDFs: MIDI Synth ERS and synthLAB manual (Brutal Deluxe scans)
+# (reading only, nothing builds from them: a failed download warns instead of failing setup)
 fetch-docs:
-    @{{fresh}} get "{{ers_url}}" "{{vendor}}/docs/apda_midisynth_synthlab_ocr.pdf" {{ers_sha}}
-    @{{fresh}} get "{{manual_url}}" "{{vendor}}/docs/synthlab_usersmanual.pdf" {{manual_sha}} "{{wb}}/20260514232548id_/{{manual_url}}"
+    @{{fresh}} get "{{ers_url}}" "{{vendor}}/docs/apda_midisynth_synthlab_ocr.pdf" {{ers_sha}} || echo "warning: skipped the MIDI Synth ERS PDF (download failed); the build doesn't need it"
+    @{{fresh}} get "{{manual_url}}" "{{vendor}}/docs/synthlab_usersmanual.pdf" {{manual_sha}} "{{wb}}/20260514232548id_/{{manual_url}}" || echo "warning: skipped the synthLAB manual PDF (download failed); the build doesn't need it"
 
 # GSSquared machine configs are generated into build/disks/<name>.gs2 by `gs2-config` (migs.emu),
 # keeping the id/battery RAM GSSquared saves on quit. Battery RAM is patched so the IIgs
