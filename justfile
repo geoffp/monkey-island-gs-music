@@ -47,17 +47,9 @@ ntp_folders   := 'ntpf() { local m d f; for m in ' + ntp_modes + '; do d="$1/$(e
 # header): entries 13, 26, 39, ... of a folder. A placeholder text file fills those slots.
 # `cp2 add` sorts the files of one call, so each run between placeholders is its own call.
 p8_tree       := 'p8t() { local cp2=$1 img=$2 d f k g fs; for d in $(find "$3" -type d | sort); do "$cp2" mkdir "$img" "$d" >/dev/null; done; for d in $(find "$3" -type d | sort); do k=$(find "$d" -mindepth 1 -maxdepth 1 -type d | wc -l); fs=(); for f in $(find "$d" -maxdepth 1 -type f | sort); do if [ $k -ge 12 ] && [ $(( (k - 12) % 13 )) -eq 0 ]; then g="$d/GAP.$((k + 1))#040000"; echo "Placeholder: SenseiPlay v2.0 skips the first entry of each later directory block." > "$g"; [ ${#fs[@]} -eq 0 ] || "$cp2" add "$img" "${fs[@]}" >/dev/null; "$cp2" add "$img" "$g" >/dev/null; fs=(); k=$((k + 1)); fi; fs+=("$f"); k=$((k + 1)); done; [ ${#fs[@]} -eq 0 ] || "$cp2" add "$img" "${fs[@]}" >/dev/null; done; }; p8t'
-# Fingerprint of everything an NTP build of mode $1 reads (file names + contents): the code,
-# config/, the lockfile, the MT-32 MIDI, the PHP converter, and the source of the ntpmod and
-# fetch-munt recipes (`just --show`: how the build runs, and which Munt), not the whole
-# justfile, so unrelated edits don't rebuild the songs. `ntpmod` skips a mode
-# whose build/ntp/<mode>/.inputs matches, and writes it only after a successful build.
-# Deliberately broad: an extra rebuild is cheap, a stale one isn't. Munt renders are cached by spec.
-ntp_inputs    := 'ntpi() { { find src/migs config "' + vendor + '/ntp/src" build/music/midi/mt32 -name __pycache__ -prune -o -type f -print; printf "%s\\n" pyproject.toml uv.lock; } | LC_ALL=C sort | xargs -d "\\n" sha256sum | { echo "mode $1"; cat; "' + just_executable() + '" --justfile "' + justfile() + '" --show ntpmod; "' + just_executable() + '" --justfile "' + justfile() + '" --show fetch-munt; } | sha256sum | cut -d" " -f1; }; ntpi'
-# Fingerprint of what `extract` reads: the game data, the extractor and the modules it imports,
-# the optional song names, and the lockfile (mido). `extract` skips itself when
-# build/music/.inputs matches and its MIDI is there, and writes it only after a successful run.
-music_inputs  := 'musici() { { find "' + game + '" -type f; ls config/song_names.toml 2>/dev/null; printf "%s\n" src/migs/__init__.py src/migs/extract_music.py src/migs/mt32.py src/migs/ro.py src/migs/scumm_v4.py pyproject.toml uv.lock; } | LC_ALL=C sort | xargs -d "\n" sha256sum | sha256sum | cut -d" " -f1; }; musici'
+# What an NTP build reads (`ntpmod` adds the variant name): ntpmod and the migs modules it
+# imports, config/, the MT-32 MIDI, the PHP period tables, the Munt binary and the lockfile.
+ntp_inputs    := "py:src/migs/ntpmod.py config build/music/midi/mt32 " + vendor + "/ntp/src " + smf2wav + " pyproject.toml uv.lock"
 # Build ProDOS image $1 (volume $2) from staging dir $3 at the smallest power-of-two size that
 # holds it (1, 2, ... 32 MB, the ProDOS limit): `eval $4` (run in $3) fills it; an attempt counts
 # when every staged entry is on the image (bash ignores errexit inside conditions, so the count
@@ -77,9 +69,11 @@ sensei_sha    := "0965c0f8d45314910f8d20f06ef395006415314fbc2cabedf4d0a221d184c0
 s6_url        := "https://www.apple.asimov.net/images/gs/os/gsos/Apple_IIGS_System_6.0.4/PO%20Disk%20Images"
 s6            := vendor / "system6"
 s6_files      := "System.Disk:496f8d80d524ded42398e7b24f62694a1562d4bbe5d933eacbf391f3a26b599a SystemTools1:25c1f33fea4e6bb983a1d2a2b3234dbb7c14913e2f922a2587d28c7ff42c9944 SystemTools3:b41cc66963f8490f61854c85c4ba14c4b31b63b96a5f2ef666a19c4ecff48859 synthLAB:ddebd51f90a709a109c8d310159a112726bb6626504c1f5e78b59499e64d7087"
-# GitHub release asset $1/$2/$3 (owner/repo, tag, asset) to file $4, checked against sha256 $5
-# (one command, not a function definition, so it works after `||` too)
-gh_asset      := "sh -c 'curl -fL --retry 3 -o \"$4\" \"https://github.com/$1/releases/download/$2/$3\" && echo \"$5  $4\" | sha256sum -c -' gh_asset"
+# Freshness checks (tools/fresh.py; its docstring has the details):
+#   fresh get URL FILE SHA256                    download a pinned file unless it's already there
+#   fresh run STAMP [--out PATH]... INPUT... -- CMD   run CMD unless its inputs are unchanged
+fresh         := "python3 tools/fresh.py"
+gh            := "https://github.com"
 
 # List recipes
 default:
@@ -92,7 +86,7 @@ setup: doctor submodules sync fetch
 doctor:
     #!/usr/bin/env bash
     missing=0
-    for c in git uv curl unzip tar sha256sum cmake c++ pkg-config fluidsynth ffmpeg php; do
+    for c in git uv python3 curl unzip tar sha256sum cmake c++ pkg-config fluidsynth ffmpeg php; do
       command -v "$c" >/dev/null || { echo "missing: $c"; missing=1; }
     done
     pkg-config --exists glib-2.0 || { echo "missing: glib2 development files (for mt32emu-smf2wav)"; missing=1; }
@@ -117,14 +111,8 @@ fetch: fetch-gssquared fetch-mcp fetch-cp2 fetch-soundfont fetch-munt fetch-synt
 
 # GSSquared emulator AppImage
 fetch-gssquared:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    f="{{gs2}}"
-    if [ ! -f "$f" ] || ! echo "{{gs2_sha}}  $f" | sha256sum -c --quiet - 2>/dev/null; then
-      mkdir -p "$(dirname "$f")"
-      {{gh_asset}} jawaidbazyar2/gssquared {{gs2_ver}} GSSquared-x86_64.AppImage "$f" {{gs2_sha}}
-      chmod 755 "$f"
-    fi
+    @{{fresh}} get {{gh}}/jawaidbazyar2/gssquared/releases/download/{{gs2_ver}}/GSSquared-x86_64.AppImage "{{gs2}}" {{gs2_sha}}
+    @chmod 755 "{{gs2}}"
 
 # gs2-mcp, the GSSquared MCP server used by .mcp.json
 fetch-mcp:
@@ -150,29 +138,24 @@ fetch-cp2:
     [ -x "{{cp2}}" ] && exit 0
     zip=cp2_{{cp2_ver}}_linux-x64_sc.zip
     mkdir -p "{{vendor}}/cp2"
-    {{gh_asset}} fadden/CiderPress2 v{{cp2_ver}} "$zip" "{{vendor}}/$zip" {{cp2_sha}}
+    {{fresh}} get {{gh}}/fadden/CiderPress2/releases/download/v{{cp2_ver}}/$zip "{{vendor}}/$zip" {{cp2_sha}}
     unzip -q -o "{{vendor}}/$zip" -d "{{vendor}}/cp2" && rm "{{vendor}}/$zip"
     chmod 755 "{{cp2}}"
 
 # GeneralUser GS soundfont (General MIDI listening tests)
 fetch-soundfont:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    f="{{sf2}}"
-    [ -f "$f" ] && echo "{{sf2_sha}}  $f" | sha256sum -c --quiet - && exit 0
-    mkdir -p "$(dirname "$f")"
-    curl -fL -o "$f" "https://raw.githubusercontent.com/mrbumpy409/GeneralUser-GS/{{sf2_rev}}/GeneralUser-GS.sf2"
-    echo "{{sf2_sha}}  $f" | sha256sum -c -
+    @{{fresh}} get "https://raw.githubusercontent.com/mrbumpy409/GeneralUser-GS/{{sf2_rev}}/GeneralUser-GS.sf2" "{{sf2}}" {{sf2_sha}}
 
-# Munt (MT-32 emulator): build libmt32emu + mt32emu-smf2wav from source
+# Munt (MT-32 emulator): build libmt32emu + mt32emu-smf2wav from source (again when munt_tag changes)
 fetch-munt:
+    @{{fresh}} run "{{vendor}}/munt/.inputs" --out "{{smf2wav}}" "text:{{munt_tag}} {{munt_sha}}" -- just _build-munt
+
+_build-munt:
     #!/usr/bin/env bash
     set -euo pipefail
-    [ -x "{{smf2wav}}" ] && exit 0
-    d="{{vendor}}/munt"; mkdir -p "$d"
-    curl -fL -o "$d/src.tar.gz" "https://github.com/munt/munt/archive/refs/tags/{{munt_tag}}.tar.gz"
-    echo "{{munt_sha}}  $d/src.tar.gz" | sha256sum -c -
-    rm -rf "$d/src" && mkdir "$d/src" && tar -xzf "$d/src.tar.gz" -C "$d/src" --strip-components=1
+    d="{{vendor}}/munt"
+    {{fresh}} get {{gh}}/munt/munt/archive/refs/tags/{{munt_tag}}.tar.gz "$d/src.tar.gz" {{munt_sha}}
+    rm -rf "$d/src" "$d/build" && mkdir "$d/src" && tar -xzf "$d/src.tar.gz" -C "$d/src" --strip-components=1
     cmake -S "$d/src" -B "$d/build" -DCMAKE_BUILD_TYPE=Release \
       -Dmunt_WITH_MT32EMU_QT=OFF -Dmunt_WITH_MT32EMU_SMF2WAV=ON \
       -DCMAKE_INSTALL_PREFIX="$PWD/$d"
@@ -185,8 +168,7 @@ fetch-synthfile: fetch-cp2
     set -euo pipefail
     d="{{vendor}}/synthfile"; [ -d "$d/src" ] && exit 0
     mkdir -p "$d"
-    curl -fL -o "$d/synthfile15.shk" "{{synthfile_url}}"
-    echo "{{synthfile_sha}}  $d/synthfile15.shk" | sha256sum -c -
+    {{fresh}} get "{{synthfile_url}}" "$d/synthfile15.shk" {{synthfile_sha}}
     mkdir -p "$d/src"
     "$PWD/{{cp2}}" extract --exdir="$d/src" "$d/synthfile15.shk"
 
@@ -194,35 +176,24 @@ fetch-synthfile: fetch-cp2
 fetch-ntp:
     #!/usr/bin/env bash
     set -euo pipefail
-    d="{{vendor}}/ntp"; mkdir -p "$d"
-    get() { [ -f "$d/$1" ] && echo "$3  $d/$1" | sha256sum -c --quiet - && return 0
-            curl -fL -o "$d/$1" "$2" && echo "$3  $d/$1" | sha256sum -c -; }
-    get ntpsources.zip http://www.ninjaforce.com/downloads/ntpsources.zip "{{ntpsrc_sha}}"
-    get ntp.2mg http://www.ninjaforce.com/downloads/ntp.2mg "{{ntpdemo_sha}}"
+    d="{{vendor}}/ntp"
+    {{fresh}} get http://www.ninjaforce.com/downloads/ntpsources.zip "$d/ntpsources.zip" {{ntpsrc_sha}}
+    {{fresh}} get http://www.ninjaforce.com/downloads/ntp.2mg "$d/ntp.2mg" {{ntpdemo_sha}}
+    {{fresh}} get {{gh}}/digarok/senseiplay/releases/download/{{sensei_ver}}/senseiplay800.2mg "$d/senseiplay800.2mg" {{sensei_sha}}
     [ -d "$d/src" ] || unzip -q -o "$d/ntpsources.zip" -d "$d/src"
-    [ -f "$d/senseiplay800.2mg" ] && echo "{{sensei_sha}}  $d/senseiplay800.2mg" | sha256sum -c --quiet - || \
-      {{gh_asset}} digarok/senseiplay {{sensei_ver}} senseiplay800.2mg "$d/senseiplay800.2mg" {{sensei_sha}}
 
 # Apple IIGS System 6.0.4 disks used by the synthLAB disk and stock-banks -> vendor/system6/
 fetch-system6:
     #!/usr/bin/env bash
     set -euo pipefail
-    d="{{s6}}"; mkdir -p "$d"
     for e in {{s6_files}}; do
-      n=${e%%:*}; h=${e#*:}; f="$d/$n.po"
-      [ -f "$f" ] && echo "$h  $f" | sha256sum -c --quiet - && continue
-      curl -fL --retry 3 -o "$f" "{{s6_url}}/$n.po" && echo "$h  $f" | sha256sum -c -
+      n=${e%%:*}; {{fresh}} get "{{s6_url}}/$n.po" "{{s6}}/$n.po" "${e#*:}"
     done
 
 # Reference PDFs: MIDI Synth ERS and synthLAB manual (Brutal Deluxe scans)
 fetch-docs:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    d="{{vendor}}/docs"; mkdir -p "$d"
-    get() { [ -f "$d/$1" ] && echo "$3  $d/$1" | sha256sum -c --quiet - && return 0
-            curl -fL -o "$d/$1" "$2" && echo "$3  $d/$1" | sha256sum -c -; }
-    get apda_midisynth_synthlab_ocr.pdf "{{ers_url}}" "{{ers_sha}}"
-    get synthlab_usersmanual.pdf "{{manual_url}}" "{{manual_sha}}"
+    @{{fresh}} get "{{ers_url}}" "{{vendor}}/docs/apda_midisynth_synthlab_ocr.pdf" {{ers_sha}}
+    @{{fresh}} get "{{manual_url}}" "{{vendor}}/docs/synthlab_usersmanual.pdf" {{manual_sha}}
 
 # GSSquared machine configs are generated into build/disks/<name>.gs2 by `gs2-config` (migs.emu),
 # keeping the id/battery RAM GSSquared saves on quit. Battery RAM is patched so the IIgs
@@ -250,13 +221,14 @@ emu-synthlab speed="ludicrous": fetch-gssquared synthlab-disk
 disk: ntp
     #!/usr/bin/env bash
     set -euo pipefail
+    songs=(); for m in {{ntp_modes}}; do songs+=(build/ntp/$m/*.ntp); done
+    {{fresh}} run build/disks/MI.NTP.inputs --out build/disks/MI.NTP.PO --out build/dist/MI.NTP.zip --out build/dist/MI.NTP.SHK \
+      "${songs[@]}" "{{vendor}}/ntp/senseiplay800.2mg" config/disk/README.TXT "text:{{ntp_modes}}" -- just _disk
+
+_disk:
+    #!/usr/bin/env bash
+    set -euo pipefail
     cp2="$PWD/{{cp2}}"; img="$PWD/build/disks/MI.NTP.PO"; st="$PWD/build/disks/ntpstage"
-    # up to date: no song, player disk or justfile (the variant list) newer than the image
-    if [ -f "$img" ] && [ -z "$(find build/ntp -name '*.ntp' -newer "$img"; find "{{vendor}}/ntp/senseiplay800.2mg" config/disk/README.TXT justfile -newer "$img")" ]; then
-      echo "build/disks/MI.NTP.PO: up to date"
-      if [ ! build/dist/MI.NTP.SHK -nt "$img" ] || [ ! build/dist/MI.NTP.zip -nt "$img" ]; then {{dist_pack}} "$img"; fi
-      exit 0
-    fi
     rm -rf "$st" "$img" && mkdir -p "$st"
     "$cp2" extract --preserve=naps --overwrite --exdir="$st" "{{vendor}}/ntp/senseiplay800.2mg" \
       PRODOS sensei.system ntpplayer dgr.radio.dgr >/dev/null
@@ -283,13 +255,9 @@ extract:
     #!/usr/bin/env bash
     set -euo pipefail
     [ -d "{{game}}" ] || { echo "no game data in '{{game}}' (see original files/README.md)"; exit 1; }
-    fp=$({{music_inputs}})
-    if [ "$(cat build/music/.inputs 2>/dev/null)" = "$fp" ] && compgen -G "build/music/midi/mt32/*.mid" >/dev/null; then
-      echo "build/music: up to date"; exit 0
-    fi
-    rm -f build/music/.inputs
-    uv run extract-music "{{game}}" build/music
-    echo "$fp" > build/music/.inputs
+    {{fresh}} run build/music/.inputs --out build/music/midi/mt32 \
+      "{{game}}" opt:config/song_names.toml py:src/migs/extract_music.py pyproject.toml uv.lock \
+      -- uv run extract-music "{{game}}" build/music
 
 # Render every extracted song to WAV via both paths (build/music/wav/{mt32,gm}/)
 render: extract fetch-munt fetch-soundfont
@@ -332,27 +300,25 @@ voices: seq
 ntpmod modes=ntp_modes: extract fetch-ntp fetch-munt
     #!/usr/bin/env bash
     set -euo pipefail
-    # modes build concurrently (logs in build/ntp/<mode>.log); previews render on all cores
-    build() {
-      rm -rf "build/ntp/$1" && mkdir -p "build/ntp/$1/wav"
-      uv run ntpmod build/music/midi/mt32/*.mid -o "build/ntp/$1" --samples "$1"
-      ls build/ntp/$1/*.mod | xargs -P "$(nproc)" -I{} sh -c \
-        'ffmpeg -hide_banner -loglevel error -y -f libopenmpt -i "$1" -ac 2 -ar 44100 "$2/wav/$(basename "$1" .mod).wav"' _ {} "build/ntp/$1"
-    }
-    pids=(); fresh=()
+    # variants build concurrently, each only if what it reads changed (logs in build/ntp/<mode>.log)
+    # (the build recipe's own text counts too: changing how it runs rebuilds)
+    mkdir -p build/ntp; pids=(); recipe=$(just --show _ntpmod-one)
     for m in {{modes}}; do
-      mkdir -p build/ntp; fp=$({{ntp_inputs}} "$m")
-      if [ "$(cat "build/ntp/$m/.inputs" 2>/dev/null)" = "$fp" ] && compgen -G "build/ntp/$m/*.mod" >/dev/null; then
-        fresh+=("$m"); continue
-      fi
-      { build "$m" && echo "$fp" > "build/ntp/$m/.inputs"; } > "build/ntp/$m.log" 2>&1 & pids+=($!)
+      {{fresh}} run "build/ntp/$m/.inputs" {{ntp_inputs}} "text:$m" "text:$recipe" -- just _ntpmod-one "$m" > "build/ntp/$m.log" 2>&1 & pids+=($!)
     done
     fail=0; for p in "${pids[@]}"; do wait "$p" || fail=1; done
-    for m in {{modes}}; do
-      if [[ " ${fresh[*]} " == *" $m "* ]]; then echo "== samples: $m: up to date (just ntpmod-force to rebuild)"; continue; fi
-      echo "== samples: $m"; cat "build/ntp/$m.log"; echo "previews: build/ntp/$m/wav/"
-    done
+    for m in {{modes}}; do echo "== samples: $m"; cat "build/ntp/$m.log"; done
     exit $fail
+
+# One variant's MODs and their previews (all cores)
+_ntpmod-one mode:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    d="build/ntp/{{mode}}"; rm -rf "$d" && mkdir -p "$d/wav"
+    uv run ntpmod build/music/midi/mt32/*.mid -o "$d" --samples "{{mode}}"
+    ls $d/*.mod | xargs -P "$(nproc)" -I{} sh -c \
+      'ffmpeg -hide_banner -loglevel error -y -f libopenmpt -i "$1" -ac 2 -ar 44100 "$2/wav/$(basename "$1" .mod).wav"' _ {} "$d"
+    echo "previews: $d/wav/"
 
 # Rebuild the MODs even if their inputs are unchanged (so does `just clean`)
 ntpmod-force modes=ntp_modes:
