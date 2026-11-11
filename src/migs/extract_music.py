@@ -277,8 +277,9 @@ def patch_notes(song: Song) -> str:
 
 # ---------------------------------------------------------------------------
 
-def load_songs(game: Game, names: dict[str, str], warn: Callable[[str], None] | None = None,
-               label: str = "") -> list[Song]:
+def load_songs(game: Game, names: dict[str, str], warn: Callable[[str], None] | None = None, *,
+               label: str) -> list[Song]:
+    """`label` is the game's (game.toml), for titles: "MI1 sound 150"."""
     """Every distinct RO sound in the game, by sound id; byte-identical copies are listed as
     the first one's `duplicates`."""
     by_hash: dict[str, Song] = {}
@@ -328,7 +329,7 @@ def main(argv: list[str] | None = None) -> int:
     game_dir = args.game_dir or g.data
     args.out_dir = args.out_dir or g.build_dir / "music"
     warn = lambda m: print("warning:", m, file=sys.stderr)
-    if game_dir == g.data:
+    if game_dir.resolve() == g.data.resolve():          # the configured release: check it
         for m in g.md5_mismatches():
             warn(f"{m} (not the release {g.config('game.toml')} was tuned on)")
 

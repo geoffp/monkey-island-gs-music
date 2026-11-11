@@ -161,7 +161,8 @@ def main(argv: list[str] | None = None) -> int:
     games.add_argument(ap)
     ap.add_argument("--log", type=Path, help="default build/<game>/disks/docscope.jsonl")
     args = ap.parse_args(argv)
-    args.log = args.log or games.load(args.game).build_dir / "disks/docscope.jsonl"
+    if args.log is None:
+        args.log = games.load(args.game).build_dir / "disks/docscope.jsonl"
     with GS2(str(Path(args.mcp).resolve()), str(Path(args.gs2).resolve())) as gs:
         extra = [str(args.config.resolve())] if args.config else []
         print(gs.call("launch", platform="IIgs", extra_args=extra))

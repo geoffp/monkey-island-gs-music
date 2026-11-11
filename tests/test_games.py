@@ -111,6 +111,30 @@ def test_the_justfile_reader_works_without_tomllib():
         sys.modules["tomllib"] = real
 
 
+def test_the_fallback_reads_both_toml_string_kinds():
+    """Basic and literal strings, escapes and comments, as tomllib reads them; tables end it."""
+    sys.path.insert(0, str(ROOT / "tools"))
+    try:
+        import game as tool
+    finally:
+        sys.path.pop(0)
+    text = ('name = "A \\"quoted\\" game"   # comment\n'
+            "data = 'Loom (DOS EGA)'\n"
+            "path = 'C:\\games'\n"
+            'prefix = "LM" # no space before the hash\n'
+            "count = 3\n"
+            "[md5]\n"
+            '"000.LFL" = "x"\n')
+    real = __import__("tomllib")
+    want = {k: v for k, v in real.loads(text).items() if isinstance(v, str)}
+    sys.modules["tomllib"] = None
+    try:
+        assert tool.values(text) == want
+    finally:
+        sys.modules["tomllib"] = real
+    assert want["data"] == "Loom (DOS EGA)" and want["name"] == 'A "quoted" game'
+
+
 def test_the_justfile_reader_fails_clearly():
     r = _tool("nosuch", "data")
     assert r.returncode == 1 and "no game 'nosuch'" in r.stderr

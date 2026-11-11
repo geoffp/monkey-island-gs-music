@@ -66,7 +66,7 @@ class BankMap:
     wave_file: str = ""
 
     @classmethod
-    def from_config(cls, name: str, cfg: dict, build_dir: Path = Path(".")) -> BankMap:
+    def from_config(cls, name: str, cfg: dict, build_dir: Path) -> BankMap:
         """`map_file` is relative to the game's build directory (build/<game>/)."""
         programs, drums = dict(cfg.get("programs", {})), dict(cfg.get("drums", {}))
         if "map_file" in cfg:                       # generated mapping (e.g. by mt32bank)
@@ -102,8 +102,9 @@ class Report:
         self.dropped[what] += 1
 
 
-def load_config(path: Path, song_id: str | None, profile: str = "stock",
-                build_dir: Path = Path(".")) -> tuple[BankMap, dict[int, int]]:
+def load_config(path: Path, song_id: str | None, profile: str,
+                build_dir: Path) -> tuple[BankMap, dict[int, int]]:
+    """`build_dir` is the game's build directory, which a bank's `map_file` is relative to."""
     """The profile's bank for a song, and the song's channel -> slot overrides (0-based)."""
     cfg = tomllib.loads(path.read_text())
     prof = cfg["profiles"][profile]

@@ -96,8 +96,11 @@ def test_drum_error_counts_a_low_rate_and_a_cut():
     assert cut > hi                                          # stopped after 30 ms of 150
 
 
-def test_a_missing_midi_file_stops_with_a_hint_to_extract(tmp_path):
-    """After `just clean` the shell passes the unexpanded glob: say what to do, not a traceback."""
+def test_a_missing_midi_file_stops_with_a_hint_to_extract(tmp_path, monkeypatch):
+    """After `just clean` the shell passes the unexpanded glob: say what to do, not a traceback.
+    Checked before the game is looked up, so it holds from any directory and for any game."""
     import pytest
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("MIGS_GAME", "nosuch")
     with pytest.raises(SystemExit, match="just extract"):
         nm.main([str(tmp_path / "*.mid"), "-o", str(tmp_path / "out")])

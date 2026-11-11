@@ -96,3 +96,14 @@ def test_sixteen_channels_leave_no_room_for_the_title_and_do_not_crash():
     seq, rep = convert(mf, BANK, title="MI1 999")
     assert len(rep.channel_slots) == 16 and "MI1 999" not in seq.track_names
     seq.to_bytes()
+
+
+def test_a_generated_map_file_is_read_from_the_games_build_dir(tmp_path):
+    """midisynth.toml's map_file (written by mt32bank) is relative to build/<game>/, not the
+    working directory."""
+    (tmp_path / "seq/mt32").mkdir(parents=True)
+    (tmp_path / "seq/mt32/X.map.toml").write_text('[programs]\n"9" = 2\n[drums]\n"36" = [0, 40]\n')
+    cfg = {"file": "X.BNK", "rhythm_slot": 0, "fallback_slot": 2, "map_file": "seq/mt32/X.map.toml",
+           "programs": {"1": 3}}
+    b = BankMap.from_config("X", cfg, tmp_path)
+    assert b.programs == {1: 3, 9: 2} and b.drums == {36: [0, 40]}

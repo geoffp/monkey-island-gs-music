@@ -60,9 +60,10 @@ def test_sound_lookup_resolves_offsets_relative_to_lf_data(tiny_game):
 
 def test_load_songs_takes_ro_only_and_dedupes(tiny_game):
     path, _ = tiny_game
-    songs = load_songs(Game(path), {"1": "Test Song"})
+    songs = load_songs(Game(path), {"1": "Test Song"}, label="TG1")
     assert [(s.sound_id, s.duplicates) for s in songs] == [(1, [3]), (4, [])]
     assert songs[0].stem == "001-test-song" and songs[0].track.loops
+    assert songs[0].title == "TG1 sound 1: Test Song"
     assert songs[1].stem == "004" and not songs[1].track.loops
 
 
@@ -85,3 +86,27 @@ def test_a_zero_size_block_is_an_error_not_an_endless_scan():
     data = blk(b"AA", b"xy") + struct.pack("<I", 0) + b"BB"
     with pytest.raises(ValueError, match="size 0"):
         list(blocks(data))
+
+
+def test_extract_warns_when_the_games_release_differs(tiny_game, tmp_path_factory, monkeypatch, capsys):
+    """The md5 check runs for the configured data folder however its path is written
+    (relative, absolute), not for another folder; outputs are named from game.toml."""
+    from migs import extract_music
+    data, _ = tiny_game
+    root = tmp_path_factory.mktemp("repo")
+    (root / "config/games/tg").mkdir(parents=True)
+    (root / "config/games/tg/game.toml").write_text(
+        'name = "T"\nengine = "scumm-v4"\ndata = "T"\nprefix = "TG"\nlabel = "TG1"\n'
+        '[md5]\n"000.LFL" = "00000000000000000000000000000000"\n')
+    (root / "original files").mkdir()
+    (root / "original files/T").symlink_to(data)
+    monkeypatch.chdir(root)
+    for arg in ([], ["original files/T"], [str(root / "original files/T")]):
+        assert extract_music.main(["--game", "tg", *arg]) == 0
+        assert "000.LFL: md5" in capsys.readouterr().err, arg
+    assert (root / "build/tg/music/midi/mt32/001.mid").is_file()
+    other = tmp_path_factory.mktemp("copy")
+    for f in data.iterdir():
+        (other / f.name).write_bytes(f.read_bytes())
+    assert extract_music.main(["--game", "tg", str(other), str(other / "out")]) == 0
+    assert "md5" not in capsys.readouterr().err

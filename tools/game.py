@@ -5,9 +5,10 @@
     python3 tools/game.py GAME KEY
 
 Standard library only, like tools/fresh.py, and it must run before `just setup` (on macOS the
-system python3 is 3.9, which has no tomllib): without tomllib it reads `key = "string"` lines
-before the first table, which is all the justfile needs. migs.games reads the whole file and
-checks it; tests/test_games.py checks both read the same values.
+system python3 is 3.9, which has no tomllib): without tomllib it reads one-line string values
+before the first table, `key = "basic"` or `key = 'literal'`, which is all the justfile needs.
+migs.games reads the whole file and checks it; tests/test_games.py checks both read the same
+values.
 """
 
 import re
@@ -23,9 +24,11 @@ def values(text: str) -> dict:
         for line in text.splitlines():
             if line.lstrip().startswith("["):
                 break
-            m = re.match(r'\s*([A-Za-z0-9_-]+)\s*=\s*"((?:[^"\\]|\\.)*)"', line)
-            if m:
+            m = re.match(r'\s*([A-Za-z0-9_-]+)\s*=\s*(?:"((?:[^"\\]|\\.)*)"|\'([^\']*)\')\s*(#.*)?$', line)
+            if m and m.group(2) is not None:
                 out[m.group(1)] = m.group(2).replace('\\"', '"').replace("\\\\", "\\")
+            elif m:
+                out[m.group(1)] = m.group(3)
         return out
     return {k: v for k, v in tomllib.loads(text).items() if isinstance(v, str)}
 
