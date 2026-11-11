@@ -640,6 +640,54 @@ Main per-song gains come from the raw-loop rate alone; shared and shared-pitch h
   - shared-hybrid unchanged.
 - **Default (2026-11-09).** After listening ("Nailed it!"), `pitch_zones = "hybrid"`, `sample_budget = "value"` and `drum_fill_block = true` became the defaults for both modes, and the trial modes became `per-song` / `shared`. The measurements above name them `per-song-hybrid` / `shared-hybrid`; the old planner is a commented `[modes.per-song-weighted]` example in `config/ntp.toml`.
 
+### Attacks sized to their measured length (trial `attack-per-song` / `attack-shared`, 2026-11-10; rejected and removed 2026-11-11)
+**Question (user):** are attack blocks sized to the attack they hold, and do they use all their RAM?
+
+**How attacks are stored:**
+- Every looped sound gets a fixed attack block: 2040 B (a 2 KB block with the 8 stopper bytes), or 1016 B where `ntp_attack_bytes` says so.
+- The block is always full. The attack is cut to exactly that many bytes at the sound's rate, so the rate only sets how long it lasts (2040 B: 97 ms at 21 kHz, 213 ms at 9.6 kHz).
+- Loops and attacks are separate power-of-two blocks in swap mode.
+
+**Measured** (every built looped sample, `loopbuild.settle`'s attack end against what its attack holds):
+
+| | shared | per-song (16 songs) |
+|---|---|---|
+| attacks cut short | 7 of 15 | 55 of 145 |
+| attack pages now | 96 | 1128 |
+| pages to hold every whole attack at its rate | 408 | 5365 |
+
+- Most attacks are far shorter than their blocks: Acou Bass 10–52 ms, Marimba 14–43, Taiko 15, organs and Strings 35–44.
+- A few steady sounds settle slowly, plausibly the MT-32's filter sweeps: French Horn 1.0–1.1 s, Chorale 1.2–1.3 s, Trombone 162 ms (key 52) rising to 1.6 s (key 72).
+- `settle` is unreliable on wobble and beating: Elec Organ measures 46 ms at key 64 but 1731 ms at 63 and 2364 ms at 71.
+
+**Trial rule** (a pass before the value budget):
+1. Each attack became the smallest of 504/1016/2040 B holding `settle`'s end plus the 4-cycle crossfade, at most `attack_bytes`. 248 B was excluded: GSSquared starts swap loops up to 255 samples early.
+2. A change was kept only if `loopbuild.attack_error_db` (spectral shape vs Munt, first 0.5 s) worsened by at most 0.1 dB.
+3. Freed pages went to the budget and loop growth; zones were priced by the blocks their own fitted attacks added.
+4. Where a block held more than the attack, a short loop's rate rose to the highest whole-cycle rate that still fit.
+
+**Results:**
+- *per-song:*
+  - 18 attacks changed: 14 shrank 2040 → 1016 B, and 4 MI153 organ attacks grew 1016 → 2040 B (attack error 3.6–4.8 → 2.7–4.2 dB).
+  - DOC use fell 4–20 pages in 7 songs. MI161 and MI162 spent it on 8 KB raw loops.
+  - Losses: MI153's grown attacks cost Pipe Organ Lo2 its second zone and Pipe Organ Lo 48 its raw loop, and MI160 lost a Panpipes zone. Steals rose 398 → 408.
+- *shared:*
+  - Five 1016 B attacks grew back to 2040 B (Sax 1.03 → 0.61 dB), for +12 pages.
+  - Those pages came out of the drums: Mute Conga, Conga and Claves lost their upgrades. Steals rose 103 → 111.
+- *Step 4 never fired at `max_rate` = 22 kHz.* With its cap raised to the DOC's 26 320 Hz, it fired once (per-song MI153 Pipe Organ Lo 43, 12 557 → 25 114 Hz) with attack error unchanged (3.59 dB). Why:
+  - E′+ needs whole samples per cycle in a power-of-two loop, so a key's rates are an octave apart and the only step is doubling.
+  - Only rates below 13.2 kHz can double.
+  - Short attacks had just been moved into blocks with no room to double, and long ones don't fit twice the bytes.
+
+**Why not kept:** the user heard no difference ("the difference is inaudible"). Shrink-only would have dropped only step 4 and the growth (about 20 of 290 lines). It would have kept the pass, the budget plumbing and the cross-pass interactions. Pricing growth inside the value budget would have added a third measure and an onset-weighted exposure, on top of the budget's existing assumption that dB on different measures are equal.
+
+**Kept:** `play`, `to_bytes`, `attack_error_db` and `DOC_RATE` moved from `looplab.py` to `loopbuild.py`, so the build can use them without the lab.
+
+**Rate limits, for reference:**
+- The DOC's useful ceiling is its output rate, 894 886 / 34 = 26 320 Hz with all 32 oscillators enabled. Above it, the oscillator skips bytes and aliases.
+- `max_rate` = 22 kHz for melodic samples is ours ("Rate above 22 kHz: dropped", above).
+- Drums go to 26 kHz (`drum_max_rate`).
+
 ## Track allocation (`convert_song`; current rules, 2026-11-07)
 NTP has no voice allocation: each MOD track owns its oscillators for the whole song (`determine_osc_per_track`). So `convert_song` assigns every note to a track itself, once, in onset order.
 
