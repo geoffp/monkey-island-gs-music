@@ -4,7 +4,7 @@
 import pytest
 
 from migs.midisynth import Bank, Instrument, SeqItem, Sequence, envelope, wavelist
-from migs.voices import envelope_end, report, spans
+from migs.midisynth_voices import envelope_end, report, spans
 
 
 def test_voice_estimate_counts_envelope_tails_not_note_length():

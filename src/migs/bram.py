@@ -2,7 +2,7 @@
 """Apple IIGS battery RAM (BRAM) in GSSquared .gs2 machine configs.
 
 GSSquared stores the 256-byte BRAM as `bram = "<512 hex digits>"` in the .gs2 and writes it
-back on quit. `migs.emu` (gs2-config) uses this module to patch Control Panel settings and to
+back on quit. `migs.gs2config` (gs2-config) uses this module to patch Control Panel settings and to
 fix the checksum, so the IIgs accepts them (an invalid checksum makes the ROM reset BRAM to
 its defaults).
 

@@ -16,6 +16,9 @@ import numpy as np
 PAGE = 256
 PAGES = 256
 SILENCE = 0x80
+# Output rate with all 32 oscillators enabled: 7.159 MHz / 8 / (32 + 2) = 894886 / 34 = 26320.2 Hz,
+# used rounded (docsim resamples Munt's 32 kHz to it exactly as 329/400).
+DOC_RATE = 26320
 
 
 @dataclass

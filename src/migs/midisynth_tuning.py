@@ -15,7 +15,8 @@ from __future__ import annotations
 
 import math
 
-DOC_RATE = 26320                     # Hz with 32 oscillators enabled
+from .docram import DOC_RATE
+
 FREQ_A4_OCT4 = 2197                  # measured DOC freq register
 B0 = DOC_RATE / 512 * FREQ_A4_OCT4   # bytes/s at A4, octave 4, sample mode
 FINE_STEPS = 64                      # fine-tune steps per semitone

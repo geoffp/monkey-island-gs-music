@@ -229,7 +229,7 @@ fetch-docs:
     @{{fresh}} get "{{ers_url}}" "{{vendor}}/docs/apda_midisynth_synthlab_ocr.pdf" {{ers_sha}} || echo "warning: skipped the MIDI Synth ERS PDF (download failed); the build doesn't need it"
     @{{fresh}} get "{{manual_url}}" "{{vendor}}/docs/synthlab_usersmanual.pdf" {{manual_sha}} "{{wb}}/20260514232548id_/{{manual_url}}" || echo "warning: skipped the synthLAB manual PDF (download failed); the build doesn't need it"
 
-# GSSquared machine configs are generated into build/disks/<name>.gs2 by `gs2-config` (migs.emu),
+# GSSquared machine configs are generated into build/disks/<name>.gs2 by `gs2-config` (migs.gs2config),
 # keeping the id/battery RAM GSSquared saves on quit. Battery RAM is patched so the IIgs
 # boots straight from the right slot with the built-in 5.25" drives off (slot 6 = Your Card).
 # speed: 1.024mhz | 2.8mhz | 7.159mhz | 14.3mhz | ludicrous
@@ -322,7 +322,7 @@ seq: stock-banks mt32bank
     rm -rf build/seq/stock && uv run mid2seq build/music/midi/gm/*.mid -p stock -o build/seq/stock -b "{{vendor}}/synthlab"
     rm -f build/seq/mt32/*.SEQ && uv run mid2seq build/music/midi/mt32/*.mid -p mt32 -o build/seq/mt32 -b build/seq/mt32
 
-# Sample the MT-32 (Munt) into our MI1 bank per config/mt32bank.toml -> build/seq/mt32/MI1.{BNK,WAV,map.toml}
+# Sample the MT-32 (Munt) into our MI1 bank per config/mt32sounds.toml -> build/seq/mt32/MI1.{BNK,WAV,map.toml}
 mt32bank: fetch-munt
     uv run mt32bank -o build/seq/mt32
 
@@ -366,7 +366,7 @@ ntpmod-force modes=ntp_modes:
     just ntpmod "{{modes}}"
 
 # Loop lab (research, not part of the build): attack detection + loop-construction candidates
-# measured on the MT-32 sample set -> build/looplab/ (report.md, wav/, plots/). docs/loop-detection.md
+# measured on the MT-32 sample set -> build/looplab/ (report.md, wav/, plots/). docs/sample-construction.md
 looplab mode="shared": fetch-ntp fetch-munt
     uv run --group lab looplab build/music/midi/mt32/*.mid --samples "{{mode}}"
 
@@ -386,7 +386,7 @@ ntp modes=ntp_modes: (ntpmod modes)
         uv run ntpcheck --shared build/ntp/$m/*.ntp | tail -1;; esac
     done
 
-# Tuning experiment bank/sequence (build/seq/tune/TUNE.*), see src/migs/tunetest.py
+# Tuning experiment bank/sequence (build/seq/tune/TUNE.*), see src/migs/midisynth_tunetest.py
 tunetest:
     uv run tunetest -o build/seq/tune
 
@@ -424,7 +424,7 @@ synthlab-disk: fetch-system6 seq drum-audition tunetest
       case "$1" in *.SEQ) t=d50001;; *.BNK) t=d60001;; *.WAV) t=d80004;; *) return;; esac
       cp "$1" "$2/$(basename "$1")#$t"
     }
-    for prof in $(uv run python -I -c "import tomllib;c=tomllib.load(open('config/instruments.toml','rb'));print(' '.join(f'{k}:{v[\"folder\"]}:{c[\"banks\"][v[\"default_bank\"]][\"file\"]}:{c[\"banks\"][v[\"default_bank\"]][\"wave_file\"]}' for k,v in c['profiles'].items()))"); do
+    for prof in $(uv run python -I -c "import tomllib;c=tomllib.load(open('config/midisynth.toml','rb'));print(' '.join(f'{k}:{v[\"folder\"]}:{c[\"banks\"][v[\"default_bank\"]][\"file\"]}:{c[\"banks\"][v[\"default_bank\"]][\"wave_file\"]}' for k,v in c['profiles'].items()))"); do
       IFS=: read -r name folder bnk wav <<< "$prof"
       d="$st/synthLAB/$folder"; mkdir -p "$d"
       for f in build/seq/$name/*.SEQ; do typed "$f" "$d"; done

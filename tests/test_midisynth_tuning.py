@@ -3,7 +3,7 @@
 
 import pytest
 
-from migs.doc_tuning import (bytes_per_second, decode, encode, rate_for, segment_rate,
+from migs.midisynth_tuning import (bytes_per_second, decode, encode, rate_for, segment_rate,
                              single_cycle_tuning, tuning_for)
 
 

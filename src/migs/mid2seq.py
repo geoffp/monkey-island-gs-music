@@ -3,7 +3,7 @@
 
 MIDI Synth model (docs/iigs-midisynth.md):
 - the MIDI channel selects the instrument slot in the bank, so each source channel is
-  rewritten to the slot that should play it (config/instruments.toml); Program Change is dropped;
+  rewritten to the slot that should play it (config/midisynth.toml); Program Change is dropped;
 - only notes, CC7 (volume), CC64 (sustain) and pitch bend reach the synth; the rest is dropped;
 - timestamps are 96 ticks per quarter note; we keep the source ticks and pick the tempo
   that makes them play at the right speed (MI1: 120 ticks at 120 BPM -> file tempo 75);
@@ -55,7 +55,7 @@ def _is_note(m: mido.Message) -> bool:
 
 @dataclass
 class BankMap:
-    """How a bank's slots play GM programs and rhythm keys (config/instruments.toml)."""
+    """How a bank's slots play GM programs and rhythm keys (config/midisynth.toml)."""
     name: str
     file: str
     rhythm_slot: int
@@ -288,7 +288,7 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("inputs", nargs="+", type=Path, help="GM MIDI files")
     ap.add_argument("-o", "--out-dir", type=Path, required=True)
-    ap.add_argument("-c", "--config", type=Path, default=Path("config/instruments.toml"))
+    ap.add_argument("-c", "--config", type=Path, default=Path("config/midisynth.toml"))
     ap.add_argument("-p", "--profile", default="stock", help="export profile in the config")
     ap.add_argument("-b", "--bank-dir", type=Path,
                     help="directory holding the bank files, to check key zones")

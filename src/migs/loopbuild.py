@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""E'+ attack + loop construction for the NTP build's short loops (docs/loop-detection.md).
+"""E'+ attack + loop construction for the NTP build's short loops (docs/sample-construction.md).
 
 - Attack detection: a pitch-synchronous STFT (window = an integer number of periods, so harmonic
   h sits exactly on bin n*h) gives one amplitude track per harmonic (`harmonic_tracks`); a sound
@@ -22,9 +22,8 @@ import numpy as np
 from scipy.signal import resample
 
 from .audio import interp_at, onset, refine_period, smooth
+from .docram import DOC_RATE
 from .munt import SR
-
-DOC_RATE = 894886 / 34              # DOC output rate with 32 oscillators enabled (doc_tuning rounds it)
 
 
 @dataclass
@@ -309,7 +308,7 @@ def join_aligned(x: np.ndarray, a: int, period: float, rate: float, k: int, atta
 @dataclass
 class Sound:
     name: str
-    m: dict                 # its [[melodic]] entry in config/mt32bank.toml
+    m: dict                 # its [[melodic]] entry in config/mt32sounds.toml
     x: np.ndarray           # long render (analysis + audio)
     a: int
     period: float

@@ -482,7 +482,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("inputs", nargs="+", type=Path, help="MT-32 MIDI files (build/music/midi/mt32)")
     ap.add_argument("-o", "--out-dir", type=Path, required=True)
     ap.add_argument("--config", type=Path, default=Path("config/ntp.toml"))
-    ap.add_argument("--spec", type=Path, default=Path("config/mt32bank.toml"))
+    ap.add_argument("--spec", type=Path, default=Path("config/mt32sounds.toml"))
     ap.add_argument("--make-tables", type=Path, default=Path("vendor/ntp/src/make_tables.php"))
     ap.add_argument("--smf2wav", type=Path, default=Path("vendor/munt/bin/mt32emu-smf2wav"))
     ap.add_argument("--roms", type=Path, default=Path("original files/mt-32 roms"))

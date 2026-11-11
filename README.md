@@ -29,10 +29,10 @@ Tracked files are inputs; everything generated goes to `build/`.
 src/migs/          Python package (extraction, conversion, NTP, emulator tools)
 tests/             unit tests (`just test`)
 docs/              format notes, findings, sources
-plans/             deferred plans and the TODO list
+plans/             deferred plans and the backlog
 config/            hand-maintained settings
-  instruments.toml   MIDI Synth export profiles: MI1 channel -> bank slot / drum keys
-  mt32bank.toml      the MT-32 sounds to sample (MIDI Synth bank and NTP)
+  midisynth.toml     MIDI Synth export profiles: MI1 channel -> bank slot / drum keys
+  mt32sounds.toml    the MT-32 sounds to sample (NTP and the MIDI Synth bank)
   ntp.toml           MOD/NTP conversion (timing, sample sizes, build variants, per-song overrides)
   song_names.toml    names for sound ids (optional; not present yet)
   emu/default-bram.hex  battery-RAM seed for the emulator configs
@@ -105,7 +105,7 @@ These go in `original files/`, which is gitignored and never committed:
 
    It renders previews of each to `<mode>/wav/` (ffmpeg/libopenmpt). `just ntpmod inst-per-song` builds just one.
    A mode whose inputs (code, `config/`, MIDI, converter, justfile) haven't changed since its last successful build is skipped, and so are the `.NTP` conversion and the disk image; `just ntpmod-force` (or `just clean`) rebuilds anyway.
-   `just looplab` measures attack/loop construction methods on the MT-32 samples (`build/looplab/report.md`, A/B WAVs, plots; see `docs/loop-detection.md`).
+   `just looplab` measures attack/loop construction methods on the MT-32 samples (`build/looplab/report.md`, A/B WAVs, plots; see `docs/sample-construction.md`).
 4. **NinjaTrackerPlus, IIGS**: `just emu` converts the MODs to `.NTP`, builds the disk (`just disk`) and boots straight into SenseiPlay. Open `songs`, then `INST.PER.SONG` or `INST.SHARED`, and press Return on a song.
 5. **Experimental aside, MIDI Synth on the IIGS**: `just emu-synthlab` boots the synthLAB disk; open `MI.SYNTHLAB/synthLAB/synthLAB`, then a sequence from the `Stock` or `MT32` folder. It also has SenseiPlay and the NTP songs in `/SenseiPlay/MI` (launch `sensei.system`).
 

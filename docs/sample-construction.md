@@ -1,6 +1,6 @@
 # Attack detection and loop construction for the NTP samples
 
-Research and measurements, 2026-11-07 (branch `loop-research`). Tool: `src/migs/looplab.py`, run with `just looplab [mode]` (output in `build/looplab/`: `report.md`, `wav/`, `plots/`). Tests: `tests/test_looplab.py`.
+Research and measurements, 2026-11-07 (branch `loop-research`). Tool: `src/migs/looplab.py`, run with `just looplab [mode]` (output in `build/looplab/`: `report.md`, `wav/`, `plots/`). Tests: `tests/test_loopbuild.py` (construction), `tests/test_looplab.py` (lab metrics).
 
 **Goal (user):** a reliable, RAM-efficient and good-sounding way to build the attack and sustain-loop sections:
 - no buzz, no audible seam and no handover jump, for every sound, without tuning each sound by hand;
@@ -201,7 +201,7 @@ Every other build number is unchanged in both modes, except one delayed note in 
 
 Keep today's attack sizes. (Xylophone is now a one-shot, see above; Taiko doesn't qualify.)
 
-**For long per-song raw loops,** use the seam search (C) with the adaptive crossfade. Choose the length at a whole number of beat periods (the Elec Organ / Shakuhachi follow-up in `plans/TODO.md`). Measure them with the same metrics.
+**For long per-song raw loops,** use the seam search (C) with the adaptive crossfade. Choose the length at a whole number of beat periods (the Elec Organ / Shakuhachi follow-up in `plans/backlog.md`). Measure them with the same metrics.
 
 **Integration:**
 - E′+ was trialled as the `per-song-e` / `shared-e` build variants (`docs/ninjatrackerplus.md`).

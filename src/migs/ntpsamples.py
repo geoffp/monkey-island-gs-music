@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""NinjaTrackerPlus samples from Munt renders of the sounds in config/mt32bank.toml.
+"""NinjaTrackerPlus samples from Munt renders of the sounds in config/mt32sounds.toml.
 
 Melodic sample = raw MT-32 attack (`attack_bytes`, loop header) + a loop holding k identical
 sustain cycles at a rate that makes the loop exactly k periods; note base + finetune make it
@@ -8,7 +8,7 @@ may grow long raw loops into free DOC RAM (plan_loops). Decaying sounds that rea
 floor within their attack + loop budget become one-shots; drums are one-shots ending at that
 floor. Levels are measured in Munt, not guessed: each sample's peak, its velocity and key
 responses, and the MT-32's channel-volume (CC7) curve. Everything is sized and packed the way
-NTP packs DOC RAM. See docs/ninjatrackerplus.md and docs/loop-detection.md.
+NTP packs DOC RAM. See docs/ninjatrackerplus.md and docs/sample-construction.md.
 """
 
 from __future__ import annotations
@@ -288,7 +288,7 @@ def loop_construction(cfg: dict) -> str:
 def eprime_attack_and_loop(m: dict, x: np.ndarray, a: int, period: float, rate: float, k: int,
                            attack_bytes: int, loop_bytes: int, hold: float, render, notes: int = 1
                            ) -> tuple[np.ndarray, np.ndarray, float, float]:
-    """E'+ (loop_construction = "eprime", the default; docs/loop-detection.md, code in loopbuild):
+    """E'+ (loop_construction = "eprime", the default; docs/sample-construction.md, code in loopbuild):
     - one cycle with each harmonic at its RMS level over the sustain (power-averaged: beating
       partials keep their mean power), phases from the period where the attack ends;
     - tiled k times with whole samples per cycle (k | loop_bytes: see best_tuning), and an
@@ -639,7 +639,7 @@ def build_melodic(m: dict, cfg: dict, keys: tuple[int, int], munt: Munt, tables,
     src = _Source(x, a, a + int(hold * SR), audio.rms_envelope(x), period * notes,
                   (min(keys[0], m["key"]), max(keys[1], m["key"])), notes)
     steady = is_steady(src.env, a, src.off, sustain_s)
-    # short loops: "eprime" (default) = E'+ (docs/loop-detection.md); "averaged" = the
+    # short loops: "eprime" (default) = E'+ (docs/sample-construction.md); "averaged" = the
     # original averaged cycle (attack_and_loop), fractional samples per cycle
     eprime = loop_construction(cfg) == "eprime"
     loop_bytes, (err, k, rate, n0, ft) = _tune_loop(m, src, cfg, tables, steady, sustain_s, eprime)
@@ -802,7 +802,7 @@ def rest_sample() -> ModSample:
 
 def build_samples(spec: dict, cfg: dict, key_ranges: dict[int, tuple[int, int]], munt: Munt, tables,
                   log=print) -> tuple[list[ModSample], dict, dict]:
-    """Samples per config/mt32bank.toml; returns (samples, program -> index (or key-split
+    """Samples per config/mt32sounds.toml; returns (samples, program -> index (or key-split
     list of (lo, hi, index)), rhythm key -> (index, note, level gain))."""
     hold = spec.get("hold_seconds", 2.0)
     samples: list[ModSample] = []

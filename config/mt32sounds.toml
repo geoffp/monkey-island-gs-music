@@ -1,6 +1,8 @@
-# MI1 custom MIDI Synth bank, sampled from the MT-32 through Munt (src/migs/mt32bank.py,
-# `just mt32bank`). One shared bank (16 slots, 64 KB DOC RAM) loaded once for every song.
+# The MT-32 sounds we sample through Munt, and which MT-32 programs / rhythm keys each covers.
+# Read by the NinjaTrackerPlus build (ntpmod / ntpsamples, with config/ntp.toml's NTP-only
+# settings), the loop lab, and the MIDI Synth MI1 bank (src/migs/mt32bank.py, `just mt32bank`).
 #
+# MI1 bank settings: one shared bank (16 slots, 64 KB DOC RAM) loaded once for every song.
 # Melodic slot = attack sample (one-shot, `attack_bytes`) + one sustain cycle looped (256 B),
 # with MIDI Synth's envelope fitted to the MT-32's. Drum zone = one-shot sample of `bytes`.
 # `covers` lists the MT-32 programs / rhythm keys that play this sound (merges). Drum keys

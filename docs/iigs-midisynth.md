@@ -179,7 +179,7 @@ The `num_inst` byte doesn't always match the number of named slots: COMBO says 9
 - The stored-byte junk we ignore: leftover memory in Pascal-string padding, and unused data bytes in 1-byte messages. Semantic round trips of every sample pass (`tests/test_midisynth.py`).
 
 ## Our converter (`src/migs/mid2seq.py`, `just seq`)
-- Input: `build/music/midi/gm/*.mid`. Output: `build/seq/MInnn.SEQ`. Mapping: `config/instruments.toml`.
+- Input: `build/music/midi/gm/*.mid`. Output: `build/seq/MInnn.SEQ`. Mapping: `config/midisynth.toml`.
 - **Channel → slot:** each source channel's first GM program picks a bank slot (or a per-song override). Every event on that channel is rewritten onto the slot's channel. Each source channel gets its own seq track, named `"<ch> <instrument>"`.
 - **Rhythm:** GM drum keys are remapped to keys inside the kit's zones (`[banks.X.drums]`); unmapped keys are dropped.
 - **Kept:** notes, CC7, CC64, pitch bend. **Dropped:** program change, pan, reverb, modulation, SysEx. `c_volume[slot]` = the first CC7 value.
@@ -209,7 +209,7 @@ The `num_inst` byte doesn't always match the number of named slots: COMBO says 9
   - SYNTH Drum Kit 3: Kick 2 0–48, Snare 2 49–56, Toms 2 57–72, Clap 73–78, Hi-hat 2 79–96.
 - **Apple's own kit usage** (`SYNTH.SEQ`, channel 0 = Drum Kit 3, note-on counts): 43 ×120 (kick), 52 ×123 (snare), 60 ×6 (tom), 77 ×30 (clap), 85 ×291, 87 ×162, 89 ×3 (hi-hat). These are the best-known-good keys.
 - The stock kits have no conga, bongo, claves, cabasa or agogo samples. MI1 uses those heavily: side stick 676 hits, congas 1207, claves 422, cabasa 188.
-- **COMBO Drum Kit 1 by ear** (user audition of `AUDIT00.SEQ`, 2026-11-06; raw notes in `docs/midisynth-drum-keys-audit.md`). Audition key = 28 + (measure − 2) × 4 + (beat − 1).
+- **COMBO Drum Kit 1 by ear** (user audition of `AUDIT00.SEQ`, 2026-11-06; raw notes in `docs/midisynth-drum-audition-notes.md`). Audition key = 28 + (measure − 2) × 4 + (beat − 1).
 
   | heard | measure:beat | keys | decoded zone (wave name) |
   |---|---|---|---|
@@ -259,7 +259,7 @@ Measured in GSSquared by playing `/synthLAB/Tune/TUNE.SEQ` and sampling the Enso
 
 ## Voice pressure: what makes MIDI Synth steal notes (2026-11-06)
 - **Symptom** (MT32 profile, MI160): sustained notes dropped out one by one by measures 9–10, although the music didn't sound dense.
-- **Cause:** a voice is freed only when **both** generators' envelopes reach 0 (ERS p.16), not at note-off. MIDI Synth then steals the *least noticeable* voice, apparently the quietest. That made sustained notes idling at their sustain level (organ ≈ 39) lose to loud-but-inaudible tails. `just voices` (src/migs/voices.py) replays each sequence against the bank's envelopes to estimate this.
+- **Cause:** a voice is freed only when **both** generators' envelopes reach 0 (ERS p.16), not at note-off. MIDI Synth then steals the *least noticeable* voice, apparently the quietest. That made sustained notes idling at their sustain level (organ ≈ 39) lose to loud-but-inaudible tails. `just voices` (src/migs/midisynth_voices.py) replays each sequence against the bank's envelopes to estimate this.
 - **What held voices,** in order: slow release and decay tails (marimba held 0.13 s median, but busy ~3× longer); drum voices kept until note-off (MT-32 drums ignore note-off, so MI1 holds them); a "silent" Generator 2 whose envelope sat at 127 until note-off; drum kits that lasted the whole sample.
 - **Fixes:**
   - the converter gates rhythm notes to ≤ 50 ms (`DRUM_GATE_SECONDS`; both profiles);
@@ -276,7 +276,7 @@ Measured in GSSquared by playing `/synthLAB/Tune/TUNE.SEQ` and sampling the Enso
 
   Held notes alone (no tails) exceed 7 voices for 23% of MI160, so that song needs musical thinning on top of this.
 
-## Custom MT-32 bank: MI1 (`just mt32bank`, config/mt32bank.toml, src/migs/mt32bank.py; Munt rendering in munt.py, analysis in audio.py, DOC RAM placement in docram.py)
+## Custom MT-32 bank: MI1 (`just mt32bank`, config/mt32sounds.toml, src/migs/mt32bank.py; Munt rendering in munt.py, analysis in audio.py, DOC RAM placement in docram.py)
 - **Why one shared bank:** a game port can't stop to load banks between songs. The bank is loaded once and every sequence references `MI1.BNK`.
 - **Effects reserve:** `reserve_pages` (16 = 4 KB) keeps DOC pages free at the top for game sound effects, which MIDI Synth's generator 7 plays from the same 64 KB.
 - **Slot layout:**

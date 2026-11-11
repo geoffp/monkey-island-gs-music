@@ -5,7 +5,7 @@
 Each instrument plays one sine cycle (stored at a given wave size) with its own tuning.
 TUNE.SEQ plays A4 (69) then A3 (57) on each instrument in turn: a 3 s slot per note, the
 note held 2.5 s, at 1 s quarter notes (half-note tempo 30). While it plays, `gs2-docscope`
-(migs.gs2client) logs the DOC registers; the fitted model is migs.doc_tuning, the results
+(migs.gs2client) logs the DOC registers; the fitted model is migs.midisynth_tuning, the results
 docs/iigs-midisynth.md "Measured".
 """
 

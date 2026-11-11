@@ -12,7 +12,7 @@
 default_bank = "COMBO"
 folder = "Stock"
 
-[profiles.mt32]           # our MT-32-sampled bank (in testing): `just mt32bank`, config/mt32bank.toml
+[profiles.mt32]           # our MT-32-sampled bank (in testing): `just mt32bank`, config/mt32sounds.toml
 default_bank = "MI1"
 folder = "MT32"
 source = "mt32"           # convert build/music/midi/mt32 (MT-32 program numbers and rhythm keys)
@@ -51,7 +51,7 @@ fallback_slot = 2
 "49" = 2    # String Ens. 2    -> Synth Lead
 "96" = 8    # FX 1 (rain)      -> Dx Marimba
 
-# Drum Kit 1 zones by ear (docs/midisynth-drum-keys-audit.md, translated in
+# Drum Kit 1 zones by ear (docs/midisynth-drum-audition-notes.md, translated in
 # docs/iigs-midisynth.md "Drum kits"): kick 28-47 | snare 48-55 | toms 56-71 low->high |
 # ride 72-77 | open hat 78-83 | closed hat 84 (Hi-hat zone 79-84; hats at its top, like
 # Apple's 85-89 on Kit 3) | 85+ Rim, unusable. No real crash: the top of the cymbal zone stands in.

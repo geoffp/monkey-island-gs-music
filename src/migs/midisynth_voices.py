@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple
 
-from .doc_tuning import ENVELOPE_RATE_SECONDS
+from .midisynth_tuning import ENVELOPE_RATE_SECONDS
 from .midisynth import ENVELOPE_SIZE, INSTRUMENT_SIZE, Bank, Sequence
 
 VOICES = 7

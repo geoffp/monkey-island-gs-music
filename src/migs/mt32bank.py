@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Build the MI1 MIDI Synth bank by sampling the MT-32 (Munt) per config/mt32bank.toml.
+"""Build the MI1 MIDI Synth bank by sampling the MT-32 (Munt) per config/mt32sounds.toml.
 
 Melodic slot: OscConfig 3 = osc A plays a short attack sample once, then osc B loops one
 sustain cycle (256 B, single-cycle mode). The attack is "flattened" (divided by its own
 loudness contour) and MIDI Synth's envelope is fitted to the MT-32's contour instead, so the
 attack -> loop handover is level. Drum zone: one-shot sample. Tuning uses the measured model
-in doc_tuning.py. Writes <out>/MI1.BNK, MI1.WAV and MI1.map.toml (program/drum -> slot/key).
+in midisynth_tuning.py. Writes <out>/MI1.BNK, MI1.WAV and MI1.map.toml (program/drum -> slot/key).
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ from pathlib import Path
 import numpy as np
 from scipy.signal import resample
 
-from . import doc_tuning as dt
+from . import midisynth_tuning as dt
 from .audio import one_cycle, onset, pitch_offset, refine_period, rising_zero, rms_envelope
 from .docram import SILENCE, Wave, allocate, ram_image, to_doc
 from .midisynth import INSTRUMENT_SIZE, INSTRUMENTS, WAVELISTS, Bank, Instrument, WaveBank, envelope, wavelist
@@ -282,7 +282,7 @@ def map_toml(spec_path: Path, programs: dict[int, int], drums: dict[int, list[in
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--spec", type=Path, default=Path("config/mt32bank.toml"))
+    ap.add_argument("--spec", type=Path, default=Path("config/mt32sounds.toml"))
     ap.add_argument("--smf2wav", type=Path, default=Path("vendor/munt/bin/mt32emu-smf2wav"))
     ap.add_argument("--roms", type=Path, default=Path("original files/mt-32 roms"))
     ap.add_argument("--cache", type=Path, default=Path("build/cache/mt32samples"))

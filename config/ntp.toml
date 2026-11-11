@@ -1,5 +1,5 @@
 # MI1 -> ProTracker MOD (15CH) -> NinjaTrackerPlus. See docs/ninjatrackerplus.md.
-# Instruments/drums come from config/mt32bank.toml (same MT-32 sounds and merges as MI1.BNK).
+# Instruments/drums come from config/mt32sounds.toml (same MT-32 sounds and merges as MI1.BNK).
 #
 # Timing: rows sit on each song's detected grid unit (usually a 16th); rows_per_unit
 # subdivides it. Each note keeps its micro-timing with EDx (quantize = 0) or is snapped
@@ -17,7 +17,7 @@ attack_bytes = 2040     # loop header; NTP adds 8 stopper bytes -> one 2 KB DOC 
 loop_bytes = 512        # short loop: one cycle, tiled (decaying sounds; the minimum)
 loop_construction = "eprime"  # short loops. eprime: E'+ (whole samples per cycle, power-averaged
                         # harmonic cycle, exact zero crossing, phase-aligned attack; no 8-bit
-                        # loop-rate buzz; docs/loop-detection.md). averaged: the original
+                        # loop-rate buzz; docs/sample-construction.md). averaged: the original
                         # averaged cycle (fractional samples per cycle). Long raw loops: same in both.
 max_loop_bytes = 16384  # long loops (raw sustain, crossfaded seam) for steady sounds, grown per
                         # song into the DOC RAM that song's own samples leave free
@@ -44,7 +44,7 @@ max_rate = 22000
 release_max = 0.3       # seconds of release ramp after note-off
 pitch_plan = true       # choose each sound's sampled key(s), key zones and short-loop rate from
                         # the notes its songs play (pitchplan, measured with docsim against Munt;
-                        # default since 2026-11-09). false: config/mt32bank.toml's fixed key
+                        # default since 2026-11-09). false: config/mt32sounds.toml's fixed key
 pitch_move_gain_db = 0.5  # a single sample moves off the configured key only if this lowers the error
                         # (the measure covers the first 0.6 s, not the loop the move changes)
 pitch_zones = "hybrid"  # what each played key counts for. hybrid (default since 2026-11-09): half an
@@ -81,7 +81,7 @@ halt_released_loops = true  # end each release with a silent looped rest that re
 one_shots = true        # decaying sounds that reach the 8-bit floor (`one_shot_floor_lsb` RMS in
 one_shot_floor_lsb = 1.5  # a peak-normalised sample) within the DOC RAM their attack + loop would
 one_shot_max_rate_drop = 0.1  # take become one-shots (1 oscillator, exact tuning), at most 10 %
-                        # below the looped rate. docs/loop-detection.md "One-shots"
+                        # below the looped rate. docs/sample-construction.md "One-shots"
 drum_min_rate = 6000    # one-shot rate window (Hz); within it the rate follows each drum's
 drum_max_rate = 26000   # bandwidth, trading length for it (hats, shakers need ~26 kHz)
 drum_floor_lsb = 1.5    # drums end at the 8-bit floor (drum_end: junk near the floor after
@@ -123,7 +123,7 @@ base = "shared"
 # unit_ticks = 40.6     # override the detected grid unit (MI1 ticks, 120 per beat)
 # phase_ticks = 12.0
 
-# NTP-only sounds: split out of the shared bank's merges (config/mt32bank.toml). `slot` only
+# NTP-only sounds: split out of the shared bank's merges (config/mt32sounds.toml). `slot` only
 # needs to be unique; it isn't a MIDI Synth slot.
 # Optional: `keys = [lo, hi]` limits a sound to a key range (key splits: the MT-32 voices some
 # timbres differently by register; keys outside every range use the nearest one);

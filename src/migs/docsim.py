@@ -30,7 +30,7 @@ from pathlib import Path
 import numpy as np
 from scipy.signal import resample, resample_poly
 
-from .doc_tuning import DOC_RATE
+from .docram import DOC_RATE
 from .munt import SR
 
 N_FFT = 4096                     # at DOC_RATE: 6.4 Hz bins, so harmonics of key 28 (41 Hz) resolve
