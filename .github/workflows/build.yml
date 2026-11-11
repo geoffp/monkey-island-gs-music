@@ -29,7 +29,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y cmake g++ pkg-config libglib2.0-dev php-cli ffmpeg fluidsynth unzip
       - name: Host tools (macOS)
         if: runner.os == 'macOS'
-        run: brew install cmake pkg-config glib php dotnet ffmpeg fluid-synth
+        run: brew install cmake pkg-config glib php ffmpeg fluid-synth
       - run: just doctor
       - run: just setup
       - run: just test
@@ -44,4 +44,6 @@ jobs:
         with:
           usesh: true
           prepare: pkg install -y bash git just uv python3 curl cmake pkgconf glib php84 dotnet ffmpeg fluidsynth
-          run: just doctor && just setup && just test && just smoke
+          run: |
+            git config --global --add safe.directory "$PWD"   # the VM's root runs on the runner's checkout
+            just doctor && just setup && just test && just smoke
