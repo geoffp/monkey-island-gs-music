@@ -20,15 +20,22 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45             # a whole run takes ~4 min; don't sit out GitHub's 6 h limit
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
       - uses: extractions/setup-just@v4
+      # A stalled package mirror hung this step for 16+ minutes on 2026-11-11 (normally < 1):
+      # fail it after 10 and let apt retry slow downloads instead of waiting forever.
       - name: Host tools (Ubuntu)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y cmake g++ pkg-config libglib2.0-dev php-cli ffmpeg fluidsynth unzip
+        timeout-minutes: 10
+        run: |
+          apt="-o Acquire::Retries=3 -o Acquire::http::Timeout=30"
+          sudo apt-get $apt update && sudo apt-get $apt install -y cmake g++ pkg-config libglib2.0-dev php-cli ffmpeg fluidsynth unzip
       - name: Host tools (macOS)
         if: runner.os == 'macOS'
+        timeout-minutes: 15
         run: brew install cmake pkg-config glib php ffmpeg fluid-synth
       - run: just doctor
       - run: just setup
