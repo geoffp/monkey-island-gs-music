@@ -127,7 +127,7 @@ doctor:
     fi
     echo "host tools OK"
     # optional: song previews and the General MIDI renders
-    ffmpeg -hide_banner -demuxers 2>/dev/null | grep -q libopenmpt || echo "note: no ffmpeg with libopenmpt: MOD previews (build/<game>/ntp/<mode>/wav/) are skipped"
+    ffmpeg -hide_banner -demuxers 2>/dev/null | grep libopenmpt >/dev/null || echo "note: no ffmpeg with libopenmpt: MOD previews (build/<game>/ntp/<mode>/wav/) are skipped"
     command -v fluidsynth >/dev/null || echo "note: no fluidsynth: \`just render\` and \`just gm-wav\` won't run"
     [ -d "{{data}}" ] || echo "note: game data for {{game}} not found at '{{data}}' (see README)"
     [ -d "{{roms}}" ] || echo "note: no MT-32 ROMs at '{{roms}}' (needed only for MT-32 rendering)"
@@ -362,10 +362,17 @@ ntpmod modes=ntp_modes: extract fetch-ntp fetch-munt
     # (the build recipe's own text counts too: changing how it runs rebuilds)
     n={{out}}/ntp; mkdir -p $n; pids=(); recipe=$(just --show _ntpmod-one)
     for m in {{modes}}; do
-      {{fresh}} run "$n/$m/.inputs" {{ntp_inputs}} "text:$m" "text:$recipe" -- just _ntpmod-one "$m" > "$n/$m.log" 2>&1 & pids+=($!)
+      {{fresh}} run "$n/$m/.inputs" {{ntp_inputs}} "text:$m" "text:$recipe" -- just _ntpmod-one "$m" > "$n/$m.log.new" 2>&1 & pids+=($!)
     done
     fail=0; for p in "${pids[@]}"; do wait "$p" || fail=1; done
-    for m in {{modes}}; do echo "== samples: $m"; cat "$n/$m.log"; done
+    # a variant that was up to date keeps the log of the build that made it
+    for m in {{modes}}; do
+      if [ "$(cat "$n/$m.log.new")" = "$n/$m: up to date" ] && [ -f "$n/$m.log" ]; then
+        echo "== samples: $m: up to date (its build log: $n/$m.log)"; rm "$n/$m.log.new"
+      else
+        mv "$n/$m.log.new" "$n/$m.log"; echo "== samples: $m"; cat "$n/$m.log"
+      fi
+    done
     exit $fail
 
 # One variant's MODs and their previews (all cores)
@@ -374,7 +381,8 @@ _ntpmod-one mode:
     set -euo pipefail
     d="{{out}}/ntp/{{mode}}"; rm -rf "$d" && mkdir -p "$d/wav"
     uv run ntpmod --game {{game}} {{out}}/extracted/midi/mt32/*.mid -o "$d" --samples "{{mode}}"
-    if ffmpeg -hide_banner -demuxers 2>/dev/null | grep -q libopenmpt; then
+    # (not grep -q: it exits at the first match, ffmpeg dies of SIGPIPE, and pipefail fails the test)
+    if ffmpeg -hide_banner -demuxers 2>/dev/null | grep libopenmpt >/dev/null; then
       ls $d/*.mod | xargs -P {{num_cpus()}} -I{} sh -c \
         'ffmpeg -hide_banner -loglevel error -y -f libopenmpt -i "$1" -ac 2 -ar 44100 "$2/wav/$(basename "$1" .mod).wav"' _ {} "$d"
       echo "previews: $d/wav/"
