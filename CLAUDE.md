@@ -49,7 +49,7 @@ Pipeline:
   - write recipes for POSIX tools, not GNU-only flags (no `nproc`, `stat -c`, `sed -i`, `xargs -d`, `sha256sum`; use `num_cpus()`, `wc -c`, `tools/fresh.py`);
   - expect bash 3.2 (macOS);
   - choose downloads by `os()`/`arch()`, and when a tool has no build for a platform, say so and carry on rather than fail;
-  - `just selftest` checks a clean-clone build.
+  - `just selftest` checks a clean-clone build (with your game data); `just smoke` checks the fetched tools run; CI (`.github/workflows/build.yml`) runs setup, tests and smoke on Ubuntu, macOS and FreeBSD (allowed to fail), weekly too, to catch downloads that break.
 - Tasks: `justfile` (run `just` to list). Key recipes:
   - `just test`: unit tests;
   - `just extract`: MT-32 + GM MIDI and patch notes into `build/music/`;

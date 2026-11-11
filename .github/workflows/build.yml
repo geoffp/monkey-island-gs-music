@@ -1,0 +1,47 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Fresh-machine checks without the game data (it can't be in CI): every download and its pin,
+# the Munt build, the unit tests (including PHP running Ninjaforce's converter) and a smoke test
+# of the fetched tools. Linux is the base, macOS a goal, FreeBSD a stretch goal (allowed to fail).
+# The weekly run catches downloads that moved or changed before someone else hits them.
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 6 * * 1"          # Mondays 06:17 UTC
+
+jobs:
+  unix:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - uses: extractions/setup-just@v3
+      - name: Host tools (Ubuntu)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y cmake g++ pkg-config libglib2.0-dev php-cli ffmpeg fluidsynth unzip
+      - name: Host tools (macOS)
+        if: runner.os == 'macOS'
+        run: brew install cmake pkg-config glib php dotnet ffmpeg fluid-synth
+      - run: just doctor
+      - run: just setup
+      - run: just test
+      - run: just smoke
+
+  freebsd:
+    runs-on: ubuntu-latest
+    continue-on-error: true         # stretch goal: report, don't block
+    steps:
+      - uses: actions/checkout@v4
+      - uses: vmactions/freebsd-vm@v1
+        with:
+          usesh: true
+          prepare: pkg install -y bash git just uv python3 curl cmake pkgconf glib php84 dotnet ffmpeg fluidsynth
+          run: just doctor && just setup && just test && just smoke

@@ -92,7 +92,7 @@ default:
     @just --list
 
 # Fetch and build everything not under source control
-setup: doctor submodules sync fetch
+setup: doctor submodules sync fetch stock-banks
 
 # Check host tools (installed via your package manager)
 doctor:
@@ -446,6 +446,21 @@ synthlab-disk: fetch-system6 seq drum-audition tunetest
     {{dist_pack}} "$img"
     "$cp2" catalog "$img" | grep -E '^Disk|blocks free'
     "$cp2" list "$img" | grep -c . | sed 's/^/files: /'
+
+# Check that the fetched tools run on this machine, without the game data: CiderPress II makes
+# a ProDOS image and lists a file on it, Munt's smf2wav starts, GSSquared and gs2-mcp are
+# there where they have a build. (`just test` covers PHP and the NTP converter.)
+smoke: fetch-cp2 fetch-munt fetch-gssquared fetch-mcp
+    #!/usr/bin/env bash
+    set -euo pipefail
+    t=$(mktemp -d); trap 'rm -rf "$t"' EXIT
+    cp2="$PWD/{{cp2}}"
+    "$cp2" create-disk-image "$t/t.po" 140k prodos >/dev/null
+    echo hello > "$t/HELLO"; (cd "$t" && "$cp2" add t.po HELLO >/dev/null)
+    "$cp2" list "$t/t.po" | grep -q HELLO && echo "CiderPress II: OK ($("$cp2" version | head -1))"
+    "{{smf2wav}}" --help 2>&1 | grep -q "Munt" && echo "Munt smf2wav: OK"
+    if [ -x "{{gs2}}" ]; then echo "GSSquared: present"; else echo "GSSquared: none for {{platform}}"; fi
+    if [ -x "{{vendor}}/bin/gs2-mcp" ]; then echo "gs2-mcp: present"; else echo "gs2-mcp: none for {{platform}}"; fi
 
 # Catches what works here only because vendor/ and build/ already exist: in a clean clone of
 # HEAD (committed work only) with your original files linked in, run `just setup`, the tests,

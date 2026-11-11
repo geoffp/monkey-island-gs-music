@@ -1,13 +1,19 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """The ProTracker MOD writer (modfile)."""
 
+import shutil
 import struct
+import subprocess
+from pathlib import Path
 
 import numpy as np
+import pytest
 
-from migs import modfile
+from migs import modfile, ntpfile
 from migs import ntpsamples as smp
 from migs import ntpsong as sg
+
+from ntp_fixtures import MAKE_TABLES
 
 
 def test_mod_bytes_layout():
@@ -28,3 +34,23 @@ def test_mod_bytes_layout():
     assert w0 & 0xFFF == 428 and (w0 >> 12) == 0 and (w1 >> 12) == 1 and w1 & 0xFFF == 0xED2
     assert len(mod) == 1084 + 64 * 12 * 4 + 100
     assert modfile.mod_file("T", [s], sg.Grid(9), 1, tables)[1080:1084] == b"9CHN"
+
+
+CONVERTER = Path(__file__).resolve().parents[1] / "vendor" / "ntp" / "src" / "ntpconverter.php"
+
+
+@pytest.mark.skipif(not (CONVERTER.exists() and shutil.which("php")), reason="needs php and `just fetch-ntp`")
+def test_ninjaforce_converter_takes_our_mod(tmp_path):
+    """A MOD from our writer through Ninjaforce's PHP converter (`just ntp`'s step) to a .NTP
+    that parses: checks the host's PHP runs the converter, without the game."""
+    tables = smp.period_tables(MAKE_TABLES)
+    s = smp.ModSample("Sine", np.sin(np.linspace(0, 2 * np.pi * 8, 512)), loop_start=0, loop_len=512)
+    s.default_volume = 64
+    g = sg.Grid(4)
+    g.get(0, 0)[:] = [25, 1, 0, 0]
+    mod = tmp_path / "t.mod"
+    mod.write_bytes(modfile.mod_file("T", [s], g, 1, tables))
+    r = subprocess.run(["php", str(CONVERTER), str(mod), "STREAM_FORBIDDEN"], capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout[-2000:] + r.stderr[-2000:]
+    ntp = ntpfile.parse((tmp_path / "t.ntp").read_bytes())
+    assert (ntp.tracks, ntp.patterns, len(ntp.instruments)) == (4, 1, 1)
