@@ -1,10 +1,12 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""The loop lab's metrics and searches (looplab: seam step, seam flux, seam search, tuning), on
-synthetic tones with known answers. Loop construction itself is tested in test_loopbuild."""
+"""The loop lab's metrics and searches (looplab: seam step, seam flux, seam search, tuning, the
+handover check on an aligned join), on synthetic tones with known answers. Loop construction
+itself is tested in test_loopbuild."""
 
 import numpy as np
 
 from loop_fixtures import SR, cycle, tone
+from migs import loopbuild as lb
 from migs import looplab as ll
 from migs import ntpsamples as smp
 
@@ -42,3 +44,18 @@ def test_searched_raw_loop_beats_a_fixed_start_on_a_detuned_tone():
     starts = np.arange(0.2 * SR, 1.5 * SR, period / 4)
     best = min(ll.seam_score(x, s0, span, period) for s0 in starts)
     assert best < ll.seam_score(x, fixed, span, period)
+
+
+def test_aligned_join_keeps_level_and_zero_start():
+    f0 = 220.0
+    x = np.concatenate([np.zeros(500), tone(f0, 2.0, detune_hz=0.0)])
+    period = SR / f0
+    k, L = 16, 512
+    rate = L * f0 / k
+    loop = lb.loop_power(x, 600 + 4000, 600 + 20000, period, k, L)
+    attack, lp = lb.join_aligned(x, 500, period, rate, k, 1016, loop)
+    assert lp[0] == 0.0
+    qa, ql = lb.to_bytes(attack, lp)
+    lvl, jump = ll.handover(qa, ql, k)
+    assert abs(lvl) < 0.5 and jump < 1.0
+    assert smp.loop_buzz_db(ql, k) == -200.0

@@ -2,12 +2,10 @@
 """Arranging a song onto NinjaTrackerPlus tracks (ntpsong): grid, timing, levels, track
 allocation and steals, envelopes, the track plan."""
 
-from pathlib import Path
 
 import numpy as np
 import pytest
 
-from migs import audio
 from migs import ntpsamples as smp
 from migs import ntpsong as sg
 from ntp_fixtures import fake_sample, midi_song

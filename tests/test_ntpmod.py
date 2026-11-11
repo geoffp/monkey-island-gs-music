@@ -51,7 +51,6 @@ def test_hybrid_key_weights_mix_an_equal_share_with_note_time():
 
 def _budget(steps, plans=None, exposure=None, floor=0.01, last_page=255):
     import numpy as np
-    from migs import pitchplan as pp
     from migs import ntpsamples as smp
     mel = smp.ModSample("A", np.zeros(1016 + 512), loop_start=1016, loop_len=512)
     spec = {"melodic": [{"name": "A", "ntp_attack_bytes": 1016}]}

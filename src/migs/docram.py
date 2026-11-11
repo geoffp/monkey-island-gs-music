@@ -10,8 +10,10 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
-import numpy as np
+if TYPE_CHECKING:
+    import numpy as np
 
 PAGE = 256
 PAGES = 256
@@ -39,6 +41,8 @@ class Wave:
 def to_doc(y: np.ndarray, peak: float | None = None) -> bytes:
     """Signed float -> DOC unsigned 8-bit, `peak` (default: the signal's) at full scale;
     0 is never emitted."""
+    import numpy as np          # only here: the rest of this module (DOC_RATE, allocate) stays
+                                # numpy-free for the MIDI Synth tools (midisynth_tuning)
     peak = peak or (float(np.max(np.abs(y))) or 1.0)
     return bytes(np.clip(np.round(128 + 126 * y / peak), 1, 255).astype(np.uint8))
 

@@ -327,9 +327,9 @@ mt32bank: fetch-munt
     uv run mt32bank -o build/seq/mt32
 
 # Estimated MIDI Synth voice pressure per sequence (voices free only when envelopes reach 0)
-voices: seq
-    @echo "== stock"; uv run voices build/seq/stock/MI*.SEQ -b "{{vendor}}/synthlab"
-    @echo "== mt32";  uv run voices build/seq/mt32/MI*.SEQ -b build/seq/mt32
+midisynth-voices: seq
+    @echo "== stock"; uv run midisynth-voices build/seq/stock/MI*.SEQ -b "{{vendor}}/synthlab"
+    @echo "== mt32";  uv run midisynth-voices build/seq/mt32/MI*.SEQ -b build/seq/mt32
 
 # MT-32 MIDI -> ProTracker MODs within NinjaTrackerPlus limits (build/ntp/<mode>/MInnn.mod), for
 # each sample-set mode (default both), plus libopenmpt previews in build/ntp/<mode>/wav/. Config: config/ntp.toml
@@ -387,8 +387,8 @@ ntp modes=ntp_modes: (ntpmod modes)
     done
 
 # Tuning experiment bank/sequence (build/seq/tune/TUNE.*), see src/migs/midisynth_tunetest.py
-tunetest:
-    uv run tunetest -o build/seq/tune
+midisynth-tunetest:
+    uv run midisynth-tunetest -o build/seq/tune
 
 # Boot the NTP disk and sample the DOC oscillators to build/disks/docscope.jsonl while you play something
 docscope seconds="240": fetch-gssquared fetch-mcp disk
@@ -397,9 +397,9 @@ docscope seconds="240": fetch-gssquared fetch-mcp disk
     uv run gs2-docscope --config build/disks/mi-ntp.gs2 --seconds {{seconds}}
 
 # Drum-kit audition sequences (build/seq/stock/AUDITnn.SEQ + .txt key tables) for the default bank's kits
-drum-audition: stock-banks
-    uv run audition "{{vendor}}/synthlab/COMBO.BNK" 0 --wave "{{vendor}}/synthlab/COMBO.WAV" -o build/seq/stock --lo 28 --hi 100
-    uv run audition "{{vendor}}/synthlab/COMBO.BNK" 9 --wave "{{vendor}}/synthlab/COMBO.WAV" -o build/seq/stock --lo 28 --hi 100
+midisynth-drum-audition: stock-banks
+    uv run midisynth-audition "{{vendor}}/synthlab/COMBO.BNK" 0 --wave "{{vendor}}/synthlab/COMBO.WAV" -o build/seq/stock --lo 28 --hi 100
+    uv run midisynth-audition "{{vendor}}/synthlab/COMBO.BNK" 9 --wave "{{vendor}}/synthlab/COMBO.WAV" -o build/seq/stock --lo 28 --hi 100
 
 # Experimental aside (MIDI Synth): a ProDOS hard disk image for BazFast, sized like `disk`
 # (build/disks/MI.SYNTHLAB.PO, volume /MI.SYNTHLAB): System 6.0.4 merged from the
@@ -407,7 +407,7 @@ drum-audition: stock-banks
 # drivers) + SystemTools3 (sounds, fonts), Tool035, and /synthLAB with a folder per export
 # profile (Stock, ...), the tuning test (Tune), and /SenseiPlay with our NTP songs (MI).
 # Experimental aside: build the synthLAB disk, build/disks/MI.SYNTHLAB.PO
-synthlab-disk: fetch-system6 seq drum-audition tunetest
+synthlab-disk: fetch-system6 seq midisynth-drum-audition midisynth-tunetest
     #!/usr/bin/env bash
     set -euo pipefail
     shopt -s extglob                       # !(SenseiPlay) below

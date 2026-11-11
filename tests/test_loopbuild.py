@@ -7,7 +7,6 @@ import numpy as np
 
 from loop_fixtures import SR, cycle, tone, with_sub_octave
 from migs import loopbuild as lb
-from migs import looplab as ll
 from migs import ntpsamples as smp
 
 
@@ -75,21 +74,6 @@ def test_exponential_decay_is_classed_as_decaying_with_its_rate():
 
 
 # --- joining ---------------------------------------------------------------------
-
-def test_aligned_join_keeps_level_and_zero_start():
-    f0 = 220.0
-    x = np.concatenate([np.zeros(500), tone(f0, 2.0, detune_hz=0.0)])
-    period = SR / f0
-    k, L = 16, 512
-    rate = L * f0 / k
-    loop = lb.loop_power(x, 600 + 4000, 600 + 20000, period, k, L)
-    attack, lp = lb.join_aligned(x, 500, period, rate, k, 1016, loop)
-    assert lp[0] == 0.0
-    qa, ql = lb.to_bytes(attack, lp)
-    lvl, jump = ll.handover(qa, ql, k)
-    assert abs(lvl) < 0.5 and jump < 1.0
-    assert smp.loop_buzz_db(ql, k) == -200.0
-
 
 def test_aligned_join_starts_the_loop_at_its_gentlest_rising_crossing():
     """The DOC's swap to the loop oscillator slips by a fraction of a sample; at a steep

@@ -224,9 +224,9 @@ The `num_inst` byte doesn't always match the number of named slots: COMBO says 9
   - The zone boundaries match the decoded TopKeys to within a key, which is about the resolution of measure-level notes.
   - **Hats:** the "Hi-hat" zone is open hat for most of its range and closed hat at its top key (84). That matches Apple playing hats near the top of the zone (85–89 on Kit 3). **The kit has no crash** (the top of the ride/"Cymbal" zone, 78, stands in) and no rim/side stick (the "Rim" zone, 85+, is unusable).
   - Drum Kit 2 (`AUDIT09.SEQ`) hasn't been auditioned yet.
-- `just drum-audition` builds `AUDITnn.SEQ` (nn = kit slot). It plays one hit per beat across a key range, so synthLAB's measure:beat counter identifies the key. `build/seq/AUDITnn.txt` lists measure:beat → key.
+- `just midisynth-drum-audition` builds `AUDITnn.SEQ` (nn = kit slot). It plays one hit per beat across a key range, so synthLAB's measure:beat counter identifies the key. `build/seq/AUDITnn.txt` lists measure:beat → key.
 
-## Measured: how MIDI Synth drives the DOC (2026-11-06, `just tunetest` + `just docscope`)
+## Measured: how MIDI Synth drives the DOC (2026-11-06, `just midisynth-tunetest` + `just docscope`)
 Measured in GSSquared by playing `/synthLAB/Tune/TUNE.SEQ` and sampling the Ensoniq oscillator state through gs2-mcp (`src/migs/gs2client.py`). Log: `build/disks/docscope.jsonl`.
 - With MIDI Synth running, **all 32 oscillators are enabled**, so the DOC rate is 894 886 / 34 ≈ **26 320 Hz**. Before MIDI Synth starts, 1 oscillator runs at 298 295 Hz.
 - **Each note uses 4 oscillators** (Gen 1 A/B, Gen 2 A/B), all with the same frequency register.
@@ -259,7 +259,7 @@ Measured in GSSquared by playing `/synthLAB/Tune/TUNE.SEQ` and sampling the Enso
 
 ## Voice pressure: what makes MIDI Synth steal notes (2026-11-06)
 - **Symptom** (MT32 profile, MI160): sustained notes dropped out one by one by measures 9–10, although the music didn't sound dense.
-- **Cause:** a voice is freed only when **both** generators' envelopes reach 0 (ERS p.16), not at note-off. MIDI Synth then steals the *least noticeable* voice, apparently the quietest. That made sustained notes idling at their sustain level (organ ≈ 39) lose to loud-but-inaudible tails. `just voices` (src/migs/midisynth_voices.py) replays each sequence against the bank's envelopes to estimate this.
+- **Cause:** a voice is freed only when **both** generators' envelopes reach 0 (ERS p.16), not at note-off. MIDI Synth then steals the *least noticeable* voice, apparently the quietest. That made sustained notes idling at their sustain level (organ ≈ 39) lose to loud-but-inaudible tails. `just midisynth-voices` (src/migs/midisynth_voices.py) replays each sequence against the bank's envelopes to estimate this.
 - **What held voices,** in order: slow release and decay tails (marimba held 0.13 s median, but busy ~3× longer); drum voices kept until note-off (MT-32 drums ignore note-off, so MI1 holds them); a "silent" Generator 2 whose envelope sat at 127 until note-off; drum kits that lasted the whole sample.
 - **Fixes:**
   - the converter gates rhythm notes to ≤ 50 ms (`DRUM_GATE_SECONDS`; both profiles);
