@@ -330,9 +330,11 @@ stock-banks: fetch-cp2 fetch-system6
     rm -rf "$d.tmp"; ls "$d"
 
 # Convert the GM MIDI files to MIDI Synth sequences, per export profile (build/<game>/seq/<profile>/MInnn.SEQ)
+# Only the songs' own sequences are replaced: seq/stock/ also holds the drum auditions
+# (AUDITnn.SEQ, `midisynth-drum-audition`) and seq/mt32/ the bank.
 seq: stock-banks mt32bank
-    rm -rf {{out}}/seq/stock && uv run mid2seq --game {{game}} {{out}}/music/midi/gm/*.mid -p stock -o {{out}}/seq/stock -b "{{vendor}}/synthlab"
-    rm -f {{out}}/seq/mt32/*.SEQ && uv run mid2seq --game {{game}} {{out}}/music/midi/mt32/*.mid -p mt32 -o {{out}}/seq/mt32 -b {{out}}/seq/mt32
+    rm -f {{out}}/seq/stock/{{prefix}}[0-9]*.SEQ && uv run mid2seq --game {{game}} {{out}}/music/midi/gm/*.mid -p stock -o {{out}}/seq/stock -b "{{vendor}}/synthlab"
+    rm -f {{out}}/seq/mt32/{{prefix}}[0-9]*.SEQ && uv run mid2seq --game {{game}} {{out}}/music/midi/mt32/*.mid -p mt32 -o {{out}}/seq/mt32 -b {{out}}/seq/mt32
 
 # Sample the MT-32 (Munt) into the game's bank (MI1) per its mt32sounds.toml -> build/<game>/seq/mt32/MI1.{BNK,WAV,map.toml}
 mt32bank: fetch-munt

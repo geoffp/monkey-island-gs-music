@@ -46,7 +46,7 @@ def test_monkey_keeps_its_names():
 
 
 @pytest.mark.parametrize("field, value", [
-    ("prefix", "mi"), ("prefix", "1MI"), ("prefix", "MONKEY1"), ("prefix", "M-I"),
+    ("prefix", "mi"), ("prefix", "1MI"), ("prefix", "MONKEY1"), ("prefix", "M-I"), ("prefix", "AUDIT"),
     ("label", "A LABEL FAR TOO LONG"), ("engine", "scumm-v5"),
 ])
 def test_bad_settings_are_refused(field, value):

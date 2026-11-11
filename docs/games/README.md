@@ -14,7 +14,7 @@ One page per game, named by its game id: what is true of that game's data only (
 - **Output:** `build/<id>/` (`music/`, `ntp/`, `seq/`, `looplab/`, `disks/`, `dist/`). The Munt render caches in `build/cache/` are shared (see the ROM limit below).
 - **Choosing the game:** `just game=<id> <recipe>` or `MIGS_GAME=<id>`; the default is `monkey`. The justfile exports `MIGS_GAME`, so nested `just` runs and the Python tools' `--game` default follow it. The justfile reads `game.toml` through `tools/game.py` (standard library only, so it also runs on macOS's system Python 3.9).
 - **Rules `games.parse` checks** (tests in `tests/test_games.py`):
-  - `prefix`: 1–6 upper-case letters or digits, starting with a letter. ProDOS names allow 15 characters, and the longest name built from it is `<prefix>.SYNTHLAB`.
+  - `prefix`: 1–6 upper-case letters or digits, starting with a letter. ProDOS names allow 15 characters, and the longest name built from it is `<prefix>.SYNTHLAB`. Not `AUDIT`: `just seq` replaces `<prefix><digits>.SEQ` in `seq/stock/`, where the drum auditions (`AUDITnn.SEQ`) live too.
   - `label`: room for `"<label> <sound id>"` in a MOD's 20-byte title.
   - `engine`: one the extractor knows. Only `scumm-v4` (`RO` music) exists so far.
 

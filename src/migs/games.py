@@ -26,6 +26,9 @@ ENGINES = ("scumm-v4",)
 # ProDOS names: 15 characters, letters/digits/periods, starting with a letter. The longest name
 # built from the prefix is the synthLAB disk's volume, <prefix>.SYNTHLAB.
 _PREFIX = re.compile(r"[A-Z][A-Z0-9]{0,5}")
+# Other files beside the songs' <prefix><sound id>.SEQ in build/<game>/seq/stock/, which `just seq`
+# must not mistake for songs: the drum auditions, AUDITnn.SEQ.
+RESERVED_PREFIXES = ("AUDIT",)
 MOD_TITLE = 20                   # bytes in a MOD's song title ("<label> <sound id>")
 
 
@@ -88,6 +91,9 @@ def parse(game_id: str, text: str, root: Path = Path(".")) -> GameInfo:
     if not _PREFIX.fullmatch(c["prefix"]):
         raise ValueError(f"{game_id}/game.toml: prefix {c['prefix']!r} must be 1-6 upper-case letters or "
                          "digits, starting with a letter (ProDOS names: <prefix>.SYNTHLAB has 15 characters)")
+    if c["prefix"] in RESERVED_PREFIXES:
+        raise ValueError(f"{game_id}/game.toml: prefix {c['prefix']!r} is reserved ({', '.join(RESERVED_PREFIXES)}: "
+                         "other sequences share the songs' folder)")
     if len(c["label"]) + 4 > MOD_TITLE:
         raise ValueError(f"{game_id}/game.toml: label {c['label']!r} leaves no room in a MOD title "
                          f"({MOD_TITLE} bytes, '<label> <sound id>')")
