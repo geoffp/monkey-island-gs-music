@@ -59,7 +59,7 @@ build/             everything generated, not in git (`just clean`, `just clean-a
 
 
 ## Setup
-Host tools: [just](https://github.com/casey/just), [uv](https://github.com/astral-sh/uv), git, curl, unzip, cmake, a C++ compiler, glib2 headers, FluidSynth, ffmpeg (with libopenmpt, for MOD previews), and PHP CLI (for Ninjaforce's MOD → NTP converter). On Fedora:
+Host tools: [just](https://github.com/casey/just), [uv](https://github.com/astral-sh/uv), git, curl, unzip, cmake, a C++ compiler, glib2 headers, FluidSynth, ffmpeg (with libopenmpt, for MOD previews), and PHP CLI (for Ninjaforce's MOD → NTP converter). `just doctor` checks them and prints the install command for Fedora, Debian/Ubuntu, macOS (Homebrew) or FreeBSD. On Fedora:
 ```sh
 sudo dnf install just uv git curl unzip cmake gcc-c++ pkgconf glib2-devel fluidsynth ffmpeg php-cli
 ```
@@ -71,7 +71,7 @@ just emu      # build the NTP songs and boot straight into SenseiPlay in GSSquar
               # (unlimited speed; `just emu 2.8mhz` for stock)
 just emu-synthlab  # experimental aside: System 6 + synthLAB + the MIDI Synth sequences
 ```
-`just setup` fetches into the gitignored `vendor/`, with pinned versions and checksums where published:
+`just setup` fetches into the gitignored `vendor/`. Every download is pinned to a sha256, and the unversioned ones fall back to an identical Internet Archive copy:
 - GSSquared (IIgs emulator)
 - gs2-mcp (its MCP server)
 - CiderPress II CLI (disk images and ShrinkIt archives)
@@ -80,7 +80,15 @@ just emu-synthlab  # experimental aside: System 6 + synthLAB + the MIDI Synth se
 - synthfile 1.5 source
 - NinjaTrackerPlus player/converter sources, demo disk, and the SenseiPlay player disk
 
-The downloads are Linux x86_64 builds for now.
+### Platforms
+- **Linux** (x86_64) is the base: everything works.
+- **macOS** is supported. CiderPress II's macOS build is x86_64, so Apple silicon needs Rosetta 2 (`just doctor` checks).
+- **FreeBSD** is a stretch goal. The build should work there, but GSSquared has no FreeBSD build, so `just emu` won't run. uv builds scipy from source, which needs gfortran (`pkg install gcc openblas`).
+- **Windows**: maybe someday.
+
+CI (`.github/workflows/build.yml`) runs `setup`, the tests and `just smoke` on Ubuntu, macOS and FreeBSD, on every push and weekly. `just selftest` builds the whole disk from a clean clone with your game data.
+
+**Reproducibility:** a build is byte-for-byte reproducible on the same CPU architecture. Across architectures, floating-point rounding can differ in the last bit: numpy's arm64 builds fuse multiply-adds. So songs built on Apple silicon may differ from x86_64 builds in a few sample bytes. That's inaudible, and accepted rather than fixed.
 
 ### You must supply
 These go in `original files/`, which is gitignored and never committed:
