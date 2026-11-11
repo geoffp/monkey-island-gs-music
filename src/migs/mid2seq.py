@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Convert General MIDI files (build/music/midi/gm/) to Apple IIGS MIDI Synth sequences.
+"""Convert General MIDI files (build/<game>/music/midi/gm/) to Apple IIGS MIDI Synth sequences.
 
 MIDI Synth model (docs/iigs-midisynth.md):
 - the MIDI channel selects the instrument slot in the bank, so each source channel is
-  rewritten to the slot that should play it (config/midisynth.toml); Program Change is dropped;
+  rewritten to the slot that should play it (the game's midisynth.toml); Program Change is dropped;
 - only notes, CC7 (volume), CC64 (sustain) and pitch bend reach the synth; the rest is dropped;
 - timestamps are 96 ticks per quarter note; we keep the source ticks and pick the tempo
   that makes them play at the right speed (MI1: 120 ticks at 120 BPM -> file tempo 75);
@@ -23,6 +23,7 @@ from typing import NamedTuple
 
 import mido
 
+from . import games
 from .midisynth import SEQ_TICKS_PER_QUARTER, TRACK_ON, TRACKS, Bank, SeqItem, Sequence
 
 RHYTHM_CHANNEL = 9
@@ -55,7 +56,7 @@ def _is_note(m: mido.Message) -> bool:
 
 @dataclass
 class BankMap:
-    """How a bank's slots play GM programs and rhythm keys (config/midisynth.toml)."""
+    """How a bank's slots play GM programs and rhythm keys (the game's midisynth.toml)."""
     name: str
     file: str
     rhythm_slot: int
@@ -65,10 +66,11 @@ class BankMap:
     wave_file: str = ""
 
     @classmethod
-    def from_config(cls, name: str, cfg: dict) -> BankMap:
+    def from_config(cls, name: str, cfg: dict, build_dir: Path = Path(".")) -> BankMap:
+        """`map_file` is relative to the game's build directory (build/<game>/)."""
         programs, drums = dict(cfg.get("programs", {})), dict(cfg.get("drums", {}))
         if "map_file" in cfg:                       # generated mapping (e.g. by mt32bank)
-            m = tomllib.loads(Path(cfg["map_file"]).read_text())
+            m = tomllib.loads((build_dir / cfg["map_file"]).read_text())
             programs.update(m.get("programs", {}))
             drums.update(m.get("drums", {}))
         return cls(name, cfg["file"], cfg["rhythm_slot"], cfg["fallback_slot"],
@@ -100,7 +102,8 @@ class Report:
         self.dropped[what] += 1
 
 
-def load_config(path: Path, song_id: str | None, profile: str = "stock") -> tuple[BankMap, dict[int, int]]:
+def load_config(path: Path, song_id: str | None, profile: str = "stock",
+                build_dir: Path = Path(".")) -> tuple[BankMap, dict[int, int]]:
     """The profile's bank for a song, and the song's channel -> slot overrides (0-based)."""
     cfg = tomllib.loads(path.read_text())
     prof = cfg["profiles"][profile]
@@ -109,7 +112,7 @@ def load_config(path: Path, song_id: str | None, profile: str = "stock") -> tupl
         song = song[profile]
     bank_name = song.get("bank", prof["default_bank"])
     overrides = {int(k) - 1: v for k, v in song.get("channels", {}).items()}
-    return BankMap.from_config(bank_name, cfg["banks"][bank_name]), overrides
+    return BankMap.from_config(bank_name, cfg["banks"][bank_name], build_dir), overrides
 
 
 def _tempo_and_scale(tpq: int, tempo_us: int) -> tuple[int, float]:
@@ -288,20 +291,23 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("inputs", nargs="+", type=Path, help="GM MIDI files")
     ap.add_argument("-o", "--out-dir", type=Path, required=True)
-    ap.add_argument("-c", "--config", type=Path, default=Path("config/midisynth.toml"))
+    games.add_argument(ap)
+    ap.add_argument("-c", "--config", type=Path, help="mapping (default the game's midisynth.toml)")
     ap.add_argument("-p", "--profile", default="stock", help="export profile in the config")
     ap.add_argument("-b", "--bank-dir", type=Path,
                     help="directory holding the bank files, to check key zones")
     args = ap.parse_args(argv)
+    game = games.load(args.game)
+    args.config = args.config or game.config("midisynth.toml")
     args.out_dir.mkdir(parents=True, exist_ok=True)
 
     for path in args.inputs:
         song_id = path.stem.split("-")[0]
-        bank, overrides = load_config(args.config, song_id, args.profile)
+        bank, overrides = load_config(args.config, song_id, args.profile, game.build_dir)
         bank_file = Bank.from_bytes((args.bank_dir / bank.file).read_bytes()) if args.bank_dir else None
-        seq, rep = convert(mido.MidiFile(path), bank, overrides, bank_file, title=f"MI1 {song_id}")
+        seq, rep = convert(mido.MidiFile(path), bank, overrides, bank_file, title=game.song_title(song_id))
         # ProDOS names: max 15 chars, letters/digits/periods, starting with a letter.
-        out = args.out_dir / f"MI{song_id}.SEQ"
+        out = args.out_dir / game.song_file(song_id, "SEQ")
         out.write_bytes(seq.to_bytes())
         slots = " ".join(f"{c + 1}>{s}" for c, s in sorted(rep.channel_slots.items()))
         print(f"{path.name:<20} -> {out.name:<11} {len(seq.items):5d} items {seq.seconds():6.1f}s "

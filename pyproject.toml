@@ -1,7 +1,7 @@
 [project]
 name = "migs"
 version = "0.1.0"
-description = "Extract the Monkey Island 1 MT-32 soundtrack and port it to Apple IIGS MIDI Synth"
+description = "Extract SCUMM games' MT-32 soundtracks (first: Monkey Island 1) and port them to the Apple IIGS as NinjaTrackerPlus songs"
 readme = "README.md"
 license = "GPL-3.0-or-later"
 license-files = ["LICENSE"]

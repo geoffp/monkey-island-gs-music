@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Loop lab: measure and compare ways to build the attack + sustain-loop samples of the NTP
-bank from the Munt renders of the MT-32 sounds (config/mt32sounds.toml, config/ntp.toml).
+bank from the Munt renders of the MT-32 sounds (the game's mt32sounds.toml and ntp.toml).
 
 Research harness, not part of the build. See docs/sample-construction.md. The construction the
 build uses (E'+: attack detection, power-averaged loop, aligned join) lives in loopbuild.
@@ -31,7 +31,7 @@ import numpy as np
 from scipy.io import wavfile
 from scipy.signal import resample, resample_poly
 
-from . import audio, ntpmod, ntpsamples as smp
+from . import audio, games, ntpmod, ntpsamples as smp
 from .audio import interp_at
 from .docram import DOC_RATE
 from .loopbuild import (Settle, Sound, analyse, attack_error_db, cycle_at_rate, join_aligned,
@@ -486,9 +486,10 @@ def _one_shot_note(m: dict, s: smp.ModSample, render, tables: dict, cfg: dict, h
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("inputs", nargs="+", type=Path, help="MT-32 MIDI files (for key ranges and the shared set)")
-    ap.add_argument("-o", "--out-dir", type=Path, default=Path("build/looplab"))
-    ap.add_argument("--config", type=Path, default=Path("config/ntp.toml"))
-    ap.add_argument("--spec", type=Path, default=Path("config/mt32sounds.toml"))
+    games.add_argument(ap)
+    ap.add_argument("-o", "--out-dir", type=Path, help="default build/<game>/looplab")
+    ap.add_argument("--config", type=Path, help="NTP settings (default the game's ntp.toml)")
+    ap.add_argument("--spec", type=Path, help="MT-32 sounds (default the game's mt32sounds.toml)")
     ap.add_argument("--make-tables", type=Path, default=Path("vendor/ntp/src/make_tables.php"))
     ap.add_argument("--smf2wav", type=Path, default=Path("vendor/munt/bin/mt32emu-smf2wav"))
     ap.add_argument("--roms", type=Path, default=Path("original files/mt-32 roms"))
@@ -497,6 +498,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--cands", default="A,A',B,C,E,E',E'+", help="candidates to trial")
     ap.add_argument("--listen", default="A,E'+", help="candidates to write WAVs for")
     args = ap.parse_args(argv)
+    game = games.load(args.game)
+    args.out_dir = args.out_dir or game.build_dir / "looplab"
+    args.config = args.config or game.config("ntp.toml")
+    args.spec = args.spec or game.config("mt32sounds.toml")
 
     conf = tomllib.loads(args.config.read_text())
     cfg = {**conf["defaults"], **conf.get("modes", {}).get(args.samples, {})}

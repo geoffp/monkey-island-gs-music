@@ -32,5 +32,5 @@ def test_a_decaying_sound_reaches_zero_by_itself_so_its_voice_frees():
 
 
 def test_map_toml_is_what_mid2seq_reads():
-    m = tomllib.loads(map_toml("config/mt32sounds.toml", {9: 2, 13: 2}, {36: [0, 40], 38: [0, 42]}))
+    m = tomllib.loads(map_toml("config/games/monkey/mt32sounds.toml", {9: 2, 13: 2}, {36: [0, 40], 38: [0, 42]}))
     assert m["programs"] == {"9": 2, "13": 2} and m["drums"]["38"] == [0, 42]

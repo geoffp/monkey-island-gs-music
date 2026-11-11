@@ -308,7 +308,7 @@ def join_aligned(x: np.ndarray, a: int, period: float, rate: float, k: int, atta
 @dataclass
 class Sound:
     name: str
-    m: dict                 # its [[melodic]] entry in config/mt32sounds.toml
+    m: dict                 # its [[melodic]] entry in the game's mt32sounds.toml
     x: np.ndarray           # long render (analysis + audio)
     a: int
     period: float

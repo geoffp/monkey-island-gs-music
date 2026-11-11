@@ -13,9 +13,32 @@ from ntp_fixtures import fake_sample, midi_song
 
 def test_grid_detection_on_jittered_16ths():
     rng = np.random.default_rng(1)
-    onsets = [(37.0 * i + 5 + rng.uniform(-2, 2)) * sg.MI1_TICK for i in range(200)]
+    onsets = [(37.0 * i + 5 + rng.uniform(-2, 2)) * sg.RO_TIMEBASE.tick_s for i in range(200)]
     unit, phase = sg.detect_grid(onsets)
     assert unit == pytest.approx(37.0, abs=0.3) and phase == pytest.approx(5, abs=1.5)
+
+
+def test_grid_is_in_the_songs_own_ticks(tmp_path):
+    """A song's time base comes from its MIDI file, not SCUMM RO's 120 PPQN: the jittered grid
+    of test_grid_detection_on_jittered_16ths at 480 PPQN (100 BPM) is found at 4x the unit."""
+    import mido
+    mf = mido.MidiFile(ticks_per_beat=480)
+    t = mido.MidiTrack([mido.MetaMessage("set_tempo", tempo=600_000, time=0)])
+    rng = np.random.default_rng(1)
+    at = [int(148 * i + 20 + rng.integers(-8, 9)) for i in range(200)]   # 37 ticks at 120 PPQN
+    tick = 0
+    for a in at:
+        t += [mido.Message("note_on", channel=1, note=60, velocity=100, time=a - tick),
+              mido.Message("note_off", channel=1, note=60, time=40)]
+        tick = a + 40
+    mf.tracks.append(t)
+    mf.save(p := tmp_path / "480.mid")
+    tb = sg.read_timebase(p)
+    assert tb == sg.Timebase(480, 600_000 / 1e6 / 480)
+    notes, _, _ = sg.read_notes(p)
+    unit, _ = sg.detect_grid([n.t for n in notes], tb)
+    assert unit == pytest.approx(148, abs=1.2)                     # 4 x 37
+    assert sg.RO_TIMEBASE == sg.Timebase(120, 0.5 / 120)            # what MI1's songs use
 
 
 def test_conversion_invariants(tmp_path):

@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""MI1 MT-32 MIDI -> multi-channel ProTracker MOD, built to NinjaTrackerPlus' constraints.
+"""A game's MT-32 MIDI -> multi-channel ProTracker MOD, built to NinjaTrackerPlus' constraints.
 
 The MOD is the primary artefact: it renders on the desktop (ffmpeg/libopenmpt) and converts
 to .NTP for the IIGS. See docs/ninjatrackerplus.md. This module is the build: configuration
-(config/ntp.toml: defaults < sample-set mode < trial variant < per-song overrides), the sample
+(the game's ntp.toml: defaults < sample-set mode < trial variant < per-song overrides), the sample
 set for each song (ntpsamples: Munt renders packed as NTP packs DOC RAM), the arrangement
 (ntpsong: tracks, timing, levels) and the MOD file (modfile).
 
@@ -28,7 +28,7 @@ from pathlib import Path
 
 import numpy as np
 
-from . import audio, docram, pitchplan
+from . import audio, docram, games, pitchplan
 from .docsim import NoteError, key_hz
 from .modfile import mod_file
 from .munt import Munt
@@ -42,7 +42,7 @@ SAMPLE_SETS = ("per-song", "shared")
 
 
 def ntp_spec(spec: dict, conf: dict, mode: str | None = None) -> dict:
-    """The MI1 bank spec plus config/ntp.toml's NTP-only `[[melodic]]` sounds. An extra sound takes
+    """The bank spec (mt32sounds.toml) plus ntp.toml's NTP-only `[[melodic]]` sounds. An extra sound takes
     its `covers` away from the shared bank's merges (NTP has DOC RAM the 16-slot MIDI Synth
     bank doesn't), e.g. Pipe Org 2, which MI1.BNK plays with Elec Org 2's sample."""
     extra = [m for m in conf.get("melodic", []) if mode is None or mode in m.get("modes", [mode])]
@@ -159,7 +159,7 @@ def _pitch_plans(spec: dict, usage_notes: list[tuple[int, Note]], cfg: dict, tab
 def _zone_entries(m: dict, p: pitchplan.Plan, shot: bool) -> list[dict]:
     """The spec entries that play entry m's keys under plan p: one per zone, each sampled at
     its key and rate (a one-shot's rate goes to one_shot_tuning: `ntp_shot_rate`). Several
-    zones become a key split (`keys`, like config/ntp.toml's)."""
+    zones become a key split (`keys`, like ntp.toml's)."""
     rate = "ntp_shot_rate" if shot else "ntp_rate"
     if p.count == 1:
         z = p.zones[0]
@@ -403,7 +403,8 @@ class _Song:
         return self.path.stem.split("-")[0]
 
 
-def _shared_levels(songs: list[_Song], shared, cfg: dict, conf: dict, cc7, out_dir: Path) -> dict:
+def _shared_levels(songs: list[_Song], shared, cfg: dict, conf: dict, cc7, out_dir: Path,
+                   game: games.GameInfo) -> dict:
     """The song settings a resident bank needs, and levels.toml for the game.
 
     Every shared .NTP must carry byte-identical instruments and samples, so a game can load
@@ -422,12 +423,12 @@ def _shared_levels(songs: list[_Song], shared, cfg: dict, conf: dict, cc7, out_d
     (out_dir / "levels.toml").write_text(
         "# Song loudness relative to the loudest (MT-32 balance). Each shared .NTP is normalised\n"
         "# to its own loudest moment; a game restores the balance with NTPsetplayvolume.\n"
-        + "".join(f'MI{sid} = {{ gain_db = {20 * math.log10(ref / top):.2f}, play_volume_scale = {ref / top:.3f} }}\n'
+        + "".join(f'{game.prefix}{sid} = {{ gain_db = {20 * math.log10(ref / top):.2f}, play_volume_scale = {ref / top:.3f} }}\n'
                   for sid, ref in refs.items()))
     return {"default_volumes": {si: int(np.median(v)) for si, v in vols.items()}}
 
 
-def _print_reports(reports: list) -> None:
+def _print_reports(reports: list, prefix: str) -> None:
     print(f"{'song':<6} {'tempo':>5} {'spd':>3} {'row ms':>6} {'pat':>3} {'trk':>3} {'osc':>3} {'notes':>5} "
           f"{'drop':>4} {'steal':>5} {'tchg':>4} {'delay':>5} {'v:cell':>6} {'v:prev':>6} {'v:dflt':>6} "
           f"{'err ms':>6} {'halt':>5} {'st.vol':>6} {'plan':>4} {'snap':>4}")
@@ -440,7 +441,7 @@ def _print_reports(reports: list) -> None:
               f"{rep.vel_snapped:4d}")
     for sid, rep in reports:
         if rep.dropped_by:
-            print(f"MI{sid} dropped (no oscillator): "
+            print(f"{prefix}{sid} dropped (no oscillator): "
                   + ", ".join(f"{k} {v}" for k, v in sorted(rep.dropped_by.items(), key=lambda kv: -kv[1])))
 
 
@@ -453,36 +454,39 @@ def _build_song(job) -> tuple[str, object, str, str | None]:
         try:
             rep, err = _build_song_quiet(job)
         except Exception:
-            rep, err = None, f"MI{job[0].sid}: build failed\n{traceback.format_exc()}"
+            rep, err = None, f"{job[-1].prefix}{job[0].sid}: build failed\n{traceback.format_exc()}"
     return job[0].sid, rep, buf.getvalue(), err
 
 
 def _build_song_quiet(job) -> tuple[object, str | None]:
     """_build_song's work: (report, error or None)."""
-    song, song_cfg, spec, cfg, shared, last_page, tables, munt, cc7, out_dir = job
+    song, song_cfg, spec, cfg, shared, last_page, tables, munt, cc7, out_dir, game = job
+    name = f"{game.prefix}{song.sid}"
     reserve = 255 - last_page
     if shared:
         samples, programs, drums = shared
     else:
         samples, programs, drums = sample_set(spec, cfg, [(song.notes, song.programs)], last_page, tables, munt,
-                                              log=lambda line: print(f"MI{song.sid}{line}"))
+                                              log=lambda line: print(f"{name}{line}"))
         if bad := loop_problems(samples, cfg):
-            return None, f"MI{song.sid}: loops fail the tremolo/buzz check: " + "; ".join(bad)
-        print(f"MI{song.sid}: {len(samples)} samples, DOC {ntp_doc_pages(samples, last_page)}/256 pages "
+            return None, f"{name}: loops fail the tremolo/buzz check: " + "; ".join(bad)
+        print(f"{name}: {len(samples)} samples, DOC {ntp_doc_pages(samples, last_page)}/256 pages "
               f"(reserve {reserve}); loops {loop_summary(samples, cfg)}")
     grid, patterns, rep = plan_tracks(song.path, samples, programs, drums, cfg, song_cfg, cc7)
     if ntp_oscillators([2 if k == "melodic" else 1 for k in rep.track_kinds]) is None:
-        return None, f"MI{song.sid}: NTP's converter can't assign oscillators to these tracks"
-    (out_dir / f"MI{song.sid}.mod").write_bytes(mod_file(f"MI1 {song.sid}", samples, grid, patterns, tables))
+        return None, f"{name}: NTP's converter can't assign oscillators to these tracks"
+    (out_dir / game.song_file(song.sid, "mod")).write_bytes(
+        mod_file(game.song_title(song.sid), samples, grid, patterns, tables))
     return rep, None
 
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("inputs", nargs="+", type=Path, help="MT-32 MIDI files (build/music/midi/mt32)")
+    games.add_argument(ap)
+    ap.add_argument("inputs", nargs="+", type=Path, help="MT-32 MIDI files (build/<game>/music/midi/mt32)")
     ap.add_argument("-o", "--out-dir", type=Path, required=True)
-    ap.add_argument("--config", type=Path, default=Path("config/ntp.toml"))
-    ap.add_argument("--spec", type=Path, default=Path("config/mt32sounds.toml"))
+    ap.add_argument("--config", type=Path, help="NTP settings (default the game's ntp.toml)")
+    ap.add_argument("--spec", type=Path, help="MT-32 sounds (default the game's mt32sounds.toml)")
     ap.add_argument("--make-tables", type=Path, default=Path("vendor/ntp/src/make_tables.php"))
     ap.add_argument("--smf2wav", type=Path, default=Path("vendor/munt/bin/mt32emu-smf2wav"))
     ap.add_argument("--roms", type=Path, default=Path("original files/mt-32 roms"))
@@ -490,8 +494,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("-j", "--jobs", type=int, default=0,
                     help="songs built at once (worker processes); default half the CPUs")
     ap.add_argument("--samples", help="build variant: per-song, shared, or a [modes.<name>] with a `base` "
-                                      "(e.g. shared-avg); default config/ntp.toml `samples`")
+                                      "(e.g. shared-avg); default ntp.toml's `samples`")
     args = ap.parse_args(argv)
+    game = games.load(args.game)
+    args.config = args.config or game.config("ntp.toml")
+    args.spec = args.spec or game.config("mt32sounds.toml")
     if missing := [str(p) for p in args.inputs if not p.is_file()]:
         raise SystemExit(f"ntpmod: no MIDI file {', '.join(missing)} (extract the songs first: just extract)")
     conf = tomllib.loads(args.config.read_text())
@@ -513,9 +520,9 @@ def main(argv: list[str] | None = None) -> int:
             raise SystemExit("shared loops fail the tremolo/buzz check: " + "; ".join(bad))
         print(f"shared samples ({len(shared[0])}, DOC {ntp_doc_pages(shared[0], last_page)}/256 pages, "
               f"reserve {reserve}): {loop_summary(shared[0], cfg)}")
-        bank = _shared_levels(songs, shared, cfg, conf, cc7, args.out_dir)
+        bank = _shared_levels(songs, shared, cfg, conf, cc7, args.out_dir, game)
     work = [(song, {**cfg, **conf.get("songs", {}).get(song.sid, {}), **bank}, spec, cfg, shared, last_page,
-             tables, munt, cc7, args.out_dir) for song in songs]
+             tables, munt, cc7, args.out_dir, game) for song in songs]
     # songs are independent once the samples are known (per-song: each makes its own): one worker
     # each, logs printed in song order
     cpus = getattr(os, "process_cpu_count", os.cpu_count)() or 2   # 3.13+: honours CPU affinity
@@ -530,7 +537,7 @@ def main(argv: list[str] | None = None) -> int:
                     pool.shutdown(cancel_futures=True)      # don't build the songs still queued
                 raise SystemExit(err)
             reports.append((sid, rep))
-    _print_reports(reports)
+    _print_reports(reports, game.prefix)
     return 0
 
 

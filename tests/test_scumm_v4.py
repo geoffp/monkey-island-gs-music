@@ -6,11 +6,13 @@ from pathlib import Path
 
 import pytest
 
+from migs import games
 from migs.extract_music import load_songs
 from migs.scumm_v4 import Game, blocks, xor
 
 ROOT = Path(__file__).resolve().parents[1]
-REAL_GAME = ROOT / "original files" / "The Secret of Monkey Island (Floppy DOS VGA)"
+MONKEY = games.load("monkey", ROOT)          # the real-game test checks Monkey Island's facts
+REAL_GAME = MONKEY.data
 
 
 def blk(tag: bytes, body: bytes) -> bytes:
@@ -66,14 +68,17 @@ def test_load_songs_takes_ro_only_and_dedupes(tiny_game):
 
 @pytest.mark.skipif(not REAL_GAME.exists(), reason="game data not present")
 def test_real_game_mt32_soundtrack():
+    """docs/games/monkey.md: 19 sounds (150-168), 16 distinct, all in room 94 on DISK04."""
+    assert MONKEY.md5_mismatches() == []
     warnings = []
-    songs = load_songs(Game(REAL_GAME), {}, warn=warnings.append)
+    songs = load_songs(Game(REAL_GAME), {}, warn=warnings.append, label=MONKEY.label)
     assert warnings and "[72, 74, 76, 78, 80, 82, 84, 86, 88, 90, 92, 94, 95, 96, 97]" in warnings[0]
     assert [s.sound_id for s in songs] == [150, 151, 152, 153, 154, *range(158, 169)]
     assert next(s for s in songs if s.sound_id == 154).duplicates == [155, 156, 157]
     assert all(s.resource_room == 94 and s.resource_disk == 4 for s in songs)
     lengths = {s.sound_id: s.track.end_tick for s in songs}
-    assert round(lengths[160] / 120 * 0.5, 1) == 93.6                 # matches docs/ro-format.md
+    assert round(lengths[160] / 120 * 0.5, 1) == 93.6                 # matches docs/games/monkey.md
+    assert songs[0].title == "MI1 sound 150"
 
 
 def test_a_zero_size_block_is_an_error_not_an_endless_scan():

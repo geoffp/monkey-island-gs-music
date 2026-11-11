@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""NinjaTrackerPlus samples from Munt renders of the sounds in config/mt32sounds.toml.
+"""NinjaTrackerPlus samples from Munt renders of the sounds in a game's mt32sounds.toml.
 
 Melodic sample = raw MT-32 attack (`attack_bytes`, loop header) + a loop holding k identical
 sustain cycles at a rate that makes the loop exactly k periods; note base + finetune make it
@@ -802,7 +802,7 @@ def rest_sample() -> ModSample:
 
 def build_samples(spec: dict, cfg: dict, key_ranges: dict[int, tuple[int, int]], munt: Munt, tables,
                   log=print) -> tuple[list[ModSample], dict, dict]:
-    """Samples per config/mt32sounds.toml; returns (samples, program -> index (or key-split
+    """Samples per the game's mt32sounds.toml; returns (samples, program -> index (or key-split
     list of (lo, hi, index)), rhythm key -> (index, note, level gain))."""
     hold = spec.get("hold_seconds", 2.0)
     samples: list[ModSample] = []

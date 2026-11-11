@@ -23,6 +23,8 @@ import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from . import games
+
 ENSONIQ_DEVICE_ID = 22
 OSCILLATORS = 32
 HEADER_SIZE, RECORD_SIZE = 16, 24
@@ -156,8 +158,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--config", type=Path, help=".gs2 machine config to boot")
     ap.add_argument("--seconds", type=float, default=240)
     ap.add_argument("--interval", type=float, default=0.1)
-    ap.add_argument("--log", type=Path, default=Path("build/disks/docscope.jsonl"))
+    games.add_argument(ap)
+    ap.add_argument("--log", type=Path, help="default build/<game>/disks/docscope.jsonl")
     args = ap.parse_args(argv)
+    args.log = args.log or games.load(args.game).build_dir / "disks/docscope.jsonl"
     with GS2(str(Path(args.mcp).resolve()), str(Path(args.gs2).resolve())) as gs:
         extra = [str(args.config.resolve())] if args.config else []
         print(gs.call("launch", platform="IIgs", extra_args=extra))

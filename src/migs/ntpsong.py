@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Arrange an MI1 MT-32 MIDI song onto NinjaTrackerPlus tracks: a MOD pattern grid.
+"""Arrange an MT-32 MIDI song onto NinjaTrackerPlus tracks: a MOD pattern grid.
 
 - Timing: rows sit on the song's detected grid unit / `rows_per_unit`; `EDx` keeps
   micro-timing, and `Fxx` alternates the two integer tempos around the ideal one so rows stay
@@ -26,10 +26,10 @@ from pathlib import Path
 import mido
 import numpy as np
 
+from . import ro
 from .ntpsamples import NOTES, ModSample
 
 ROWS = 64                                 # rows per pattern
-MI1_TICK = 0.5 / 120                      # seconds per MI1 tick (120 PPQN, 120 BPM)
 RHYTHM = 9
 CELL_EMPTY = (0, 0, -1, 0)                # note, instrument, effect (-1: none), parameter
 FX_JUMP, FX_VOLUME, FX_EXTENDED, FX_SPEED = 0xB, 0xC, 0xE, 0xF
@@ -49,16 +49,31 @@ class Note:
     volume: int = 100   # channel CC7 at note-on (MT-32 power-on part volume is 100)
 
 
+@dataclass(frozen=True)
+class Timebase:
+    """A song's MIDI time base: its grid (unit_ticks, phase_ticks) is in these ticks."""
+    ppqn: int           # ticks per beat
+    tick_s: float       # seconds per tick (one tempo per song)
+
+
 def read_notes(path: Path) -> tuple[list[Note], dict[int, int], float]:
     """(notes, first program per channel, end s). Cached per file (path + mtime): a build reads
     each song several times (sample planning, level passes, conversion). Callers must not
     modify the returned notes."""
+    return _read_cached(path)[:3]
+
+
+def read_timebase(path: Path) -> Timebase:
+    return _read_cached(path)[3]
+
+
+def _read_cached(path: Path):
     st = Path(path).stat()
     return _read_notes(str(Path(path).resolve()), st.st_mtime_ns, st.st_size)
 
 
 @functools.lru_cache(maxsize=None)
-def _read_notes(path: str, _mtime: int, _size: int) -> tuple[list[Note], dict[int, int], float]:
+def _read_notes(path: str, _mtime: int, _size: int) -> tuple[list[Note], dict[int, int], float, Timebase]:
     mf = mido.MidiFile(path)
     tempos = {msg.tempo for trk in mf.tracks for msg in trk if msg.type == "set_tempo"}
     if len(tempos) > 1:          # MI1 songs have one tempo; times below assume a single one
@@ -102,19 +117,25 @@ def _read_notes(path: str, _mtime: int, _size: int) -> tuple[list[Note], dict[in
         n.off = end
         notes.append(n)
     notes.sort(key=lambda n: (n.t, n.channel, n.key))
-    return notes, programs, max(end, max((n.off for n in notes), default=0))
+    return (notes, programs, max(end, max((n.off for n in notes), default=0)),
+            Timebase(mf.ticks_per_beat, tempo / 1e6 / mf.ticks_per_beat))
 
 
-def detect_grid(onsets: list[float], unit_range=(14, 80)) -> tuple[float, float]:
-    """(unit, phase) in MI1 ticks maximising circular concentration of the onsets."""
-    return _detect_grid(tuple(onsets), tuple(unit_range))
+RO_TIMEBASE = Timebase(ro.PPQN, ro.TEMPO_US / 1e6 / ro.PPQN)   # extracted SCUMM RO songs: 120 PPQN, 120 BPM
+
+
+def detect_grid(onsets: list[float], tb: Timebase = RO_TIMEBASE, unit_range=(14, 80)) -> tuple[float, float]:
+    """(unit, phase) in the song's ticks maximising circular concentration of the onsets.
+    `unit_range` is in ticks at 120 PPQN (a 16th is 30), scaled to the song's PPQN."""
+    return _detect_grid(tuple(onsets), tb, tuple(unit_range))
 
 
 @functools.lru_cache(maxsize=None)
-def _detect_grid(onsets: tuple[float, ...], unit_range: tuple[int, int]) -> tuple[float, float]:
-    on = np.array(sorted(set(onsets))) / MI1_TICK
-    best = (0.0, 30.0, 0.0)
-    for P in np.arange(unit_range[0], unit_range[1], 0.05):
+def _detect_grid(onsets: tuple[float, ...], tb: Timebase, unit_range: tuple[int, int]) -> tuple[float, float]:
+    on = np.array(sorted(set(onsets))) / tb.tick_s
+    k = tb.ppqn / 120
+    best = (0.0, 30.0 * k, 0.0)
+    for P in np.arange(unit_range[0] * k, unit_range[1] * k, 0.05 * k):
         z = np.mean(np.exp(2j * np.pi * on / P))
         if abs(z) > best[0]:
             best = (abs(z), P, (np.angle(z) / (2 * np.pi) * P) % P)
@@ -276,13 +297,13 @@ class _Timing:
         return abs((r * self.speed + d) * self.tick_s - (t + self.shift))
 
 
-def _timing(notes: list[Note], cfg: dict, song_cfg: dict) -> _Timing:
+def _timing(notes: list[Note], cfg: dict, song_cfg: dict, tb: Timebase = RO_TIMEBASE) -> _Timing:
     unit, phase = song_cfg.get("unit_ticks"), song_cfg.get("phase_ticks")
     if unit is None:
-        unit, phase = detect_grid([n.t for n in notes])
+        unit, phase = detect_grid([n.t for n in notes], tb)
     phase = phase or 0.0
     rpu, speed = song_cfg.get("rows_per_unit", cfg["rows_per_unit"]), song_cfg.get("speed", cfg["speed"])
-    row_s = unit * MI1_TICK / rpu
+    row_s = unit * tb.tick_s / rpu
     # MOD tempo 32-255: change the speed (ticks per row) until the tempo fits
     tempo = round(2.5 * speed / row_s)
     while tempo > 255:
@@ -291,7 +312,7 @@ def _timing(notes: list[Note], cfg: dict, song_cfg: dict) -> _Timing:
     while tempo < 32:
         speed += 1
         tempo = round(2.5 * speed / row_s)
-    shift = (row_s - (phase * MI1_TICK) % row_s) % row_s + row_s      # grid aligned, >= 1 row lead-in
+    shift = (row_s - (phase * tb.tick_s) % row_s) % row_s + row_s      # grid aligned, >= 1 row lead-in
     return _Timing(row_s, speed, tempo, shift, song_cfg.get("quantize", cfg["quantize"]))
 
 
@@ -527,7 +548,7 @@ def convert_song(path: Path, samples: list[ModSample], programs: dict, drums: di
     for this song (the MOD writer stores it)."""
     notes, chan_prog, end = read_notes(path)
     rep = Report()
-    timing = _timing(notes, cfg, song_cfg)
+    timing = _timing(notes, cfg, song_cfg, read_timebase(path))
     rep.tempo, rep.speed, rep.row_ms = timing.tempo, timing.speed, timing.row_s * 1000
     arr = _Arranger(samples, cfg, song_cfg, rep)
 

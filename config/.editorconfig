@@ -1,4 +1,4 @@
-# config/disk/*.TXT: text for the Apple II (ProDOS TXT). Kept as plain 7-bit ASCII with LF
+# config/games/*/disk/*.TXT (disk READMEs): text for the Apple II (ProDOS TXT). Kept as plain 7-bit ASCII with LF
 # line ends here, so git and editors treat it normally; `just disk` converts LF to CR.
 # EditorConfig globs are case-sensitive, hence both spellings.
 [*.{txt,TXT}]

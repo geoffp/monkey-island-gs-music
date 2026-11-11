@@ -6,7 +6,7 @@ For each distinct RO sound, writes:
   <out>/midi/gm/NNN[-name].mid     General MIDI conversion (docs/mt32-to-gm.md)
   <out>/patches/NNN[-name].toml    per-channel instrument notes and statistics
 
-Song names come from an optional TOML file (default config/song_names.toml):
+Song names come from the game's optional song_names.toml (config/games/<game>/):
   [names]
   160 = "main-title"
 """
@@ -26,7 +26,7 @@ from pathlib import Path
 
 import mido
 
-from . import mt32, ro
+from . import games, mt32, ro
 from .ro import Kind
 from .scumm_v4 import HEADER, Game
 
@@ -43,6 +43,7 @@ class Song:
     resource_disk: int
     resource_offset: int
     size: int                    # RO block size, header included
+    label: str = ""              # the game's label (game.toml), for titles: "MI1 sound 160"
 
     @property
     def stem(self) -> str:
@@ -51,7 +52,7 @@ class Song:
 
     @property
     def title(self) -> str:
-        return f"MI1 sound {self.sound_id}" + (f": {self.name}" if self.name else "")
+        return f"{self.label} sound {self.sound_id}".lstrip() + (f": {self.name}" if self.name else "")
 
     @property
     def seconds(self) -> float:
@@ -276,7 +277,8 @@ def patch_notes(song: Song) -> str:
 
 # ---------------------------------------------------------------------------
 
-def load_songs(game: Game, names: dict[str, str], warn: Callable[[str], None] | None = None) -> list[Song]:
+def load_songs(game: Game, names: dict[str, str], warn: Callable[[str], None] | None = None,
+               label: str = "") -> list[Song]:
     """Every distinct RO sound in the game, by sound id; byte-identical copies are listed as
     the first one's `duplicates`."""
     by_hash: dict[str, Song] = {}
@@ -287,7 +289,7 @@ def load_songs(game: Game, names: dict[str, str], warn: Callable[[str], None] | 
         try:
             res = game.sound(sid)
         except ValueError:
-            # The MI1 VGA index has stale entries that point mid-block (sounds 72-97);
+            # Indexes can hold stale entries that point mid-block (MI1 VGA: sounds 72-97);
             # see docs/scumm-v4-resources.md.
             unresolved.append(sid)
             continue
@@ -300,7 +302,7 @@ def load_songs(game: Game, names: dict[str, str], warn: Callable[[str], None] | 
         by_hash[h] = Song(
             sound_id=sid, duplicates=[], name=names.get(str(sid), ""), track=ro.parse(res.payload),
             resource_room=res.room, resource_disk=res.disk, resource_offset=res.offset,
-            size=len(res.payload) + HEADER,
+            size=len(res.payload) + HEADER, label=label,
         )
     if unresolved and warn:
         warn(f"skipped {len(unresolved)} index entries that do not point at a sound block: {unresolved}")
@@ -315,14 +317,23 @@ def _read_names(path: Path) -> dict[str, str]:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("game_dir", type=Path, help="SCUMM v4 game directory (000.LFL, DISKnn.LEC)")
-    ap.add_argument("out_dir", type=Path, help="output directory (e.g. build/music)")
-    ap.add_argument("--names", type=Path, default=Path("config/song_names.toml"),
-                    help="song names TOML (optional; default config/song_names.toml)")
+    games.add_argument(ap)
+    ap.add_argument("game_dir", type=Path, nargs="?",
+                    help="SCUMM v4 game directory (000.LFL, DISKnn.LEC); default the game's `data`")
+    ap.add_argument("out_dir", type=Path, nargs="?", help="output directory (default build/<game>/music)")
+    ap.add_argument("--names", type=Path,
+                    help="song names TOML (optional; default the game's song_names.toml)")
     args = ap.parse_args(argv)
+    g = games.load(args.game)
+    game_dir = args.game_dir or g.data
+    args.out_dir = args.out_dir or g.build_dir / "music"
+    warn = lambda m: print("warning:", m, file=sys.stderr)
+    if game_dir == g.data:
+        for m in g.md5_mismatches():
+            warn(f"{m} (not the release {g.config('game.toml')} was tuned on)")
 
-    songs = load_songs(Game(args.game_dir), _read_names(args.names),
-                       warn=lambda m: print("warning:", m, file=sys.stderr))
+    songs = load_songs(Game(game_dir), _read_names(args.names or g.config("song_names.toml")),
+                       warn=warn, label=g.label)
     if not songs:
         print("no RO (MT-32) sounds found", file=sys.stderr)
         return 1
