@@ -1,6 +1,6 @@
 # Attack detection and loop construction for the NTP samples
 
-Research and measurements, 2026-11-07 (branch `loop-research`). Tool: `src/migs/looplab.py`, run with `just looplab [mode]` (output in `build/looplab/`: `report.md`, `wav/`, `plots/`). Tests: `tests/test_loopbuild.py` (construction), `tests/test_looplab.py` (lab metrics).
+Research and measurements, 2026-11-07 (branch `loop-research`). Tool: `src/migs/looplab.py`, run with `just looplab [mode]` (output in `build/monkey/looplab/`: `report.md`, `wav/`, `plots/`). Tests: `tests/test_loopbuild.py` (construction), `tests/test_looplab.py` (lab metrics).
 
 **Goal (user):** a reliable, RAM-efficient and good-sounding way to build the attack and sustain-loop sections:
 - no buzz, no audible seam and no handover jump, for every sound, without tuning each sound by hand;
@@ -35,7 +35,7 @@ The shared bank must still fit in 240/256 DOC pages (16 pages are kept for sound
   - **Known limit:** very deep beating (Strings, ±4 dB at 2.3 Hz) makes the ranges so wide that the attack end comes out early (30 ms).
 
 ## What the sampled MT-32 sounds actually do
-From the 6 s Munt renders (harmonic plots in `build/looplab/plots/`):
+From the 6 s Munt renders (harmonic plots in `build/monkey/looplab/plots/`):
 - **No slow swells.** Every steady sound reaches full level within about 0.1–0.2 s. What looked like 0.6–1.6 s "swells" in the level is **deep periodic beating between detuned partials**:
 
   | sound | beat period | depth |
@@ -205,11 +205,11 @@ Keep today's attack sizes. (Xylophone is now a one-shot, see above; Taiko doesn'
 
 **Integration:**
 - E′+ was trialled as the `per-song-e` / `shared-e` build variants (`docs/ninjatrackerplus.md`).
-- **Since 2026-11-07 it is the build's standard** for short loops (`loop_construction = "eprime"` in `config/ntp.toml`).
+- **Since 2026-11-07 it is the build's standard** for short loops (`loop_construction = "eprime"` in `config/games/monkey/ntp.toml`).
 - Its code moved from `looplab` into `src/migs/loopbuild.py`: attack detection, `loop_power`, `zero_start_exact`, `join_aligned`. `looplab` imports it from there to measure against the other candidates.
 - The original averaged cycle (candidate A) is still available as `loop_construction = "averaged"`.
 
-`build/looplab/wav/<sound>.wav` plays the Munt source, then A, then E′+. Each is played at the sampled key, the lowest song key and the highest, through a DOC-style no-interpolation player.
+`build/monkey/looplab/wav/<sound>.wav` plays the Munt source, then A, then E′+. Each is played at the sampled key, the lowest song key and the highest, through a DOC-style no-interpolation player.
 
 [soodek]: https://music-tech-archive-2024.netlify.app/files/soodek/Soodek_Capstone_Paper_Final.pdf
 [la-guide]: https://loopauditioneer.sourceforge.io/userguide.html

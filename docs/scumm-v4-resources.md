@@ -1,14 +1,12 @@
-# SCUMM v4 resources (Monkey Island 1, DOS VGA floppy)
+# SCUMM v4 resources
 
-Verified against the game data on 2026-11-06. ScummVM references are under `ref/scummvm/engines/scumm/`.
+The container format, as `scumm_v4.py` reads it. Verified against Monkey Island 1 (DOS VGA floppy) on 2026-11-06; that game's own facts (its files, where its music is, stale index entries, other releases) are in `games/monkey.md`. ScummVM references are under `ref/scummvm/engines/scumm/`.
 
 ## Files
 | file | encryption | contents |
 |---|---|---|
 | `000.LFL` | none | index (directories) |
-| `901–904.LFL` | – | charset/misc (not used here) |
-| `DISK01–04.LEC` | XOR 0x69 | room data |
-| `MONKEY.EXE` | LZEXE ("LZ91") packed | interpreter + drivers |
+| `DISKnn.LEC` | XOR 0x69 | room data |
 
 ## Block header (v4)
 `uint32 LE size` (includes the 6-byte header) + 2-byte ASCII tag.
@@ -16,7 +14,7 @@ Verified against the game data on 2026-11-06. ScummVM references are under `ref/
 ## Index `000.LFL`
 Blocks in order: `RN` (room names), `0R` rooms, `0S` scripts, `0N` sounds, `0C` costumes, `0O` objects.
 
-The `0R`/`0S`/`0N`/`0C` directories are `uint16 count` followed by `count × { uint8 room; uint32 LE offset }`. Sounds: 199 entries, 124 used.
+The `0R`/`0S`/`0N`/`0C` directories are `uint16 count` followed by `count × { uint8 room; uint32 LE offset }`. A room of 0 marks an unused entry.
 
 (The ScummVM code compares the tags byte-swapped, e.g. `0x4E30` = `'0N'`; see `resource_v4.cpp`.)
 
@@ -29,19 +27,14 @@ LE  (whole file)
       SC  scripts
       CO  costumes
       SO  sound (non-Roland)
-      RO  Roland MT-32 sound (only in room 94; same tag as the room block!)
+      RO  Roland MT-32 sound (same tag as the room block!)
 ```
-A sound's directory offset is relative to the LF data start, i.e. `LF offset + 8`. Room 94 (the "roland" room) is on DISK04.
+A sound's directory offset is relative to the LF data start, i.e. `LF offset + 8`. The extractor takes every sound whose block is an `RO`, from whichever rooms hold them (Monkey Island 1 keeps all of its in one "roland" room).
 
-**Stale index entries:** sounds 72, 74, 76, 78, 80, 82, 84, 86, 88, 90, 92, 94, 95, 96 and 97 point mid-block into other data in their rooms (109 other entries resolve fine). The extractor skips them with a warning. None are Roland tracks. They are probably unused leftovers; not investigated further.
+**Stale index entries:** an index entry can point mid-block into other data instead of at a sound block. The extractor skips those with a warning listing them (Monkey Island 1 has 15: `games/monkey.md`).
 
 ## Sound blocks
 - `SO` contains `WA` (PC speaker/PCjr) and `AD` (AdLib) sub-blocks, sometimes nested `SO`s. Both sub-blocks start `7f 00 …`. An `AD` byte at +2 of `0x80` marks music rather than an effect (`convertADResource` in `sound.cpp`).
 - `RO` is a raw MT-32 event stream: see `ro-format.md`.
 
 ScummVM picks among these in `Sound::readSoundResourceSmallHeader` (`sound.cpp`).
-
-## Other releases (background)
-- **CD-ROM** (SCUMM v5, `monkey1.000/.001`, BE size + 4-char tags `SOUN`/`SOU `/`ROL `…): the soundtrack is Redbook CD audio. The 32-byte sound resources just name CD tracks. The MIDI chunks it does have are short effects.
-- **EGA floppy**: the MT-32 music is in a separate "Roland Upgrade" file, `DISK09.LEC` (room 94, sounds 150–168). See the workaround in `resource_v4.cpp`.
-- **French 8-disk VGA**: the Roland room is missing (`scumm.cpp`).

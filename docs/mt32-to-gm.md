@@ -1,8 +1,8 @@
 # MT-32 → General MIDI conversion
 
 We keep **two** MIDI renditions of every track:
-- `build/music/midi/mt32/`: a faithful transcription of the `RO` stream, for an MT-32 (real hardware or Munt).
-- `build/music/midi/gm/`: converted for General MIDI players, using the rules below.
+- `build/monkey/music/midi/mt32/`: a faithful transcription of the `RO` stream, for an MT-32 (real hardware or Munt).
+- `build/monkey/music/midi/gm/`: converted for General MIDI players, using the rules below.
 
 Both come from the same parse. Only the steps marked *GM* differ.
 
@@ -12,7 +12,7 @@ Both come from the same parse. Only the steps marked *GM* differ.
 - `ref/scummvm/audio/mt32gm.cpp` (`MidiDriver_MT32GM`): MT-32 power-on defaults (panning, volume), reversed pan, bend range.
 
 ## Rules
-1. **Programs** (*GM*): `gm = _mt32ToGm[mt32]`. Override per song in `build/music/patches/*.toml` where a listening test calls for it.
+1. **Programs** (*GM*): `gm = _mt32ToGm[mt32]`. Override per song in `build/monkey/music/patches/*.toml` where a listening test calls for it.
 2. **Rhythm** (channel 10, *GM*): MT-32 default keys 35–51, 54, 56, 60–73 and 75 map to the same GM key (`Mt32PresetRhythmKeymap`). All other keys are silent on a stock MT-32, so drop them in GM. MI1 uses one such key: **76**, a single hit.
 3. **Pan** (*GM*): MT-32 pan is reversed relative to the MIDI spec, so GM gets `min(128 − v, 127)`. That keeps centre (64) at 64 (ScummVM `mt32gm.cpp`).
 4. **Default pan** (*GM*): emit the MT-32 power-on panning for channels 2–9 at tick 0 (`MT32_DEFAULT_PANNING` in `mt32gm.cpp`, reversed per rule 3) unless the track sets pan itself. Every MI1 track sets pan on most channels.
