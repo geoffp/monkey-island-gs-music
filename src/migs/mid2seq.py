@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Convert General MIDI files (build/<game>/music/midi/gm/) to Apple IIGS MIDI Synth sequences.
+"""Convert General MIDI files (build/<game>/extracted/midi/gm/) to Apple IIGS MIDI Synth sequences.
 
 MIDI Synth model (docs/iigs-midisynth.md):
 - the MIDI channel selects the instrument slot in the bank, so each source channel is

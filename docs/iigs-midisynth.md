@@ -15,7 +15,7 @@ All multi-byte values are **little-endian** (65816).
 ## Hard limits (these drive the whole port)
 - **At most 7 simultaneous voices.** [ERS 6, 12] The DOC has 32 oscillators. MIDI Synth reserves #31 (5 ms update timebase), #30 (metronome) and #28–29 ("generator 7", for the app's Sound Tool Set use). That leaves 28 oscillators, and **every voice uses 4** (2 generators × 2 oscillators), whatever the instrument. Beyond 7, MIDI Synth "steals" the least noticeable active note.
   - A note keeps its voice until **both envelopes reach zero**, i.e. through the release segments, not just until note-off. [ERS 16]
-  - MI1 peaks at 7–16 simultaneous notes (see `build/monkey/music/patches/*.toml` `max_polyphony`).
+  - MI1 peaks at 7–16 simultaneous notes (see `build/monkey/extracted/patches/*.toml` `max_polyphony`).
   - **Decision:** by default the converter passes every note through and lets MIDI Synth's voice stealing cap the polyphony at playback time. It knows the real voice state, release tails included, and targets the least noticeable note. The converter only reports peak polyphony. Thinning notes in the converter is a per-song fallback, only for songs that sound bad in listening tests.
 - **16 instruments per bank, and the MIDI channel *is* the instrument.** [ERS 8, 9, 24; synthLAB 12] The sequencer always plays in Multi mode: "the MIDI channel field specifies which of the 16 Synthesizer Instruments gets the MIDI message".
   - **Program Change does not change the instrument.** `$Cx` (0–15) is only passed to a call-back. [ERS 8]
@@ -179,7 +179,7 @@ The `num_inst` byte doesn't always match the number of named slots: COMBO says 9
 - The stored-byte junk we ignore: leftover memory in Pascal-string padding, and unused data bytes in 1-byte messages. Semantic round trips of every sample pass (`tests/test_midisynth.py`).
 
 ## Our converter (`src/migs/mid2seq.py`, `just seq`)
-- Input: `build/monkey/music/midi/gm/*.mid`. Output: `build/monkey/seq/MInnn.SEQ`. Mapping: `config/games/monkey/midisynth.toml`.
+- Input: `build/monkey/extracted/midi/gm/*.mid`. Output: `build/monkey/seq/MInnn.SEQ`. Mapping: `config/games/monkey/midisynth.toml`.
 - **Channel → slot:** each source channel's first GM program picks a bank slot (or a per-song override). Every event on that channel is rewritten onto the slot's channel. Each source channel gets its own seq track, named `"<ch> <instrument>"`.
 - **Rhythm:** GM drum keys are remapped to keys inside the kit's zones (`[banks.X.drums]`); unmapped keys are dropped.
 - **Kept:** notes, CC7, CC64, pitch bend. **Dropped:** program change, pan, reverb, modulation, SysEx. `c_volume[slot]` = the first CC7 value.

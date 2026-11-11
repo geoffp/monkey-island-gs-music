@@ -104,7 +104,7 @@ def test_extract_warns_when_the_games_release_differs(tiny_game, tmp_path_factor
     for arg in ([], ["original files/T"], [str(root / "original files/T")]):
         assert extract_music.main(["--game", "tg", *arg]) == 0
         assert "000.LFL: md5" in capsys.readouterr().err, arg
-    assert (root / "build/tg/music/midi/mt32/001.mid").is_file()
+    assert (root / "build/tg/extracted/midi/mt32/001.mid").is_file()
     other = tmp_path_factory.mktemp("copy")
     for f in data.iterdir():
         (other / f.name).write_bytes(f.read_bytes())

@@ -68,7 +68,7 @@ ntp_folders   := 'ntpf() { local m d f; for m in ' + ntp_modes + '; do d="$1/$(e
 p8_tree       := 'p8t() { local cp2=$1 img=$2 d f k g fs; for d in $(find "$3" -type d | sort); do "$cp2" mkdir "$img" "$d" >/dev/null; done; for d in $(find "$3" -type d | sort); do k=$(find "$d" -mindepth 1 -maxdepth 1 -type d | wc -l); fs=(); for f in $(find "$d" -maxdepth 1 -type f | sort); do if [ $k -ge 12 ] && [ $(( (k - 12) % 13 )) -eq 0 ]; then g="$d/GAP.$((k + 1))#040000"; echo "Placeholder: SenseiPlay v2.0 skips the first entry of each later directory block." > "$g"; [ ${#fs[@]} -eq 0 ] || "$cp2" add "$img" "${fs[@]}" >/dev/null; "$cp2" add "$img" "$g" >/dev/null; fs=(); k=$((k + 1)); fi; fs+=("$f"); k=$((k + 1)); done; [ ${#fs[@]} -eq 0 ] || "$cp2" add "$img" "${fs[@]}" >/dev/null; done; }; p8t'
 # What an NTP build reads (`ntpmod` adds the variant name): ntpmod and the migs modules it
 # imports, the game's config, the MT-32 MIDI, the PHP period tables, the Munt binary and the lockfile.
-ntp_inputs    := "py:src/migs/ntpmod.py " + gconf + " " + out + "/music/midi/mt32 " + vendor + "/ntp/src " + smf2wav + " pyproject.toml uv.lock"
+ntp_inputs    := "py:src/migs/ntpmod.py " + gconf + " " + out + "/extracted/midi/mt32 " + vendor + "/ntp/src " + smf2wav + " pyproject.toml uv.lock"
 # Build ProDOS image $1 (volume $2) from staging dir $3 at the smallest power-of-two size that
 # holds it (1, 2, ... 32 MB, the ProDOS limit): `eval $4` (run in $3) fills it; an attempt counts
 # when every staged entry is on the image (bash ignores errexit inside conditions, so the count
@@ -297,20 +297,20 @@ mt32-wav mid wav: fetch-munt
 gm-wav mid wav: fetch-soundfont
     fluidsynth -ni -F "{{wav}}" "{{sf2}}" "{{mid}}"
 
-# Extract the MT-32 soundtrack: build/<game>/music/midi/{mt32,gm}/*.mid + .../music/patches/*.toml
+# Extract the MT-32 soundtrack: build/<game>/extracted/midi/{mt32,gm}/*.mid + .../extracted/patches/*.toml
 extract:
     #!/usr/bin/env bash
     set -euo pipefail
     [ -d "{{data}}" ] || { echo "no game data for {{game}} in '{{data}}' (see original files/README.md)"; exit 1; }
-    {{fresh}} run {{out}}/music/.inputs --out {{out}}/music/midi/mt32 \
+    {{fresh}} run {{out}}/extracted/.inputs --out {{out}}/extracted/midi/mt32 \
       "{{data}}" {{gconf}}/game.toml opt:{{gconf}}/song_names.toml py:src/migs/extract_music.py pyproject.toml uv.lock \
-      -- uv run extract-music --game {{game}} "{{data}}" {{out}}/music
+      -- uv run extract-music --game {{game}} "{{data}}" {{out}}/extracted
 
-# Render every extracted song to WAV via both paths (build/<game>/music/wav/{mt32,gm}/)
+# Render every extracted song to WAV via both paths (build/<game>/extracted/wav/{mt32,gm}/)
 render: extract fetch-munt fetch-soundfont
     #!/usr/bin/env bash
     set -euo pipefail
-    m={{out}}/music
+    m={{out}}/extracted
     mkdir -p $m/wav/mt32 $m/wav/gm
     for f in $m/midi/mt32/*.mid; do
       n=$(basename "$f" .mid)
@@ -333,8 +333,8 @@ stock-banks: fetch-cp2 fetch-system6
 # Only the songs' own sequences are replaced: seq/stock/ also holds the drum auditions
 # (AUDITnn.SEQ, `midisynth-drum-audition`) and seq/mt32/ the bank.
 seq: stock-banks mt32bank
-    rm -f {{out}}/seq/stock/{{prefix}}[0-9]*.SEQ && uv run mid2seq --game {{game}} {{out}}/music/midi/gm/*.mid -p stock -o {{out}}/seq/stock -b "{{vendor}}/synthlab"
-    rm -f {{out}}/seq/mt32/{{prefix}}[0-9]*.SEQ && uv run mid2seq --game {{game}} {{out}}/music/midi/mt32/*.mid -p mt32 -o {{out}}/seq/mt32 -b {{out}}/seq/mt32
+    rm -f {{out}}/seq/stock/{{prefix}}[0-9]*.SEQ && uv run mid2seq --game {{game}} {{out}}/extracted/midi/gm/*.mid -p stock -o {{out}}/seq/stock -b "{{vendor}}/synthlab"
+    rm -f {{out}}/seq/mt32/{{prefix}}[0-9]*.SEQ && uv run mid2seq --game {{game}} {{out}}/extracted/midi/mt32/*.mid -p mt32 -o {{out}}/seq/mt32 -b {{out}}/seq/mt32
 
 # Sample the MT-32 (Munt) into the game's bank (MI1) per its mt32sounds.toml -> build/<game>/seq/mt32/MI1.{BNK,WAV,map.toml}
 mt32bank: fetch-munt
@@ -365,7 +365,7 @@ _ntpmod-one mode:
     #!/usr/bin/env bash
     set -euo pipefail
     d="{{out}}/ntp/{{mode}}"; rm -rf "$d" && mkdir -p "$d/wav"
-    uv run ntpmod --game {{game}} {{out}}/music/midi/mt32/*.mid -o "$d" --samples "{{mode}}"
+    uv run ntpmod --game {{game}} {{out}}/extracted/midi/mt32/*.mid -o "$d" --samples "{{mode}}"
     if ffmpeg -hide_banner -demuxers 2>/dev/null | grep -q libopenmpt; then
       ls $d/*.mod | xargs -P {{num_cpus()}} -I{} sh -c \
         'ffmpeg -hide_banner -loglevel error -y -f libopenmpt -i "$1" -ac 2 -ar 44100 "$2/wav/$(basename "$1" .mod).wav"' _ {} "$d"
@@ -382,7 +382,7 @@ ntpmod-force modes=ntp_modes:
 # Loop lab (research, not part of the build): attack detection + loop-construction candidates
 # measured on the MT-32 sample set -> build/<game>/looplab/ (report.md, wav/, plots/). docs/sample-construction.md
 looplab mode="shared": fetch-ntp fetch-munt
-    uv run --group lab looplab --game {{game}} {{out}}/music/midi/mt32/*.mid --samples "{{mode}}"
+    uv run --group lab looplab --game {{game}} {{out}}/extracted/midi/mt32/*.mid --samples "{{mode}}"
 
 # MOD -> .NTP with Ninjaforce's converter (needs php-cli). Streaming forbidden: everything in DOC RAM.
 # Converts only MODs newer than their .ntp (ntpmod rewrites a mode's folder when it rebuilds it).

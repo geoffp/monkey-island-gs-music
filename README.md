@@ -6,7 +6,7 @@ This project ports the Roland MT-32 soundtrack of *The Secret of Monkey Island* 
 
 ## Approach
 1. **Document** the SCUMM v4 resource format, the MT-32 `RO` music format, and the IIGS formats (`docs/`).
-2. **Extract** each distinct piece of music to Standard MIDI Files in two renditions (`build/<game>/music/`):
+2. **Extract** each distinct piece of music to Standard MIDI Files in two renditions (`build/<game>/extracted/`):
    - `midi/mt32/`: faithful to the original, for an MT-32 or Munt;
    - `midi/gm/`: converted for General MIDI (rules in `docs/mt32-to-gm.md`);
    - plus a patch-notes file per song listing each channel's MT-32 and GM instrument.
@@ -50,17 +50,17 @@ original files/    YOUR copies of the game and MT-32 ROMs; not distributable, no
 ref/scummvm/       ScummVM source (git submodule, reference only)
 vendor/            fetched/built tools and System 6.0.4 disk images (`just fetch`), not in git
 build/             everything generated, not in git (`just clean`, `just clean-all`):
- <game>/           one folder per game (build/monkey/), holding:
-  music/midi/{mt32,gm}/  extracted MIDI (faithful / General MIDI)
-  music/patches/         per-song channel -> instrument notes
-  music/wav/{mt32,gm}/   Munt / FluidSynth renders of the songs
-  seq/{stock,mt32,tune}/ MIDI Synth sequences, banks and wave files
-  ntp/<variant>/         MODs, .NTP files, desktop previews (wav/), build logs
-  disks/                 hard-disk images (MI.NTP.PO; experimental MI.SYNTHLAB.PO) and the GSSquared machine
-                         configs (*.gs2) that boot them
-  dist/                  each disk as <VOLUME>.zip (the image) and <VOLUME>.SHK (ShrinkIt archive of its files)
-  looplab/               loop-lab report, A/B WAVs and plots
- cache/mt32samples/     Munt sample renders, shared by every game (kept by `just clean`)
+ <game>/                     one folder per game (build/monkey/), holding:
+  extracted/midi/{mt32,gm}/  extracted MIDI (faithful / General MIDI)
+  extracted/patches/         per-song channel -> instrument notes
+  extracted/wav/{mt32,gm}/   Munt / FluidSynth renders of the songs
+  seq/{stock,mt32,tune}/     MIDI Synth sequences, banks and wave files
+  ntp/<variant>/             MODs, .NTP files, desktop previews (wav/), build logs
+  disks/                     hard-disk images (MI.NTP.PO; experimental MI.SYNTHLAB.PO) and the GSSquared machine
+                             configs (*.gs2) that boot them
+  dist/                      each disk as <VOLUME>.zip (the image) and <VOLUME>.SHK (ShrinkIt archive of its files)
+  looplab/                   loop-lab report, A/B WAVs and plots
+ cache/mt32samples/          Munt sample renders, shared by every game (kept by `just clean`)
 ```
 
 ## What may be distributed
@@ -107,8 +107,8 @@ These go in `original files/`, which is gitignored and never committed:
 - `mt-32 roms/`: MT-32 control and PCM ROMs, needed only for MT-32 rendering with Munt. MT-32 v1.07 matches the period hardware; CM-32L also works. Tested with control ROM sha1 `7b8c2a5d…` (Munt: "MT-32 Control BlueRidge", a modified control ROM) and PCM sha1 `f6b1eebc…` (standard MT-32 PCM).
 
 ## Listening tests
-1. **MT-32**: `just mt32-wav <mid> <wav>` renders with [Munt](https://github.com/munt/munt)'s `mt32emu-smf2wav`. Needs your ROMs. Plays `build/<game>/music/midi/mt32/`.
-2. **General MIDI**: `just gm-wav <mid> <wav>` renders with FluidSynth and the [GeneralUser GS](https://github.com/mrbumpy409/GeneralUser-GS) soundfont. Plays `build/<game>/music/midi/gm/`.
+1. **MT-32**: `just mt32-wav <mid> <wav>` renders with [Munt](https://github.com/munt/munt)'s `mt32emu-smf2wav`. Needs your ROMs. Plays `build/<game>/extracted/midi/mt32/`.
+2. **General MIDI**: `just gm-wav <mid> <wav>` renders with FluidSynth and the [GeneralUser GS](https://github.com/mrbumpy409/GeneralUser-GS) soundfont. Plays `build/<game>/extracted/midi/gm/`.
 3. **NinjaTrackerPlus, desktop**: `just ntpmod` writes MODs in two builds, one per sample-set mode:
    - `build/<game>/ntp/inst-per-song/`: each song carries only its own sounds, with longer loops;
    - `build/<game>/ntp/inst-shared/`: one set for every song, like a resident instrument bank;

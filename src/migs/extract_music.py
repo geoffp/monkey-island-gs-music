@@ -321,13 +321,13 @@ def main(argv: list[str] | None = None) -> int:
     games.add_argument(ap)
     ap.add_argument("game_dir", type=Path, nargs="?",
                     help="SCUMM v4 game directory (000.LFL, DISKnn.LEC); default the game's `data`")
-    ap.add_argument("out_dir", type=Path, nargs="?", help="output directory (default build/<game>/music)")
+    ap.add_argument("out_dir", type=Path, nargs="?", help="output directory (default build/<game>/extracted)")
     ap.add_argument("--names", type=Path,
                     help="song names TOML (optional; default the game's song_names.toml)")
     args = ap.parse_args(argv)
     g = games.load(args.game)
     game_dir = args.game_dir or g.data
-    args.out_dir = args.out_dir or g.build_dir / "music"
+    args.out_dir = args.out_dir or g.build_dir / "extracted"
     warn = lambda m: print("warning:", m, file=sys.stderr)
     if game_dir.resolve() == g.data.resolve():          # the configured release: check it
         for m in g.md5_mismatches():

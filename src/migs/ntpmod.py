@@ -483,7 +483,7 @@ def _build_song_quiet(job) -> tuple[object, str | None]:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     games.add_argument(ap)
-    ap.add_argument("inputs", nargs="+", type=Path, help="MT-32 MIDI files (build/<game>/music/midi/mt32)")
+    ap.add_argument("inputs", nargs="+", type=Path, help="MT-32 MIDI files (build/<game>/extracted/midi/mt32)")
     ap.add_argument("-o", "--out-dir", type=Path, required=True)
     ap.add_argument("--config", type=Path, help="NTP settings (default the game's ntp.toml)")
     ap.add_argument("--spec", type=Path, help="MT-32 sounds (default the game's mt32sounds.toml)")

@@ -9,10 +9,10 @@ Extract the Roland MT-32 soundtrack of *The Secret of Monkey Island* (DOS VGA fl
 
 Pipeline:
 1. **Docs** (`docs/`): record format knowledge and sources before writing code that depends on it.
-2. **Extract** (`src/migs/extract_music.py` → `build/<game>/music/`): MT-32 `RO` tracks → Standard MIDI Files in **two renditions from one parse**:
-   - `build/<game>/music/midi/mt32/`: faithful;
-   - `build/<game>/music/midi/gm/`: converted per `docs/mt32-to-gm.md`;
-   - plus per-song patch notes (`build/<game>/music/patches/*.toml`).
+2. **Extract** (`src/migs/extract_music.py` → `build/<game>/extracted/`): MT-32 `RO` tracks → Standard MIDI Files in **two renditions from one parse**:
+   - `build/<game>/extracted/midi/mt32/`: faithful;
+   - `build/<game>/extracted/midi/gm/`: converted per `docs/mt32-to-gm.md`;
+   - plus per-song patch notes (`build/<game>/extracted/patches/*.toml`).
 
    Keep both renditions working. Test the MT-32 one with Munt (`just mt32-wav`, user-supplied ROMs in `original files/mt-32 roms/`) and the GM one with FluidSynth + GeneralUser GS (`just gm-wav`).
 3. **NinjaTrackerPlus** (`src/migs/ntpmod.py` build CLI: samples in `ntpsamples.py`, arrangement in `ntpsong.py`, MOD writer in `modfile.py`; the game's `ntp.toml` → `build/<game>/ntp/`): MT-32 SMF → ProTracker MOD within NinjaTrackerPlus limits (31 oscillators, 64 KB DOC RAM, no streaming) → `.NTP` via Ninjaforce's PHP converter (`just ntp`). The MOD is the primary artefact: preview it on the desktop (`just ntpmod`) before going to the IIGS. Sample construction research (attack detection, loop candidates, metrics): `just looplab` → `build/<game>/looplab/`, findings in `docs/sample-construction.md`.
@@ -54,7 +54,7 @@ Pipeline:
   - `just selftest` checks a clean-clone build (with your game data); `just smoke` checks the fetched tools run; CI (`.github/workflows/build.yml`) runs setup, tests and smoke on Ubuntu and macOS, weekly too, to catch downloads that break.
 - Tasks: `justfile` (run `just` to list). Key recipes:
   - `just test`: unit tests;
-  - `just extract`: MT-32 + GM MIDI and patch notes into `build/<game>/music/`;
+  - `just extract`: MT-32 + GM MIDI and patch notes into `build/<game>/extracted/`;
   - `just render`: WAVs through Munt and FluidSynth;
   - `just ntp`: MODs and `.NTP` songs for every build variant in `build/<game>/ntp/` (`just ntpmod` stops at the MODs and desktop previews);
   - `just disk`: the NinjaTrackerPlus disk `build/<game>/disks/MI.NTP.PO`;
@@ -71,7 +71,7 @@ Pipeline:
 - **Layout: tracked files are inputs, everything generated goes to `build/`.**
   - `config/`: hand-maintained settings. Per game, `games/<id>/`: `game.toml`, `midisynth.toml`, `mt32sounds.toml`, `ntp.toml`, optional `song_names.toml`, and `disk/README.TXT` (the NTP disk's root README, explaining the variant folders; keep it in step with them). Shared: `emu/default-bram.hex`.
   - `original files/`: user-supplied game data and MT-32 ROMs. Only its README is tracked.
-  - `build/`: all generated output, gitignored. Per game, `build/<id>/`: `music/`, `ntp/<variant>/`, `seq/`, `disks/` (images plus the `.gs2` configs beside them), `dist/` (each disk as `<VOLUME>.zip` holding the image and `<VOLUME>.SHK`, a ShrinkIt archive of its files, made by `just disk` / `just synthlab-disk`) and `looplab/`. Shared by every game: `cache/` (`mt32samples/`, `docsim.json`: keyed by what is played, not by game or ROM) and `selftest/`. `just clean` keeps `build/cache/`; `just clean-all` removes it all.
+  - `build/`: all generated output, gitignored. Per game, `build/<id>/`: `extracted/`, `ntp/<variant>/`, `seq/`, `disks/` (images plus the `.gs2` configs beside them), `dist/` (each disk as `<VOLUME>.zip` holding the image and `<VOLUME>.SHK`, a ShrinkIt archive of its files, made by `just disk` / `just synthlab-disk`) and `looplab/`. Shared by every game: `cache/` (`mt32samples/`, `docsim.json`: keyed by what is played, not by game or ROM) and `selftest/`. `just clean` keeps `build/cache/`; `just clean-all` removes it all.
 - Outputs must be reproducible from the game data plus `config/`. Byte-for-byte holds on one CPU architecture; known differences across platforms are accepted and listed here, not fixed:
   - **arm64 vs x86_64 floating point.** numpy's arm64 builds fuse multiply-adds (one rounding instead of two), so float results can differ in the last bit. One example: `audio.interp_at` matches `np.interp` exactly on x86_64 only. MODs built on Apple silicon may therefore differ from Linux x86_64 builds in a few sample bytes. That's inaudible, but not identical. Unmeasured: CI has no game data. Found in CI, 2026-11-11.
 - `just` has no freshness tracking (every dependency recipe runs), so recipes skip themselves through `tools/fresh.py` (standard library only; usage in its docstring). `fresh get URL FILE SHA256` fetches a pinned download unless it's already there. `fresh run STAMP [--out PATH]... INPUT... -- CMD` runs CMD unless its inputs hash to the stamp, which is written only after success. It's used by `extract`, `fetch-munt`, `ntpmod` (one stamp per variant in `build/<game>/ntp/<mode>/.inputs`, inputs in the justfile's `ntp_inputs`) and `disk`. `py:FILE` inputs hash a module plus every `migs` module it imports, so new modules are picked up without editing the list. A new data file or tool that a build reads must be added to its inputs. `just ntpmod-force` rebuilds the NTP variants regardless.

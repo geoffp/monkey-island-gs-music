@@ -15,7 +15,7 @@ folder = "Stock"
 [profiles.mt32]           # our MT-32-sampled bank (in testing): `just mt32bank`, mt32sounds.toml
 default_bank = "MI1"
 folder = "MT32"
-source = "mt32"           # convert build/<game>/music/midi/mt32 (MT-32 program numbers and rhythm keys)
+source = "mt32"           # convert build/<game>/extracted/midi/mt32 (MT-32 program numbers and rhythm keys)
 
 [banks.COMBO]
 # Stock synthLAB bank (System 6.0.4 synthLAB disk, vendor/system6/synthLAB.po /SEQ.AND.INSTR/), slots:
