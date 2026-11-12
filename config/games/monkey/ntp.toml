@@ -73,6 +73,10 @@ melodic_one_shots = "any"  # one-shots (Xylophone) may use 1- or 2-oscillator tr
 delay_snap_db = 4.0     # a delayed (EDx) note whose start at the sample's default volume would be
                         # more than this off moves one tick to the nearest row, velocity in-cell
                         # (never onto a same-part neighbour: flams, rolls). Remove to keep all delays
+delay_snap_ms = 20      # also move a delayed note onto its nearest row when its onset is within this
+                        # many ms of it and its velocity isn't the default: no EDx, velocity in-cell.
+                        # 0 = off. Default-volume notes sat 15-43 ms from a row (10-90 %, per-song;
+                        # a tick is a third of a row, 18-51 ms). Default since 2026-11-11 (by ear: 20 over 30)
 track_plan = true       # choose each song's 2-/1-oscillator track split for the least polyphony loss
                         # (plan_tracks) instead of letting the first notes fix it
 halt_released_loops = true  # end each release with a silent looped rest that replaces the loop: NTP

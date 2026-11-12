@@ -284,6 +284,31 @@ def test_delayed_notes_far_from_the_default_volume_snap_to_a_row(tmp_path):
         assert on.timing_err_ms >= off.timing_err_ms
 
 
+def test_delayed_notes_near_a_row_snap_to_it_within_delay_snap_ms(tmp_path):
+    """delay_snap_ms: a delayed note whose onset is within that many ms of its nearest row goes
+    onto the row with its velocity in-cell, even when the default volume is close (under
+    delay_snap_db). A note at exactly the default volume gains nothing and keeps its EDx."""
+    import mido
+    # 62.5 ms rows = 15 MIDI ticks, speed 3: a tracker tick is 5 MIDI ticks (20.8 ms)
+    on_row = [(0, 100), (60, 100), (120, 100)]          # set the default volume to velocity 100's
+    delayed = [(185, 90), (247, 90), (305, 100)]        # 20.8 ms, 29.2 ms (still 1 tick), 20.8 ms at the default
+    ev, now = [mido.Message("program_change", channel=1, program=9)], 0
+    for at, vel in on_row + delayed:
+        ev += [mido.Message("note_on", channel=1, note=60, velocity=vel, time=at - now),
+               mido.Message("note_off", channel=1, note=60, time=20)]
+        now = at + 20
+    p = midi_song(tmp_path, ev)
+    cfg = {"rows_per_unit": 2, "speed": 3, "quantize": 0.0, "oscillators": 31, "unit_ticks": 30, "phase_ticks": 0,
+           "delay_snap_db": 4.0}
+    reps = {ms: sg.convert_song(p, [fake_sample()], {9: 0}, {}, cfg, {**cfg, "delay_snap_ms": ms})[2]
+            for ms in (0, 25, 35)}
+    assert [reps[ms].snap_near for ms in (0, 25, 35)] == [0, 1, 2]
+    assert [reps[ms].vel_default for ms in (0, 25, 35)] == [3, 2, 1]
+    assert reps[0].vel_snapped == 0 and reps[35].vel_snapped == 2
+    assert sorted(round(x, 1) for x in reps[0].default_row_ms) == [20.8, 20.8, 29.2]
+    assert reps[35].timing_err_ms > reps[25].timing_err_ms > reps[0].timing_err_ms
+
+
 def test_tempo_commands_stay_on_the_ideal_grid():
     ideal, speed, rows, tol = 97.56, 3, 2000, 0.002
     ch = sg.tempo_commands(ideal, speed, rows, lambda r: True, tol)

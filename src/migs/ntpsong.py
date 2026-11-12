@@ -163,6 +163,8 @@ class Report:
     vel_preceding: int = 0
     vel_default: int = 0
     vel_snapped: int = 0       # delayed notes moved to a row so their velocity fits in-cell
+    snap_near: int = 0         # ... of them, moved only for being within delay_snap_ms of the row
+    default_row_ms: list = field(default_factory=list)  # v:dflt notes: how far (ms) each is from its nearest row
     level_ref: float = 1.0      # note loudness that maps to MOD volume 64
     tempo_changes: int = 0
     track_kinds: list = field(default_factory=list)   # "melodic" (2 oscillators) / "drum" (1), in MOD order
@@ -626,6 +628,7 @@ def convert_song(path: Path, samples: list[ModSample], programs: dict, drums: di
     hyst = arr.opt("volume_hysteresis", 0.75)
     max_rise_db = arr.opt("env_max_rise_db", 1.5)
     snap_db = arr.opt("delay_snap_db")
+    snap_ms = arr.opt("delay_snap_ms") or 0.0
     halt_ghosts = arr.opt("halt_before_delayed", True)
     flexible = arr.opt("melodic_one_shots", "any") == "any"
     onsets = {ch: np.array([m.t for m in notes if m.channel == ch]) for ch in {m.channel for m in notes}}
@@ -669,20 +672,24 @@ def convert_song(path: Path, samples: list[ModSample], programs: dict, drums: di
         # volume until the next row unless the preceding cell can carry its velocity (a silent
         # one-shot track). When that start would be more than `delay_snap_db` off, move the note
         # to the nearest row instead (at most speed/2 ticks: one tick at speed 3) and put its
-        # velocity in the cell: a little timing for a correct onset level.
-        if d and snap_db is not None:
+        # velocity in the cell: a little timing for a correct onset level. A note whose own onset
+        # is within `delay_snap_ms` of that row moves too, whenever its velocity differs from the
+        # default at all: a timing change too small to matter for an exact onset level.
+        if d and (snap_db is not None or snap_ms):
             off_db = abs(20 * math.log10(max(s.default_volume, 1) / max(v, 1)))
             move = speed - d if speed - d <= d else -d          # ticks: to the next row or back to this one
+            to_row = r + 1 if move > 0 else r
+            loud = snap_db is not None and off_db > snap_db
+            near = bool(snap_ms) and v != s.default_volume and 1000 * timing.error(to_row, 0, n.t) <= snap_ms
             # don't collapse a flam, roll or grace note onto a neighbour of the same part
             gaps = (onsets[n.channel] - n.t) / tick_s
             collapses = bool(np.any((np.abs(gaps) >= 0.5) & (np.abs(gaps - move) < 0.5)))
-            if not arr.preceding_silent(tr, s, si, r, row_s) and off_db > snap_db and not collapses:
+            if (loud or near) and not collapses and not arr.preceding_silent(tr, s, si, r, row_s):
                 err_sum -= timing.error(r, d, n.t)
-                if move > 0:                         # nearer the next row: start there
-                    r += 1
-                d = 0
+                r, d = to_row, 0
                 err_sum += timing.error(r, 0, n.t)
                 rep.vel_snapped += 1
+                rep.snap_near += not loud
         # A delayed note on a 2-oscillator track that is still sounding would raise the old note
         # to its default volume for d ticks (a loud stray tone on the IIGS only). Halt the track
         # on the row before; when that row starts a note, put this note on the nearest row.
@@ -713,6 +720,8 @@ def convert_song(path: Path, samples: list[ModSample], programs: dict, drums: di
             else:
                 cell[1] = si + 1                     # default volume; corrected next row
                 rep.vel_default += 1
+                nearest = r + 1 if 2 * d > speed else r
+                rep.default_row_ms.append(1000 * timing.error(nearest, 0, n.t))
             cell[2], cell[3] = FX_EXTENDED, NOTE_DELAY | d
         track.inst, track.chan, track.off = si + 1, n.channel, -1
         if not s.loop_len:

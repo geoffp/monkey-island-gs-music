@@ -480,6 +480,15 @@ def _print_reports(reports: list, prefix: str) -> None:
               f"{rep.delayed:5d} {rep.vel_in_cell:6d} {rep.vel_preceding:6d} {rep.vel_default:6d} "
               f"{rep.timing_err_ms:6.1f} {rep.halted:5d} {max(rep.stolen_levels, default=0):6d} {plan:>4} "
               f"{rep.vel_snapped:4d}")
+    if any(rep.snap_near for _, rep in reports):
+        print("delay_snap_ms: " + ", ".join(f"{prefix}{sid} {rep.snap_near} moved" for sid, rep in reports
+                                            if rep.snap_near))
+    ms = [x for _, rep in reports for x in rep.default_row_ms]
+    if ms:
+        ms.sort()
+        print(f"v:dflt notes ({len(ms)}), ms from their nearest row: " + ", ".join(
+            f"{q}% {ms[min(len(ms) - 1, len(ms) * q // 100)]:.0f}" for q in (10, 25, 50, 75, 90))
+            + f"; within 10/15/20/25 ms: " + "/".join(str(sum(x <= c for x in ms)) for c in (10, 15, 20, 25)))
     if any(rep.ghost_halts or rep.ghost_moves for _, rep in reports):
         print("halt_before_delayed: " + ", ".join(f"{prefix}{sid} {rep.ghost_halts} halts {rep.ghost_moves} moved"
                                                 for sid, rep in reports if rep.ghost_halts or rep.ghost_moves))
