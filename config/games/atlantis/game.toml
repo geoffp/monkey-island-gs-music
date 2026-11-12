@@ -9,6 +9,9 @@ engine = "scumm-v5"              # SCUMM v5: iMUSE MIDI in SOUN blocks, MT-32 in
 data = "Indiana Jones 2 - Fate of Atlantis (CD DOS)"   # folder under original files/
 prefix = "FOA"                   # song files (FOA001.mod) and disk volumes (FOA.NTP)
 label = "FOA"                    # titles: song "FOA 1", MIDI "FOA sound 1", emulator configs
+# NTP variants on its disk: per-song only. A shared set (31 samples for every song) can't hold
+# the 100-odd sounds an iMUSE game plays (docs/ninjatrackerplus.md, "Songs with too many sounds").
+ntp_variants = "inst-per-song"
 
 # The release this config was tuned on (ScummVM scumm-md5.h: atlantis, CD, English, DOS).
 [md5]

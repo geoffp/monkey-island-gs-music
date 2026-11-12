@@ -9,6 +9,9 @@ engine = "scumm-v5"              # SCUMM v5: iMUSE MIDI in SOUN blocks, MT-32 in
 data = "monkey2"                 # folder under original files/
 prefix = "M2"                    # song files (M2100.mod, M2100.NTP) and disk volumes (M2.NTP)
 label = "MI2"                    # titles: song "MI2 100", MIDI "MI2 sound 100", emulator configs
+# NTP variants on its disk: per-song only. A shared set (31 samples for every song) can't hold
+# the 100-odd sounds an iMUSE game plays (docs/ninjatrackerplus.md, "Songs with too many sounds").
+ntp_variants = "inst-per-song"
 
 # The release this config was tuned on (ScummVM scumm-md5.h: monkey2, English, DOS).
 # `extract` warns when the data differs.

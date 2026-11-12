@@ -92,6 +92,17 @@ def test_the_justfile_reader_agrees_with_migs_games(gid):
     for key, want in (("data", g.data.name), ("prefix", g.prefix), ("label", g.label)):
         r = _tool(gid, key)
         assert r.returncode == 0 and r.stdout == want + "\n", r.stderr
+    r = _tool(gid, "ntp_variants", " ".join(games.NTP_VARIANTS))       # as the justfile asks
+    assert r.returncode == 0 and r.stdout.split() == list(g.ntp_variants), r.stderr
+
+
+def test_a_game_lists_its_ntp_variants_or_gets_both():
+    """iMUSE games play too many sounds for a shared set: their disks are per-song only."""
+    assert games.load("monkey", ROOT).ntp_variants == ("inst-per-song", "inst-shared")
+    assert games.load("monkey2", ROOT).ntp_variants == ("inst-per-song",)
+    assert _tool("monkey", "no_such_key").returncode == 1
+    r = _tool("monkey", "no_such_key", "x y")
+    assert r.returncode == 0 and r.stdout == "x y\n"
 
 
 def test_the_justfile_reader_works_without_tomllib():

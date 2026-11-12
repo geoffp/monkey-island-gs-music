@@ -19,6 +19,7 @@ _gv      := 'python3 -I tools/game.py "$1" "$2"'
 build_nice := env("MIGS_NICE", "10")
 nice       := "nice -n " + build_nice
 lowprio    := '[ "$(ps -o ni= -p $$)" -ge ' + build_nice + ' ] || renice -n ' + build_nice + ' -p $$ >/dev/null'
+_gvd     := 'python3 -I tools/game.py "$1" "$2" "$3"'   # with a default
 data     := "original files" / shell(_gv, game, "data")      # the game's files (read only)
 prefix   := shell(_gv, game, "prefix")   # song files MI150.mod, disk volumes MI.NTP
 label    := shell(_gv, game, "label")    # titles: "MI1 NinjaTrackerPlus"
@@ -60,7 +61,7 @@ ntpdemo_sha   := "350843388bde213b10101212fcd6e3f5affa3b4f25b74ea970b0b6ab85d14d
 # with a sample-set `base`: inst-per-song (per-song: each song carries only its own sounds,
 # longer loops) and inst-shared (shared: one set for every song, like the MIDI Synth bank), plus
 # any trial variants.
-ntp_modes     := "inst-per-song inst-shared"
+ntp_modes     := shell(_gvd, game, "ntp_variants", "inst-per-song inst-shared")   # game.toml; default: migs.games.NTP_VARIANTS
 # The helpers below expand to `f() {...}; f`: use them as whole commands (a line, or inside
 # if/then), never after `||` or `&&`, which would skip only the definition.
 # Copy build/<game>/ntp/<mode>/*.ntp (typed $D5/$0008) into <dir>/<MODE>/, one folder per variant.

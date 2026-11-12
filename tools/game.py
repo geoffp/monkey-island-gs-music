@@ -2,7 +2,9 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Print one top-level value of config/games/<GAME>/game.toml, for the justfile:
 
-    python3 tools/game.py GAME KEY
+    python3 tools/game.py GAME KEY [DEFAULT]
+
+DEFAULT is printed when the key is absent (without one, that is an error).
 
 Standard library only, like tools/fresh.py, and it must run before `just setup` (on macOS the
 system python3 is 3.9, which has no tomllib): without tomllib it reads one-line string values
@@ -34,10 +36,10 @@ def values(text: str) -> dict:
 
 
 def main(argv: list) -> int:
-    if len(argv) != 2:
+    if len(argv) not in (2, 3):
         print(__doc__, file=sys.stderr)
         return 2
-    game, key = argv
+    game, key, *default = argv
     if game in ("cache", "selftest"):            # migs.games.RESERVED_IDS: shared build/ folders
         print(f"{game!r} can't be a game id: build/{game}/ is shared", file=sys.stderr)
         return 1
@@ -47,6 +49,8 @@ def main(argv: list) -> int:
         print(f"no game {game!r} ({path} not found; known: {', '.join(known)})", file=sys.stderr)
         return 1
     v = values(path.read_text())
+    if key not in v and default:
+        v[key] = default[0]
     if key not in v:
         print(f"{path}: no top-level string {key!r}", file=sys.stderr)
         return 1

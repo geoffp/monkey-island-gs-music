@@ -34,6 +34,11 @@ RESERVED_PREFIXES = ("AUDIT",)
 MOD_TITLE = 20                   # bytes in a MOD's song title ("<label> <sound id>")
 
 
+# NTP build variants a game's disk gets unless its game.toml lists others (`ntp_variants`, a
+# space-separated string: the justfile reads it through tools/game.py)
+NTP_VARIANTS = ("inst-per-song", "inst-shared")
+
+
 @dataclass(frozen=True)
 class GameInfo:
     id: str
@@ -46,6 +51,7 @@ class GameInfo:
     root: Path = Path(".")
     mt32: dict = field(default_factory=dict)     # [mt32]: the game's MT-32 driver (init SysEx, GM for its timbres)
     music: dict = field(default_factory=dict)    # [music]: which sounds are music (engines with sound effects mixed in)
+    ntp_variants: tuple[str, ...] = NTP_VARIANTS  # NTP build variants for its disk (game.toml `ntp_variants`)
 
     @property
     def mt32_init(self) -> list[bytes]:
@@ -117,7 +123,8 @@ def parse(game_id: str, text: str, root: Path = Path(".")) -> GameInfo:
         if len(b) < 6 or b[0] != 0x41 or b[3] != 0x12:
             raise ValueError(f"{game_id}/game.toml: [mt32] init {h[:16]}...: not a Roland DT1 (41 dd 16 12 ...)")
     return GameInfo(game_id, c["name"], c["engine"], root / ORIGINAL / c["data"], c["prefix"], c["label"],
-                    dict(c.get("md5", {})), root, dict(c.get("mt32", {})), dict(c.get("music", {})))
+                    dict(c.get("md5", {})), root, dict(c.get("mt32", {})), dict(c.get("music", {})),
+                    tuple(c.get("ntp_variants", " ".join(NTP_VARIANTS)).split()))
 
 
 def load(game_id: str | None = None, root: Path = Path(".")) -> GameInfo:
