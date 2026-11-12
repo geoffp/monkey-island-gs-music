@@ -140,6 +140,7 @@ notes after `imuse.remap_channels`.
 | 222 | 156.1s | from 129.5s | 9 | 3052 | 41 |
 
 ## Open questions
+- Sound 222 plays 37 sounds, more than a MOD's 31 samples: the NTP build drops its 8 least-played drum keys (`docs/ninjatrackerplus.md`, "Songs with too many sounds"). Which merges would keep them?
 - Names of the songs (cues): from the scripts, or by ear.
 - Which hooks the scripts set for each room, so songs like Woodtick (100) could be
   extracted per building.

@@ -131,3 +131,50 @@ def test_attack_cuts_are_a_decision_the_build_checks():
     organ = _att("Organ", 1016)                         # its own short attack (ntp.toml [[melodic]]): not a candidate
     with pytest.raises(ValueError, match=r"at full length: A\)"):
         nm.check_fit([_att("A", 2040), organ, cut[2]], cfg, 10)
+
+
+def test_too_many_sounds_drop_the_least_played():
+    """A MOD holds 31 samples (one the rest): past that, the sounds with the fewest notes go,
+    their notes unplayed (MI2's sound 222 plays 37). Ties: the later entry goes first."""
+    from migs.ntpmod import drop_least_used
+    from migs.ntpsong import Note
+    spec = {"melodic": [{"slot": 1, "name": "Bass", "program": 1, "covers": [1], "key": 40},
+                        {"slot": 2, "name": "Flute", "program": 2, "covers": [2], "key": 70}],
+            "drum": [{"slot": 9, "name": "Kick", "key": 36, "covers": [35, 36]},
+                     {"slot": 9, "name": "Tom", "key": 45, "covers": [45]},
+                     {"slot": 9, "name": "Bongo", "key": 60, "covers": [60]}]}
+    n = lambda ch, key, prog=-1: Note(0.0, 0.5, key, 100, ch, program=prog)
+    notes = [n(0, 40, 1)] * 3 + [n(1, 70, 2)] + [n(9, 35), n(9, 36)] + [n(9, 45)] + [n(9, 60)] * 2
+    lines = []
+    out = drop_least_used(spec, [(notes, {})], 3, lines.append)
+    assert [m["name"] for m in out["melodic"]] == ["Bass"] and [d["name"] for d in out["drum"]] == ["Kick", "Bongo"]
+    assert lines[0].startswith("  dropped Tom (1 notes)") and len(lines) == 2
+    assert drop_least_used(spec, [(notes, {})], 5) is spec
+
+
+def test_the_budget_finds_a_sound_that_starts_zoned_by_its_own_name():
+    """A sound too wide for one sample (Fate of Atlantis's Str Sect 3: keys 27-87) has no 1-zone
+    plan, so it is zoned from the start ('Str Sect 3 27', 'Str Sect 3 76'). The budget prices
+    its next zone from the sound's own entry, not the zones."""
+    from migs import pitchplan
+    from migs.ntpmod import _value_budget, _zone_entries
+    z = lambda lo, hi, key: pitchplan.Zone(lo, hi, key, 20000.0, -10.0)
+    two = pitchplan.Plan((z(27, 50, 40), z(51, 87, 76)), -10.0)
+    three = pitchplan.Plan((z(27, 40, 34), z(41, 60, 52), z(61, 87, 76)), -14.0)
+    m = {"slot": 1, "name": "Str Sect 3", "program": 50, "covers": [50], "key": 60}
+    plans = {"Str Sect 3": ([two, three], 30.0, -8.0, False)}
+    assert [e["name"] for e in _zone_entries(m, two, False)] == ["Str Sect 3 40", "Str Sect 3 76"]
+    cfg = {"loop_bytes": 512, "attack_bytes": 1024}
+    count, _, lines = _value_budget(plans, [], {"melodic": [m], "drum": []}, cfg, 239, {"Str Sect 3": 1.0}, {})
+    assert count == {"Str Sect 3": 2} and "-> 2 zones" in lines[0]
+
+
+def test_a_failed_song_is_logged_and_the_others_kept(capsys):
+    """One song's error doesn't stop the build (Fate of Atlantis found its bugs one full build at a time)."""
+    results = [("001", "rep1", "log 1\n", None),
+               ("002", None, "log 2\n", "FOA002: build failed\nTraceback ...\nKeyError: 'Str Sect 3'"),
+               ("003", "rep3", "log 3\n", None)]
+    reports, failed = nm._gather(iter(results))
+    assert reports == [("001", "rep1"), ("003", "rep3")] and failed == [("002", "KeyError: 'Str Sect 3'")]
+    out = capsys.readouterr().out
+    assert out.index("log 2") < out.index("FOA002: build failed") < out.index("log 3")

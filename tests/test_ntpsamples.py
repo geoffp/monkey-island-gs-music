@@ -281,3 +281,21 @@ def test_forget_renders_drops_the_in_process_renders():
     assert not smp._PEAKS
     b = smp.cached_render(m, 1, 60, 0.5)
     assert Fake.calls == 2 and b is not a and np.array_equal(a, b) and not b.flags.writeable
+
+
+def test_a_planned_rate_with_no_whole_cycle_tuning_falls_back_to_the_config_window():
+    """The pitch plan's rate assumes the sampled key's nominal pitch. Fate of Atlantis's
+    Triangle measures 58 cents sharp: no whole number of periods divides 512 B within +-3 %
+    of it, so the build tunes it in the config's whole window instead."""
+    from types import SimpleNamespace
+    tables = synthetic_tables()
+    cfg = {"loop_bytes": 512, "attack_bytes": 1024, "min_rate": 8000, "max_rate": 26000}
+    src = SimpleNamespace(freq=361.33, keys=(54, 70))
+    m = {"name": "Triangle", "key": 65, "ntp_rate": 11175.3}
+    with pytest.raises(ValueError, match="no tuning"):
+        smp.best_tuning(src.freq, tables, *smp.rate_window(m, cfg, 512), 512, 65, 54, 70, whole_cycles=True)
+    loop_bytes, (err, k, rate, _, _) = smp._tune_loop(m, src, cfg, tables, False, 1.0, True)
+    assert loop_bytes == 512 and 512 % k == 0 and 8000 <= rate <= 26000 and rate == pytest.approx(512 * 361.33 / k)
+    with pytest.raises(ValueError):                    # unplanned: the config window already failed
+        smp._tune_loop({"name": "X", "key": 65}, src, {**cfg, "min_rate": 11200, "max_rate": 11300},
+                       tables, False, 1.0, True)

@@ -552,8 +552,18 @@ def _tune_loop(m: dict, src: _Source, cfg: dict, tables, steady: bool, sustain_s
         if tuning is not None:
             return loop_bytes, tuning
         loop_bytes //= 2
-    return loop_bytes, best_tuning(src.freq, tables, *rate_window(m, cfg, loop_bytes), loop_bytes, m["key"],
-                                   *src.keys, whole_cycles=eprime)
+    try:
+        return loop_bytes, best_tuning(src.freq, tables, *rate_window(m, cfg, loop_bytes), loop_bytes, m["key"],
+                                       *src.keys, whole_cycles=eprime)
+    except ValueError:
+        # The plan's rate assumed the sampled key's nominal pitch. A sound that measures well
+        # off it can leave no whole-cycle tuning within +-3 % (Fate of Atlantis's Triangle,
+        # program 121: 361 Hz at key 65, 58 cents sharp, so 512 B = 16.07-17.07 periods there).
+        # Then the config's whole window is used, as for an unplanned sound.
+        if "ntp_rate" not in m:
+            raise
+        return loop_bytes, best_tuning(src.freq, tables, cfg["min_rate"], cfg["max_rate"], loop_bytes, m["key"],
+                                       *src.keys, whole_cycles=eprime)
 
 
 def _raw_tuning(m: dict, src: _Source, cfg: dict, tables, z: int, att_bytes: int, sustain_s: float

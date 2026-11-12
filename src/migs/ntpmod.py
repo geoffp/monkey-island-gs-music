@@ -224,7 +224,8 @@ def _budget(plans, samples, song_spec, unplanned, songs, usage_notes, cfg, last_
         st = drum_steps(d, cfg, munt, tables, hits)
         steps[d["name"]] = st
         exposure[d["name"]] = sum(hits.get(c, 0.0) for c in d["covers"]) * cap(st[0][2])
-    count, drum_bytes, lines = _value_budget(plans, samples, song_spec, cfg, last_page, exposure, steps)
+    # sounds by their own names (unplanned): a sound too wide for one sample starts zoned already
+    count, drum_bytes, lines = _value_budget(plans, samples, unplanned, cfg, last_page, exposure, steps)
     for line in lines:
         log(line)
     return count, drum_bytes
@@ -299,6 +300,31 @@ def _value_budget(plans: dict, samples: list[ModSample], spec: dict, cfg: dict, 
     return count, drum_blocks, lines
 
 
+def drop_least_used(spec: dict, songs: list[tuple[list[Note], dict]], room: int, log=lambda *a: None) -> dict:
+    """`spec` with its least-played sounds (fewest notes; ties: the later entry) left out until
+    at most `room` remain: a MOD holds 31 samples, one of them the rest. Their notes go
+    unplayed (MI2's sound 222 plays 37 sounds). Returns `spec` itself when everything fits."""
+    entries = [("melodic", m) for m in spec["melodic"]] + [("drum", d) for d in spec["drum"]]
+    if len(entries) <= room:
+        return spec
+    count = {id(e): 0 for _, e in entries}
+    for notes, chan_prog in songs:
+        for n in notes:
+            if n.channel == RHYTHM:
+                e = next((d for d in spec["drum"] if n.key in d["covers"]), None)
+            else:
+                e = melodic_entry(spec, program_of(n, chan_prog), n.key)
+            if e is not None and id(e) in count:
+                count[id(e)] += 1
+    order = sorted(range(len(entries)), key=lambda i: (count[id(entries[i][1])], -i))
+    gone = {id(entries[i][1]) for i in order[:len(entries) - room]}
+    for i in order[:len(entries) - room]:
+        log(f"  dropped {entries[i][1]['name']} ({count[id(entries[i][1])]} notes): "
+            f"{len(entries)} sounds, room for {room}")
+    return {**spec, "melodic": [m for m in spec["melodic"] if id(m) not in gone],
+            "drum": [d for d in spec["drum"] if id(d) not in gone]}
+
+
 def sample_set(spec: dict, cfg: dict, songs: list[tuple[list[Note], dict]], last_page: int, tables,
                munt: Munt, log=lambda *a: None) -> tuple[list[ModSample], dict, dict]:
     """(samples, programs, drums) for the sounds these songs play, with loop sizes planned into
@@ -322,8 +348,8 @@ def sample_set(spec: dict, cfg: dict, songs: list[tuple[list[Note], dict]], last
     song_spec = {**spec, "melodic": [m for m in spec["melodic"] if m["slot"] in used],
                  "drum": [d for d in spec["drum"] if keys & set(d["covers"])]}
     build = lambda sp, c=cfg: build_samples(sp, c, ranges, munt, tables, log=lambda *a: None)
-    plans = _pitch_plans(song_spec, usage_notes, cfg, tables, munt) if cfg.get("pitch_plan") else {}
-    unplanned = song_spec
+    every = song_spec
+    all_plans = _pitch_plans(song_spec, usage_notes, cfg, tables, munt) if cfg.get("pitch_plan") else {}
 
     def planned(count: dict[str, int]) -> dict:
         """song_spec with each planned sound replaced by its zones under its count-zone plan."""
@@ -342,10 +368,25 @@ def sample_set(spec: dict, cfg: dict, songs: list[tuple[list[Note], dict]], last
     # Loops are planned with every melodic sound looped; one-shots are decided afterwards, so a
     # one-shot never takes more than its attack + loop and what it saves stays free (reserve)
     # instead of growing some other loop into a short raw loop.
-    if plans:
-        song_spec = planned({name: 1 for name in plans})
-    samples, programs, drums = build(song_spec, {**cfg, "one_shots": False})
-    check_fit(samples, cfg, last_page, log)
+    # Too many sounds for the MOD's 31 samples (one is the rest) or for DOC RAM at their
+    # smallest: the least-played are dropped, one more each time the set still doesn't fit.
+    room = MAX_SAMPLES - bool(cfg.get("halt_released_loops", True))
+    while True:
+        dropped: list[str] = []
+        unplanned = drop_least_used(every, songs, room, dropped.append)
+        names = {m["name"] for m in unplanned["melodic"]}
+        plans = {k: v for k, v in all_plans.items() if k in names}
+        song_spec = planned({name: 1 for name in plans}) if plans else unplanned
+        samples, programs, drums = build(song_spec, {**cfg, "one_shots": False})
+        try:
+            check_fit(samples, cfg, last_page, log)
+            break
+        except ValueError:
+            room = len(unplanned["melodic"]) + len(unplanned["drum"]) - 1
+            if room < 1:
+                raise
+    for line in dropped:
+        log(line)
     if cfg.get("sample_budget", "zones") == "value":
         count, drum_bytes = _budget(plans, samples, song_spec, unplanned, songs, usage_notes, cfg, last_page,
                                     tables, munt, log)
@@ -357,7 +398,7 @@ def sample_set(spec: dict, cfg: dict, songs: list[tuple[list[Note], dict]], last
                 f"{pitchplan.describe(p)}")
         samples, programs, drums = build(song_spec, {**cfg, "one_shots": False})
     elif plans:
-        count = _extra_zones(plans, samples, song_spec, cfg, last_page)
+        count = _extra_zones(plans, samples, unplanned, cfg, last_page)   # by name: see _budget
         for name, (ps, secs, now, _) in plans.items():
             p = ps[count[name] - 1]
             log(f"  pitch {name:<13} {secs:6.1f} s of notes: {now:+5.1f} -> {p.error_db:+5.1f} dB  "
@@ -526,6 +567,21 @@ def _build_song(job) -> tuple[str, object, str, str | None]:
     return job[0].sid, rep, buf.getvalue(), err
 
 
+def _gather(results) -> tuple[list[tuple[str, object]], list[tuple[str, str]]]:
+    """_build_song results, in song order: prints each song's log (and a failed song's error),
+    and returns (sid, report) for the songs built and (sid, last error line) for the failed.
+    One song's failure doesn't stop the others."""
+    reports, failed = [], []
+    for sid, rep, log, err in results:
+        print(log, end="")
+        if err:
+            print(err)
+            failed.append((sid, err.strip().splitlines()[-1]))
+        else:
+            reports.append((sid, rep))
+    return reports, failed
+
+
 def _build_song_quiet(job) -> tuple[object, str | None]:
     """_build_song's work: (report, error or None)."""
     song, song_cfg, spec, cfg, shared, last_page, tables, munt, cc7, out_dir, game = job
@@ -614,16 +670,13 @@ def main(argv: list[str] | None = None) -> int:
     jobs = min(args.jobs or max(1, cpus // 2), len(work))
     with ProcessPoolExecutor(jobs) if jobs > 1 else contextlib.nullcontext() as pool:
         results = pool.map(_build_song, work) if pool else map(_build_song, work)
-        reports = []
-        for sid, rep, log, err in results:
-            print(log, end="")
-            if err:
-                if pool:
-                    pool.shutdown(cancel_futures=True)      # don't build the songs still queued
-                raise SystemExit(err)
-            reports.append((sid, rep))
+        reports, failed = _gather(results)
     _print_reports(reports, game.prefix)
-    return 0
+    for sid, why in failed:
+        print(f"FAILED {game.prefix}{sid}: {why} (no MOD; its log is above)")
+    if failed:
+        print(f"{len(failed)} of {len(work)} songs failed")
+    return 0 if reports or not work else 1      # every song failed: the build did
 
 
 if __name__ == "__main__":

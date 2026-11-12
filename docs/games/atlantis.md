@@ -151,5 +151,6 @@ One pass at the song's starting tempo; *loop from X* = where the loop goes back 
 | 166 | 35.4s | from 2.2s | 4 | 777 |  |
 
 ## Open questions
+- Pipe Org 1 (program 12) at its lowest keys measures an octave below the key: 12.1 Hz at key 19 (song 133) and 20.3 Hz for keys 25-34 (song 048). One cycle then doesn't fit a 512 B loop at any configured rate, so these two songs fail to build and are left off the disk (2026-11-12). Is it a sub-octave the pitch detector caught, or what the MT-32 really plays there?
 - Song names (cues).
 - Does the Atlantis driver send the same MT-32 set-up as MI2's? (Assumed from ScummVM.)
