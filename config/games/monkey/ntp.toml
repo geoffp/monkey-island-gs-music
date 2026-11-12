@@ -11,6 +11,9 @@ samples = "per-song"    # per-song: each .NTP carries only its own sounds, free 
                         # every song, like the MIDI Synth bank. Override: just ntpmod shared
 rows_per_unit = 2       # 32nd-note rows on a 16th-note grid
 speed = 3               # tracker ticks per row; EDx resolution = row / speed
+release_rows = "mean"   # a release row plays the release's mean (RMS) gain over the row, not its
+                        # first instant ("start", before 2026-11-12): fast releases (organ) no
+                        # longer hold full volume for a row (docs/ninjatrackerplus.md, "Staccato")
 quantize = 0.0          # 0 = full performance timing, 1 = hard snap to rows
 oscillators = 31        # NTP budget: drum (one-shot) tracks use 1, looped melodic tracks 2
 attack_bytes = 2040     # loop header; NTP adds 8 stopper bytes -> one 2 KB DOC block
@@ -114,7 +117,7 @@ base = "per-song"
 base = "shared"
 
 # Trial variants, built side by side for listening: a `base` sample-set mode plus overrides.
-# Add the name to `ntp_modes` in the justfile. E.g. the original loops next to `shared`:
+# Add the name to `ntp_variants` in the game's game.toml. E.g. the original loops next to `shared`:
 # [modes.shared-avg]
 # base = "shared"
 # loop_construction = "averaged"

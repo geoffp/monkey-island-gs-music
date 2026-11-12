@@ -418,12 +418,35 @@ def loop_rows(timing: _Timing, loop: tuple[float, float]) -> tuple[int, int]:
     return 1 + round(loop[0] / timing.row_s), max(1, round((loop[1] - loop[0]) / timing.row_s))
 
 
+def _fit_rows(notes: list[Note], unit_s: float, rpu: int, cfg: dict, song_cfg: dict) -> int:
+    """Rows per grid unit. `row_fit = "grid"` (default): `rpu` as configured. `"short-notes"`
+    (trial): doubled while a row is longer than the song's short melodic notes (the
+    `row_fit_percentile`, default 10th, of note lengths), since a note lasts at least a row:
+    MI2's 101 has 110 ms rows (its grid unit is an 8th at 135 BPM) and 35-50 ms organ notes.
+    Not below `row_fit_min_ms` (default 30: speed 3 at MOD tempo 250), nor past 120 patterns.
+    A song opts out with its own `row_fit = "grid"` (song_cfg arrives with the defaults merged
+    in, so its `rows_per_unit` can't tell a song's choice from the default)."""
+    opt = lambda k, d: song_cfg.get(k, cfg.get(k, d))
+    if opt("row_fit", "grid") != "short-notes":
+        return rpu
+    lengths = [n.off - n.t for n in notes if n.channel != RHYTHM]
+    if not lengths:
+        return rpu
+    short = float(np.percentile(lengths, opt("row_fit_percentile", 10)))
+    floor = opt("row_fit_min_ms", 30.0) / 1000
+    end = max(n.off for n in notes)
+    while unit_s / rpu > short and unit_s / (2 * rpu) >= floor and end / (unit_s / (2 * rpu)) / 64 <= 120:
+        rpu *= 2
+    return rpu
+
+
 def _timing(notes: list[Note], cfg: dict, song_cfg: dict, tb: Timebase = RO_TIMEBASE) -> _Timing:
     unit, phase = song_cfg.get("unit_ticks"), song_cfg.get("phase_ticks")
     if unit is None:
         unit, phase = detect_grid([n.t for n in notes], tb)
     phase = phase or 0.0
     rpu, speed = song_cfg.get("rows_per_unit", cfg["rows_per_unit"]), song_cfg.get("speed", cfg["speed"])
+    rpu = _fit_rows(notes, unit * tb.tick_s, rpu, cfg, song_cfg)
     row_s = unit * tb.tick_s / rpu
     # MOD tempo 32-255: change the speed (ticks per row) until the tempo fits
     tempo = round(2.5 * speed / row_s)
@@ -621,9 +644,18 @@ class _Arranger:
         if k is not None and prev is not None:
             v_off = min(v_off, prev)        # release from the (limited) level that plays, never a jump up
         steps = max(1, int(round(len(s.rel_g) * 0.01 / row_s)))
+        mean_rows = self.opt("release_rows", "mean") == "mean"   # "start": before 2026-11-12
         for i in range(steps + 1 if oneshot_end is None or cut else 0):
             rr = r_off + i
-            gg = float(np.interp(i * row_s, np.arange(len(s.rel_g)) * 0.01, s.rel_g, right=0.0)) if i < steps else 0.0
+            if i >= steps:
+                gg = 0.0
+            elif mean_rows:
+                # a row holds one volume: the release's RMS gain over the row, not its first instant
+                # (Elec Org 2 falls 20 dB in 10 ms; its first 110 ms row averages 0.31, not 1.0)
+                ts = np.linspace(i * row_s, (i + 1) * row_s, 12)
+                gg = float(np.sqrt(np.mean(np.interp(ts, np.arange(len(s.rel_g)) * 0.01, s.rel_g, right=0.0) ** 2)))
+            else:
+                gg = float(np.interp(i * row_s, np.arange(len(s.rel_g)) * 0.01, s.rel_g, right=0.0))
             vv = max(0, min(64, round(v_off * gg)))
             if self.grid.effect_free(tr, rr) and self.grid.cells[tr].get(rr, CELL_EMPTY)[0] == 0:
                 c = self.grid.set_effect(tr, rr, FX_VOLUME, vv)

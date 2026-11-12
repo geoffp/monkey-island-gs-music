@@ -440,12 +440,45 @@ A song whose build raises is logged with its traceback and a closing `FAILED <so
 A MOD holds 31 samples, and one of them is the rest; the sounds must also fit DOC RAM at their smallest (`check_fit`). MI1 needs neither rule. MI2's sound 222 plays 17 melodic sounds and 20 drum keys, and sounds that share no sample (`covers`) need one each. So `sample_set` drops the least-played sounds (`drop_least_used`: fewest notes, the later entry first on a tie) until there are at most 30. If the set still doesn't fit DOC RAM, it drops one more each time (222: 8 drum keys of 1-6 notes, which leaves 30 samples and 237/256 pages). The build log lists each dropped sound (`dropped <name> (<n> notes)`). Their notes are counted in the report's dropped notes and go unplayed. This is a stopgap: merging sounds (`covers` in the game's `mt32sounds.toml`) keeps them, but each merge needs listening. Test: `test_too_many_sounds_drop_the_least_played`.
 - **Shared sets for iMUSE games.** Across all their songs, MI2 plays 71 melodic sounds and 47 drum keys, and Fate of Atlantis 75 and 32. One shared set of 30 would drop most of them, so the shared variant isn't a fit for these games without many merges.
 
+## Staccato (trials `stacc-per-song` / `rel-per-song`, 2026-11-12; mean release rows the default since)
+**Heard:** MI2's 101 lost its extreme staccato, and its drums sounded quieter than in the Munt render.
+
+**Measured.** Every drum note is in the MOD, and a kick against a bass note matches the MT-32 within 0.8 dB. Each drum sample holds 99 % of its MT-32 energy. But per instrument, relative to the drums, the MOD's energy exceeds Munt's: Accordion +8.1 dB, Elec Org 2 +5.0, Acou Bass1 +3.8, Pizzicato +3.3. The drums aren't too quiet; the short notes are held too long. Two causes:
+1. **A note lasts at least a row** (`r_off = max(r_off, r + 1)`). 101's grid unit is an 8th at 135.6 BPM (221 ms), so its rows are 110.6 ms, while its organ and accordion notes last 35-50 ms (10th percentile / median). Rows are longer than the 10th-percentile melodic note in 51 of 96 MI2 songs and 9 of 16 MI1 songs (MI152: 118 ms rows, 38 ms notes).
+2. **The first release row is at full volume.** A row holds one volume, and the release used its gain at the row's first instant. Elec Org 2 and Accordion fall 20 dB within 10 ms of note-off; averaged (RMS) over a 110 ms row, their release gain is 0.31.
+
+**Options:**
+- `row_fit = "short-notes"` (`ntpsong._fit_rows`; off, `"grid"`, by default): `rows_per_unit` doubles while a row is longer than the song's `row_fit_percentile` (10th) melodic note length. Not below `row_fit_min_ms` (30: speed 3 at MOD tempo 250), nor past 120 patterns. A song opts out with its own `row_fit = "grid"`.
+- `release_rows = "mean"` (**default since 2026-11-12**; `"start"` before): each release row plays the release's RMS gain over the row. The steps keep the MT-32 release's energy, though not its shape: just after the note-off a row is a little quieter than the MT-32, later a little louder.
+
+**101, energy relative to the drums (MOD minus Munt, dB).** Neither change does much alone; together they come close:
+
+| | now | mean release | 55 ms rows | both |
+|---|---|---|---|---|
+| Elec Org 2 | +5.0 | +2.9 | +2.9 | +1.0 |
+| Accordion | +8.1 | +5.0 | +4.8 | +1.7 |
+| Acou Bass1 | +3.8 | +2.6 | +2.9 | +2.3 |
+| Pizzicato | +3.3 | +3.0 | +2.3 | +2.4 |
+| Swell 1 | -6.7 | -6.8 | -6.6 | -6.6 |
+
+Swell 1 is a separate problem. Its velocities are 5-31, so its MOD volumes are 1-2.
+
+**MI1 builds** (per-song; steals, `.NTP` size):
+- `rel-per-song` (mean release rows only): steals fall in three songs (MI160 387 -> 300, MI152 17 -> 12, MI168 1 -> 0); the files are the same size (MI150 2 KB smaller). Releases reach 0 sooner, so tracks free up earlier, and the steals left cut quieter releases.
+- `stacc-per-song` (both options): 9 of 16 songs get finer rows (MI153 154 -> 39 ms, MI152 118 -> 59, MI160 85 -> 42). Steals fall further (MI160 -> 220, MI152 -> 1) and the mean timing error drops (MI153 12.7 -> 8.4 ms), but the `.NTP` files grow from 1,436 to 1,688 KB in all (MI153 +67 %, MI160 +55 %, MI152 +38 %).
+
+**Listening (2026-11-12):** `REL.PER.SONG` is "both a fidelity improvement and a stealing improvement"; `STACC.PER.SONG` "sounds a tiny bit better, but it doesn't pay for the inflated file size". So mean release rows became the default for every game and mode, and both trial modes were removed. `row_fit` stays available per song (`[songs.<id>] row_fit = "short-notes"`) for a song whose rows are far longer than its notes (MI2's 101: 110 ms rows, 35 ms notes); no song uses it yet.
+
+Tests: `test_short_notes_halve_the_rows_until_they_fit`, `test_mean_release_rows_play_the_release_averaged_over_the_row`.
+
 ## Build options: tradeoffs (2026-11-08)
 What each option buys and costs, as measured. Sizes are totals over all 16 songs. Pattern data is 256 B per track per 64-row pattern, so allocation options change it through the track count; sample options change the sample data. Where a cost hasn't been measured, the entry says so.
 
 **Sample sets**
 - **`samples = "per-song"` vs `"shared"`.** *Per-song:* each `.NTP` carries only its own sounds, and free DOC RAM grows steady sounds into long raw loops (better sustains; per-song Elec Organ's 8192 B loop holds its rotary wobble). *Shared:* one bank for every song, byte-identical in each file, so a game can keep it resident; every sound gets a 512 B loop, and four attacks are shortened to fit (below). *Size:* per-song 1101 KB of `.NTP`, shared 1376 KB, because every shared file carries the whole ~54 KB bank; with a resident bank a game loads only header + patterns per song (shared patterns 516 KB). *Polyphony:* about the same (shared drops 2, audible steals 180; per-song 3, 280).
 - **`ntp_attack_bytes` (shared: Elec Organ, Sax, Acou Bass, Vibes at 1016 B).** Keeps the 16-page sound-effect reserve in the shared bank (−16 pages), at the least measured cost: log-spectral distance vs Munt over the first 0.6 s changes −0.28…+0.06 dB.
+- **`release_rows = "mean"`** (default since 2026-11-12). A release row plays the release's mean gain over the row, so fast releases (Elec Org 2, Accordion: -20 dB in 10 ms) no longer hold full volume for a row. *Gains:* closer balance to the MT-32 (M2101, energy vs the drums: Accordion +8.1 -> +5.0 dB) and fewer steals (MI160 387 -> 300). *Cost:* none in size. Heard as "both a fidelity improvement and a stealing improvement".
+- **`row_fit = "short-notes"`** (off; per song if needed). Rows halve until the song's short notes fit. *Gains:* short notes stay short, timing error falls (MI153 12.7 -> 8.4 ms), more steals saved (MI160 -> 220). *Cost:* MI1's `.NTP` +17 % (1,436 -> 1,688 KB; MI153 +67 %). Heard as "a tiny bit better, but it doesn't pay for the inflated file size".
 - **`reserve_pages = 16`.** 4 KB of DOC kept for game sound effects; it limits loop growth (per-song) and forces the shortened shared attacks.
 
 **Sounds**

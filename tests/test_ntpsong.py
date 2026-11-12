@@ -90,7 +90,9 @@ def test_channel_volume_and_swell_set_levels(tmp_path):
     s = fake_sample()
     s.env_g = np.array([1.0, 2.0])                 # swells to twice its attack level
     # the row step limit would make the rows lag the swell; levels are the targets
-    cfg = {"rows_per_unit": 2, "speed": 3, "quantize": 0.0, "oscillators": 31, "env_max_rise_db": 0}
+    # (this note's swell peaks on its release row: "start" plays that row at the peak itself)
+    cfg = {"rows_per_unit": 2, "speed": 3, "quantize": 0.0, "oscillators": 31, "env_max_rise_db": 0,
+           "release_rows": "start"}
     grid, _, _ = sg.convert_song(p, [s], {9: 0}, {}, cfg, dict(cfg), cc7)
     vols = []
     for cells in grid.cells:
@@ -723,3 +725,52 @@ def test_a_loop_after_an_intro_jumps_back_to_a_pattern_start(tmp_path):
         assert b - a == pytest.approx(loop_ticks * tb, abs=0.003)
     # the lead-in, then the intro: the pass starts at the loop's start, to within half a row
     assert starts[0] - played[1][0] == pytest.approx(start * tb, abs=0.0625 + 0.001)
+
+
+def test_short_notes_halve_the_rows_until_they_fit():
+    """row_fit = "short-notes" (trial): a note lasts at least a row, so rows halve while longer
+    than the song's short melodic notes (10th percentile), down to 30 ms. MI2's 101: 221 ms grid
+    unit (an 8th at 135 BPM), 35-50 ms organ notes."""
+    N = lambda t, d, ch=1: sg.Note(t, t + d, 60, 90, ch)
+    notes = [N(0.25 * i, 0.04) for i in range(40)] + [N(0.25 * i + 0.1, 0.3, 9) for i in range(40)]
+    cfg = {"row_fit": "short-notes"}
+    assert sg._fit_rows(notes, 0.221, 2, {}, {}) == 2                     # default: as configured
+    assert sg._fit_rows(notes, 0.221, 2, cfg, {}) == 4                    # 55 ms; 28 ms would pass the floor
+    assert sg._fit_rows(notes, 0.221, 2, {**cfg, "row_fit_min_ms": 20}, {}) == 8
+    long_notes = [N(0.25 * i, 0.2) for i in range(40)]
+    assert sg._fit_rows(long_notes, 0.221, 2, cfg, {}) == 2                # already short enough rows
+    assert sg._fit_rows(notes, 0.221, 2, cfg, {"row_fit": "grid"}) == 2    # a song can opt out
+    # as the build calls it: the song's config arrives with the defaults (rows_per_unit) merged in
+    full = {"rows_per_unit": 2, "speed": 3, "quantize": 0.0, "row_fit": "short-notes"}
+    song = {**full, "unit_ticks": 0.221 / sg.RO_TIMEBASE.tick_s, "phase_ticks": 0}
+    assert sg._timing(notes, full, song).row_s == pytest.approx(0.221 / 4)
+    assert sg._timing(notes, full, {**song, "row_fit": "grid"}).row_s == pytest.approx(0.221 / 2)
+
+
+def test_mean_release_rows_play_the_release_averaged_over_the_row(tmp_path):
+    """A row holds one volume. release_rows = "start" (the rule before 2026-11-12) gives the first release row the
+    release's gain at its first instant, so a release that falls 20 dB in 10 ms (Elec Org 2)
+    holds full volume for a row; "mean" (the default) gives it the RMS gain over the row."""
+    import mido
+    p = midi_song(tmp_path, [mido.Message("program_change", channel=1, program=9),
+                             *[m for i in range(4) for m in (
+                                 mido.Message("note_on", channel=1, note=60, velocity=100, time=0 if i == 0 else 360),
+                                 mido.Message("note_off", channel=1, note=60, time=120))]])
+
+    def release_row(mode):
+        s = fake_sample()
+        s.rel_g = np.array([1.0, 0.05, 0.0])                     # per 10 ms: gone in 20 ms
+        cfg = {"rows_per_unit": 2, "speed": 3, "quantize": 0.0, "oscillators": 31}
+        if mode:
+            cfg["release_rows"] = mode
+        song = {**cfg, "unit_ticks": 60, "phase_ticks": 0}       # 125 ms rows: a note is 4 rows
+        grid, _, rep = sg.convert_song(p, [s], {9: 0}, {}, cfg, song)
+        assert rep.row_ms == pytest.approx(125)
+        cells = next(c for c in grid.cells if any(v[0] for v in c.values()))
+        on = min(r for r in cells if cells[r][0])
+        off = min(r for r in cells if r >= on + 4 and cells[r][2] == 0xC)
+        return cells[on][3], cells[off][3]
+    onset, start = release_row("start")
+    _, mean = release_row("mean")
+    _, default = release_row(None)
+    assert start > 0.6 * onset and 0 < mean < 0.3 * start and default == mean
