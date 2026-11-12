@@ -11,9 +11,10 @@ For each distinct sound, writes:
   <out>/midi/gm/NNN[-name].mid     General MIDI conversion (docs/mt32-to-gm.md)
   <out>/patches/NNN[-name].toml    per-channel instrument notes and statistics
 
-Song names come from the game's optional song_names.toml (config/games/<game>/):
+Song names come from the game's optional song_names.toml (config/games/<game>/; at most 20
+ASCII characters, since the NTP build makes them the MOD's title):
   [names]
-  160 = "main-title"
+  160 = "Opening Theme"
 """
 
 from __future__ import annotations
@@ -23,7 +24,6 @@ import hashlib
 import json
 import re
 import sys
-import tomllib
 from collections import Counter, defaultdict
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, field
@@ -55,7 +55,7 @@ class Song:
 
     @property
     def stem(self) -> str:
-        slug = re.sub(r"[^a-z0-9]+", "-", self.name.lower()).strip("-")
+        slug = re.sub(r"[^a-z0-9]+", "-", re.sub(r"['’]", "", self.name.lower())).strip("-")
         return f"{self.sound_id:03d}" + (f"-{slug}" if slug else "")
 
     @property
@@ -455,9 +455,7 @@ def timbres_toml(timbres: list[imuse.Timbre], gm: dict[str, int]) -> str:
 
 
 def _read_names(path: Path) -> dict[str, str]:
-    if not path.exists():
-        return {}
-    return {str(k): v for k, v in tomllib.loads(path.read_text()).get("names", {}).items()}
+    return games.parse_names(path.parent.name, path.read_text()) if path.exists() else {}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -477,7 +475,7 @@ def main(argv: list[str] | None = None) -> int:
         for m in g.md5_mismatches():
             warn(f"{m} (not the release {g.config('game.toml')} was tuned on)")
 
-    names = _read_names(args.names or g.config("song_names.toml"))
+    names = _read_names(args.names) if args.names else g.song_names
     timbres: list[imuse.Timbre] = []
     if g.engine == "scumm-v5":
         songs, timbres = load_songs_v5(scumm_v5.Game(game_dir), names, g.music, label=g.label, warn=warn)

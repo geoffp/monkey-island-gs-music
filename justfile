@@ -78,7 +78,7 @@ p8_tree       := 'p8t() { local cp2=$1 img=$2 d f k g fs; for d in $(find "$3" -
 # imports, the game's settings it reads (game.toml: names, MT-32 set-up; ntp.toml; mt32sounds.toml), the MT-32 MIDI
 # and its custom timbres (timbres.toml, v5 games),
 # the PHP period tables, the Munt binary and the lockfile. (Not the disk README or midisynth.toml.)
-ntp_inputs    := "py:src/migs/ntpmod.py " + gconf + "/game.toml " + gconf + "/ntp.toml opt:" + gconf + "/mt32sounds.toml " + out + "/extracted/midi/mt32 opt:" + out + "/extracted/timbres.toml " + vendor + "/ntp/src " + smf2wav + " pyproject.toml uv.lock"
+ntp_inputs    := "py:src/migs/ntpmod.py " + gconf + "/game.toml " + gconf + "/ntp.toml opt:" + gconf + "/mt32sounds.toml opt:" + gconf + "/song_names.toml " + out + "/extracted/midi/mt32 opt:" + out + "/extracted/timbres.toml " + vendor + "/ntp/src " + smf2wav + " pyproject.toml uv.lock"
 # Build ProDOS image $1 (volume $2) from staging dir $3 at the smallest power-of-two size that
 # holds it (1, 2, ... 32 MB, the ProDOS limit): `eval $4` (run in $3) fills it; an attempt counts
 # when every staged entry is on the image (bash ignores errexit inside conditions, so the count
@@ -373,6 +373,7 @@ render: extract fetch-munt fetch-soundfont
     {{lowprio}}
     m={{out}}/extracted
     mkdir -p $m/wav/mt32 $m/wav/gm
+    rm -f $m/wav/mt32/*.wav $m/wav/gm/*.wav      # names in song_names.toml rename the files
     for f in $m/midi/mt32/*.mid; do
       n=$(basename "$f" .mid)
       "{{smf2wav}}" --quiet -m "{{roms}}" -f -o "$m/wav/mt32/$n.wav" "$f"

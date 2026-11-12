@@ -15,7 +15,7 @@ import hashlib
 import os
 import re
 import tomllib
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 DEFAULT = "monkey"
@@ -31,7 +31,7 @@ _PREFIX = re.compile(r"[A-Z][A-Z0-9]{0,5}")
 # Other files beside the songs' <prefix><sound id>.SEQ in build/<game>/seq/stock/, which `just seq`
 # must not mistake for songs: the drum auditions, AUDITnn.SEQ.
 RESERVED_PREFIXES = ("AUDIT",)
-MOD_TITLE = 20                   # bytes in a MOD's song title ("<label> <sound id>")
+MOD_TITLE = 20                   # bytes in a MOD's song title (its name, else "<label> <sound id>")
 
 
 # NTP build variants a game's disk gets unless its game.toml lists others (`ntp_variants`, a
@@ -52,6 +52,7 @@ class GameInfo:
     mt32: dict = field(default_factory=dict)     # [mt32]: the game's MT-32 driver (init SysEx, GM for its timbres)
     music: dict = field(default_factory=dict)    # [music]: which sounds are music (engines with sound effects mixed in)
     ntp_variants: tuple[str, ...] = NTP_VARIANTS  # NTP build variants for its disk (game.toml `ntp_variants`)
+    song_names: dict[str, str] = field(default_factory=dict)  # sound id -> name (song_names.toml)
 
     @property
     def mt32_init(self) -> list[bytes]:
@@ -79,9 +80,14 @@ class GameInfo:
         """A song's file name: MI150.mod, MI150.SEQ."""
         return f"{self.prefix}{sound_id}.{ext}"
 
+    def song_name(self, sound_id: int | str) -> str:
+        """A song's name from song_names.toml ("" if it has none); ids match with or without
+        leading zeros (Atlantis 009)."""
+        return self.song_names.get(str(int(sound_id)) if str(sound_id).isdigit() else str(sound_id), "")
+
     def song_title(self, sound_id: int | str) -> str:
-        """A song's title in its MOD or sequence: "MI1 150"."""
-        return f"{self.label} {sound_id}"
+        """A song's title in its MOD (and so its .NTP) or sequence: its name, else "MI1 150"."""
+        return self.song_name(sound_id) or f"{self.label} {sound_id}"
 
     def md5_mismatches(self) -> list[str]:
         """Files of `md5` that are missing from `data` or differ: the config was tuned on
@@ -127,6 +133,19 @@ def parse(game_id: str, text: str, root: Path = Path(".")) -> GameInfo:
                     tuple(c.get("ntp_variants", " ".join(NTP_VARIANTS)).split()))
 
 
+def parse_names(game_id: str, text: str) -> dict[str, str]:
+    """A song_names.toml's [names]: sound id -> name, checked to fit a MOD title."""
+    names = {}
+    for k, v in tomllib.loads(text).get("names", {}).items():
+        if not str(k).isdigit():
+            raise ValueError(f"{game_id}/song_names.toml: {k!r} is not a sound id")
+        if not (isinstance(v, str) and v and v.isascii() and v.isprintable() and len(v) <= MOD_TITLE):
+            raise ValueError(f"{game_id}/song_names.toml: {k} = {v!r}: a name is 1-{MOD_TITLE} printable "
+                             "ASCII characters (a MOD title)")
+        names[str(int(k))] = v
+    return names
+
+
 def load(game_id: str | None = None, root: Path = Path(".")) -> GameInfo:
     """The game's settings from config/games/<id>/game.toml."""
     game_id = game_id or default_id()
@@ -136,7 +155,9 @@ def load(game_id: str | None = None, root: Path = Path(".")) -> GameInfo:
     if not path.is_file():
         known = sorted(p.parent.name for p in (root / CONFIG).glob("*/game.toml"))
         raise SystemExit(f"no game {game_id!r} ({path} not found; known: {', '.join(known) or 'none'})")
-    return parse(game_id, path.read_text(), root)
+    g = parse(game_id, path.read_text(), root)
+    names = path.with_name("song_names.toml")
+    return replace(g, song_names=parse_names(game_id, names.read_text())) if names.is_file() else g
 
 
 def default_id() -> str:

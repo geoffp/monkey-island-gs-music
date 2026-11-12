@@ -1,0 +1,26 @@
+# Song names: the title of each song's MOD and .NTP (20 bytes at most, ASCII) and its MIDI
+# track name. Keys are sound ids; a byte-identical copy (155-157 of 154) takes its first id's.
+#
+# Names follow the community's MT-32 track list (The Legend of Monkey Island, "PC - Roland
+# MT-32", https://legendofmi.com/downloads/music/mi1/). Each id was matched to a track by
+# cross-correlating the tracks' chroma against our Munt renders (docs/games/monkey.md,
+# "Song names"): every one of the 14 tracks matches one sound at 0.91-1.00. 164 and 168 are
+# not in that list; they are matched against the CD tracks (another recording, so the scores
+# are lower), and still need confirming by ear.
+[names]
+150 = "LeChuck's Theme"
+151 = "The SCUMM Bar"
+152 = "The Journey"
+153 = "Church Organ"
+154 = "Interlude"
+158 = "Introduction"
+159 = "Melee Island Forest"
+160 = "Opening Theme"
+161 = "Ghost Ship Shuffle"
+162 = "Melee Island"
+163 = "Fettucini Brothers"
+164 = "Following Shopkeeper"   # unconfirmed: a variant of 159; the CD's track scores 0.50
+165 = "Voodoo Lady"
+166 = "Monkey Island"
+167 = "Guybrush and Elaine"
+168 = "Closing Theme"          # unconfirmed: the CD's closing theme scores 0.66 (next best 0.64)

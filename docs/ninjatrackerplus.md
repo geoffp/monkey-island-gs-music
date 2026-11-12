@@ -30,7 +30,7 @@ Sources (fetched by `just fetch-ntp` into `vendor/ntp/`):
   Free DOC RAM can hold sound effects too, but you write the code to play them.
 
 ## File format (`.NTP`, ProDOS type `$D5`, aux `$0008`) [NTP file_format.txt]
-Versions 0, 1 and 2. The converter writes version 1 ("since 1.3"); song and instrument names are stored "since 1.4".
+Versions 0, 1 and 2. The converter writes version 2 (`save_ntp`, `ntpconverter_lib.php`: `chr(2)`, then the MOD's title as the Pascal song name; checked in `MI160.ntp`, 2026-11-12); song and instrument names are stored "since 1.4". Our MOD titles are the song names (`song_names.toml`), else `MI1 150`. SenseiPlay shows the name, in quotes, when you press `i` while a song plays (GSSquared, `MI160.ntp` "Opening Theme" and the full 20 characters of `MI164.ntp` "Following Shopkeeper", 2026-11-12).
 ```
 header:      "nfc!", version, #tracks (1-31), #instruments (1-255), #patterns (1-255),
              order length (1-255), [v2: Pascal song name]

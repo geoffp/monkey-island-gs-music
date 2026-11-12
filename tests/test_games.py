@@ -2,6 +2,7 @@
 """Per-game settings (migs.games, config/games/<id>/game.toml) and the justfile's reader of
 them (tools/game.py), which must agree."""
 
+import dataclasses
 import hashlib
 import subprocess
 import sys
@@ -42,7 +43,23 @@ def test_names_paths_and_titles_come_from_the_game():
 def test_monkey_keeps_its_names():
     """Moving MI1 into config/games/monkey/ must not rename a single output."""
     g = games.load("monkey", ROOT)
-    assert (g.song_file(150, "mod"), g.song_file("150", "SEQ"), g.song_title(150)) == ("MI150.mod", "MI150.SEQ", "MI1 150")
+    assert (g.song_file(150, "mod"), g.song_file("150", "SEQ")) == ("MI150.mod", "MI150.SEQ")
+
+
+def test_a_song_with_a_name_is_titled_by_it():
+    """song_names.toml names a song's MOD (and so its .NTP) title; others keep "<label> <id>"."""
+    g = games.parse("tg", GOOD.format(md5="0" * 32), ROOT)
+    g = dataclasses.replace(g, song_names=games.parse_names("tg", '[names]\n9 = "Opening Theme"\n'))
+    assert g.song_title("009") == g.song_title(9) == "Opening Theme" and g.song_name("010") == ""
+    assert g.song_title("150") == "TG1 150"
+    assert games.load("monkey", ROOT).song_title(160) == "Opening Theme"
+
+
+@pytest.mark.parametrize("text", ['[names]\n1 = "A name far longer than twenty"', '[names]\n1 = "Mêlée Island"',
+                                  '[names]\nx = "Name"', '[names]\n1 = ""'])
+def test_a_song_name_must_fit_a_mod_title(text):
+    with pytest.raises(ValueError):
+        games.parse_names("tg", text)
 
 
 @pytest.mark.parametrize("field, value", [

@@ -65,6 +65,8 @@ def test_load_songs_takes_ro_only_and_dedupes(tiny_game):
     assert songs[0].stem == "001-test-song" and songs[0].track.loops
     assert songs[0].title == "TG1 sound 1: Test Song"
     assert songs[1].stem == "004" and not songs[1].track.loops
+    songs = load_songs(Game(path), {"1": "LeChuck's Theme"}, label="TG1")
+    assert songs[0].stem == "001-lechucks-theme"          # an apostrophe joins its word
 
 
 @pytest.mark.skipif(not REAL_GAME.exists(), reason="game data not present")
