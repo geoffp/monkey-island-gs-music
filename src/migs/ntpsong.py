@@ -769,7 +769,7 @@ class _Arranger:
         """Pattern count, track order (2-oscillator tracks first), tempo commands, speed and
         tempo on row 0 (the lead-in), and the song's end.
 
-        A song that plays once ends after its last row (a `D00` there), once its notes have
+        A song that plays once ends on its last row (`F00`: stop), once its notes have
         released and its one-shots played out. A looping song (`loop`: start, end s) repeats
         exactly as long as the game's loop. Its rows are laid out in patterns so that the jump
         back lands on a pattern start (NTP's `B` and `D` share one variable, so a row can't
@@ -794,6 +794,8 @@ class _Arranger:
             rows_needed = max(rows_needed, int((end + timing.shift) / timing.row_s) + 1)
             ring = max((t.oneshot_end for t in self.tracks), default=-1.0)    # one-shots play out
             rows_needed = max(rows_needed, math.ceil(ring / timing.row_s) + 1)
+            if rows_needed % ROWS == 0:     # the F00 row must have a row after it in its pattern
+                rows_needed += 1            # (see the end of finish)
             patterns = math.ceil(rows_needed / ROWS)
         if patterns > 128:
             raise ValueError(f"{patterns} patterns > 128 (MOD order list); raise row length")
@@ -837,12 +839,23 @@ class _Arranger:
                 c = grid.get(t, first - 1)
                 c[0], c[1] = self.samples[self.rest].base_note + 1, self.rest + 1
                 rep.halted += 1
-        if loop is None and rows_needed % ROWS:
-            # the song ends after its last row, not at the end of that row's pattern: D00 there
-            # moves past the last order position (NTP stops, or plays again if told to loop)
+        if loop is None:
+            # The song ends on its last row with F00 (stop). Not D00, nor the end of the order
+            # list: NTP stops there in check_pattern_end, which first resets the row pointer, and
+            # the same tick then parses and plays row 0 of the last pattern after every
+            # oscillator was stopped (MI154: an Elec Organ loop droning on). After F00
+            # (setup_setspeed -> stop_playing) the row pointer is left alone, so the row parsed
+            # is the next, empty, row of the same pattern: rows_needed % ROWS != 0 above.
             tr = self._overwritable(rows_needed - 1)
+            if tr is None:
+                raise ValueError(f"no cell for the song's end (F00) on row {rows_needed - 1}")
+            grid.set_effect(tr, rows_needed - 1, FX_SPEED, 0)
+            # Desktop players (libopenmpt) ignore F00 in a MOD: D00 on that next row ends the song
+            # for them one row later. NTP has stopped and only parses that row (no note there);
+            # play() zeroes pattern_jump for the next song.
+            tr = next((t for t in range(len(grid.cells)) if grid.effect_free(t, rows_needed)), None)
             if tr is not None:
-                grid.set_effect(tr, rows_needed - 1, FX_BREAK, 0)
+                grid.set_effect(tr, rows_needed, FX_BREAK, 0)
         if loop is not None:
             tr = self._overwritable(end_row - 1)
             if tr is None:

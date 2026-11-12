@@ -3,6 +3,8 @@
 allocation and steals, envelopes, the track plan."""
 
 
+import math
+
 import numpy as np
 import pytest
 
@@ -638,18 +640,33 @@ def test_a_looping_song_repeats_exactly_as_long_as_the_game_loop(tmp_path):
         assert b - a == pytest.approx(loop_ticks * sg.RO_TIMEBASE.tick_s, abs=0.003)
 
 
-def test_a_song_that_plays_once_ends_after_its_last_row(tmp_path):
+def test_a_song_that_plays_once_stops_on_its_last_row_with_F00(tmp_path):
+    """NTP stopping at the end of the order list (after D00, or a pattern's last row) resets its
+    row pointer and, in the same tick, plays row 0 of the last pattern after stopping every
+    oscillator: a stray note that never ends (MI154). F00 stops without moving the pointer, so
+    the row parsed after it is the next row of the same pattern, which must exist and be empty."""
     import mido
-    p = midi_song(tmp_path, [mido.Message("program_change", channel=1, program=9, time=0),
-                             mido.Message("note_on", channel=1, note=60, velocity=90, time=0),
-                             mido.Message("note_off", channel=1, note=60, velocity=0, time=240)])
-    assert sg.read_loop(p) is None
-    cfg = {"rows_per_unit": 2, "speed": 3, "quantize": 0.0, "oscillators": 31}
-    grid, _, rep = sg.convert_song(p, [fake_sample()], {9: 0}, {}, cfg, dict(cfg))
-    assert rep.loop_rows == 0
-    assert not any(c[r][2] == sg.FX_JUMP for c in grid.cells for r in c)
-    breaks = [r for c in grid.cells for r in c if c[r][2] == sg.FX_BREAK]
-    assert breaks == [rep.rows - 1] and rep.rows >= max(r for c in grid.cells for r in c) + 1
+    bumped = 0
+    for length in range(2400, 4000, 40):                     # some end on a pattern's last row
+        p = midi_song(tmp_path, [mido.Message("program_change", channel=1, program=9, time=0),
+                                 mido.Message("note_on", channel=1, note=60, velocity=90, time=0),
+                                 mido.Message("note_off", channel=1, note=60, velocity=0, time=length)],
+                      name=f"{length}.mid")
+        assert sg.read_loop(p) is None
+        cfg = {"rows_per_unit": 2, "speed": 3, "quantize": 0.0, "oscillators": 31}
+        grid, patterns, rep = sg.convert_song(p, [fake_sample()], {9: 0}, {}, cfg, dict(cfg))
+        assert rep.loop_rows == 0
+        assert not any(c[r][2] == sg.FX_JUMP for c in grid.cells for r in c)
+        # D00 only on the row after the stop: for desktop players, which ignore F00
+        assert [r for c in grid.cells for r in c if c[r][2] == sg.FX_BREAK] == [rep.rows]
+        stops = [r for c in grid.cells for r in c if c[r][2] == sg.FX_SPEED and c[r][3] == 0]
+        last = rep.rows - 1
+        assert stops == [last] and last >= max(r for c in grid.cells for r in c
+                                               if c[r][0] or c[r][2] not in (sg.FX_SPEED, sg.FX_BREAK))
+        assert (last + 1) % sg.ROWS and patterns == math.ceil(rep.rows / sg.ROWS)   # a next row, same pattern
+        assert not any(c.get(last + 1, (0,))[0] for c in grid.cells)               # ... with no note
+        bumped += rep.rows % sg.ROWS == 1
+    assert bumped                                             # the pattern-boundary case was met
 
 
 def test_releases_that_cross_the_loop_sound_into_the_next_pass(tmp_path):
