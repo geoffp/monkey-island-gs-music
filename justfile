@@ -12,6 +12,13 @@ export MIGS_GAME := game
 gconf    := "config/games" / game
 out      := "build" / game
 _gv      := 'python3 -I tools/game.py "$1" "$2"'
+# Builds run at a lower CPU priority (nice 10; MIGS_NICE=0 for full speed), so audio and the
+# emulator keep up while they run. The emulator recipes stay at normal priority. `lowprio`
+# renices a bash recipe's own shell, and everything it starts inherits that. util-linux renice
+# sets an absolute value with -n, BSD/macOS adds it, so a shell already at the level or lower is left alone.
+build_nice := env("MIGS_NICE", "10")
+nice       := "nice -n " + build_nice
+lowprio    := '[ "$(ps -o ni= -p $$)" -ge ' + build_nice + ' ] || renice -n ' + build_nice + ' -p $$ >/dev/null'
 data     := "original files" / shell(_gv, game, "data")      # the game's files (read only)
 prefix   := shell(_gv, game, "prefix")   # song files MI150.mod, disk volumes MI.NTP
 label    := shell(_gv, game, "label")    # titles: "MI1 NinjaTrackerPlus"
@@ -197,6 +204,7 @@ fetch-munt:
 _build-munt:
     #!/usr/bin/env bash
     set -euo pipefail
+    {{lowprio}}
     d="{{vendor}}/munt"
     {{fresh}} get {{gh}}/munt/munt/archive/refs/tags/{{munt_tag}}.tar.gz "$d/src.tar.gz" {{munt_sha}}
     rm -rf "$d/src" "$d/build" && mkdir "$d/src" && tar -xzf "$d/src.tar.gz" -C "$d/src" --strip-components=1
@@ -271,6 +279,7 @@ emu-synthlab speed=emu_speed: fetch-gssquared synthlab-disk
 disk: ntp
     #!/usr/bin/env bash
     set -euo pipefail
+    {{lowprio}}
     songs=(); for m in {{ntp_modes}}; do songs+=({{out}}/ntp/$m/*.ntp); done
     v={{prefix}}.NTP
     {{fresh}} run {{out}}/disks/$v.inputs --out {{out}}/disks/$v.PO --out {{out}}/dist/$v.zip --out {{out}}/dist/$v.SHK \
@@ -279,6 +288,7 @@ disk: ntp
 _disk:
     #!/usr/bin/env bash
     set -euo pipefail
+    {{lowprio}}
     cp2="$PWD/{{cp2}}"; img="$PWD/{{out}}/disks/{{prefix}}.NTP.PO"; st="$PWD/{{out}}/disks/ntpstage"
     rm -rf "$st" "$img" && mkdir -p "$st"
     "$cp2" extract --preserve=naps --overwrite --exdir="$st" "{{vendor}}/ntp/senseiplay800.2mg" \
@@ -300,16 +310,17 @@ _disk:
 
 # Render an MT-32 MIDI file to WAV with Munt (needs ROMs)
 mt32-wav mid wav: fetch-munt
-    "{{smf2wav}}" -m "{{roms}}" -f -o "{{wav}}" "{{mid}}"
+    {{nice}} "{{smf2wav}}" -m "{{roms}}" -f -o "{{wav}}" "{{mid}}"
 
 # Render a General MIDI file to WAV with FluidSynth
 gm-wav mid wav: fetch-soundfont
-    fluidsynth -ni -F "{{wav}}" "{{sf2}}" "{{mid}}"
+    {{nice}} fluidsynth -ni -F "{{wav}}" "{{sf2}}" "{{mid}}"
 
 # Extract the MT-32 soundtrack: build/<game>/extracted/midi/{mt32,gm}/*.mid + .../extracted/patches/*.toml
 extract:
     #!/usr/bin/env bash
     set -euo pipefail
+    {{lowprio}}
     [ -d "{{data}}" ] || { echo "no game data for {{game}} in '{{data}}' (see original files/README.md)"; exit 1; }
     {{fresh}} run {{out}}/extracted/.inputs --out {{out}}/extracted/midi/mt32 \
       "{{data}}" {{gconf}}/game.toml opt:{{gconf}}/song_names.toml py:src/migs/extract_music.py pyproject.toml uv.lock \
@@ -319,6 +330,7 @@ extract:
 render: extract fetch-munt fetch-soundfont
     #!/usr/bin/env bash
     set -euo pipefail
+    {{lowprio}}
     m={{out}}/extracted
     mkdir -p $m/wav/mt32 $m/wav/gm
     for f in $m/midi/mt32/*.mid; do
@@ -342,12 +354,12 @@ stock-banks: fetch-cp2 fetch-system6
 # Only the songs' own sequences are replaced: seq/stock/ also holds the drum auditions
 # (AUDITnn.SEQ, `midisynth-drum-audition`) and seq/mt32/ the bank.
 seq: stock-banks mt32bank
-    rm -f {{out}}/seq/stock/{{prefix}}[0-9]*.SEQ && uv run mid2seq --game {{game}} {{out}}/extracted/midi/gm/*.mid -p stock -o {{out}}/seq/stock -b "{{vendor}}/synthlab"
-    rm -f {{out}}/seq/mt32/{{prefix}}[0-9]*.SEQ && uv run mid2seq --game {{game}} {{out}}/extracted/midi/mt32/*.mid -p mt32 -o {{out}}/seq/mt32 -b {{out}}/seq/mt32
+    rm -f {{out}}/seq/stock/{{prefix}}[0-9]*.SEQ && {{nice}} uv run mid2seq --game {{game}} {{out}}/extracted/midi/gm/*.mid -p stock -o {{out}}/seq/stock -b "{{vendor}}/synthlab"
+    rm -f {{out}}/seq/mt32/{{prefix}}[0-9]*.SEQ && {{nice}} uv run mid2seq --game {{game}} {{out}}/extracted/midi/mt32/*.mid -p mt32 -o {{out}}/seq/mt32 -b {{out}}/seq/mt32
 
 # Sample the MT-32 (Munt) into the game's bank (MI1) per its mt32sounds.toml -> build/<game>/seq/mt32/MI1.{BNK,WAV,map.toml}
 mt32bank: extract fetch-munt
-    uv run mt32bank --game {{game}} {{out}}/extracted/midi/mt32/*.mid -o {{out}}/seq/mt32
+    {{nice}} uv run mt32bank --game {{game}} {{out}}/extracted/midi/mt32/*.mid -o {{out}}/seq/mt32
 
 # Estimated MIDI Synth voice pressure per sequence (voices free only when envelopes reach 0)
 midisynth-voices: seq
@@ -359,6 +371,7 @@ midisynth-voices: seq
 ntpmod modes=ntp_modes: extract fetch-ntp fetch-munt
     #!/usr/bin/env bash
     set -euo pipefail
+    {{lowprio}}
     # variants build concurrently, each only if what it reads changed (logs in build/<game>/ntp/<mode>.log)
     # (the build recipe's own text counts too: changing how it runs rebuilds)
     n={{out}}/ntp; mkdir -p $n; pids=(); recipe=$(just --show _ntpmod-one)
@@ -380,6 +393,7 @@ ntpmod modes=ntp_modes: extract fetch-ntp fetch-munt
 _ntpmod-one mode:
     #!/usr/bin/env bash
     set -euo pipefail
+    {{lowprio}}
     d="{{out}}/ntp/{{mode}}"; rm -rf "$d" && mkdir -p "$d/wav"
     uv run ntpmod --game {{game}} {{out}}/extracted/midi/mt32/*.mid -o "$d" --samples "{{mode}}"
     # (not grep -q: it exits at the first match, ffmpeg dies of SIGPIPE, and pipefail fails the test)
@@ -399,13 +413,14 @@ ntpmod-force modes=ntp_modes:
 # Loop lab (research, not part of the build): attack detection + loop-construction candidates
 # measured on the MT-32 sample set -> build/<game>/looplab/ (report.md, wav/, plots/). docs/sample-construction.md
 looplab mode="shared": fetch-ntp fetch-munt
-    uv run --group lab looplab --game {{game}} {{out}}/extracted/midi/mt32/*.mid --samples "{{mode}}"
+    {{nice}} uv run --group lab looplab --game {{game}} {{out}}/extracted/midi/mt32/*.mid --samples "{{mode}}"
 
 # MOD -> .NTP with Ninjaforce's converter (needs php-cli). Streaming forbidden: everything in DOC RAM.
 # Converts only MODs newer than their .ntp (ntpmod rewrites a mode's folder when it rebuilds it).
 ntp modes=ntp_modes: (ntpmod modes)
     #!/usr/bin/env bash
     set -euo pipefail
+    {{lowprio}}
     command -v php >/dev/null || { echo "php not found (see just doctor)"; exit 1; }
     for m in {{modes}}; do
       # all cores; a failed conversion prints its log and stops the batch (xargs exit 255)
@@ -441,6 +456,7 @@ midisynth-drum-audition: stock-banks
 synthlab-disk: fetch-system6 seq midisynth-drum-audition midisynth-tunetest
     #!/usr/bin/env bash
     set -euo pipefail
+    {{lowprio}}
     shopt -s extglob                       # !(SenseiPlay) below
     cp2="$PWD/{{cp2}}"; img="$PWD/{{out}}/disks/{{prefix}}.SYNTHLAB.PO"; st="$PWD/{{out}}/disks/synthlabstage"
     rm -rf "$st" "$img" && mkdir -p "$st/synthLAB"
@@ -499,6 +515,7 @@ smoke: fetch-cp2 fetch-munt fetch-gssquared fetch-mcp
 selftest target="disk":
     #!/usr/bin/env bash
     set -euo pipefail
+    {{lowprio}}
     [ -z "$(git status --porcelain)" ] || echo "note: uncommitted changes are not part of the self-test"
     d="$PWD/build/selftest"; rm -rf "$d"
     git clone -q . "$d"
