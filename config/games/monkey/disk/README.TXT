@@ -24,6 +24,9 @@ INST.SHARED    Every song uses one common set of instrument samples,
                the instruments of all the songs, so samples are
                shorter and coarser.
 
+Songs that loop in the game loop here too, from the start, for as
+long as they play; the others play once and stop.
+
 The file names ({first} to {last}) are the game's sound numbers.[[  {gaps}
 is a placeholder that SenseiPlay appears to need in long folders;
 ignore it.]]

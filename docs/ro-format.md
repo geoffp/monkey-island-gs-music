@@ -20,7 +20,7 @@ Source: `ref/scummvm/engines/scumm/midiparser_ro.cpp` (`MidiParser_RO`). Confirm
 | `Bc` | control change | ctrl, val |
 | `Cc` | program change | prog |
 | `Ax` | **marker** (one byte, no params). ScummVM counts them for `getTick()` (2 markers = 1 beat), apparently for script sync | – |
-| `FF` | end of track, loop | – |
+| `FF` | end of track, loop: play again from the start (ScummVM `_autoLoop`; `MidiParser::jumpToTick(0)` stops the sounding notes) | – |
 | `00` | end of track | – |
 
 No running status. No SysEx: `F0` is always a delay.

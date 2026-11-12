@@ -547,3 +547,118 @@ def test_halt_before_delayed_moves_the_note_when_the_row_before_starts_one(tmp_p
            "halt_before_delayed": True}
     grid, _, rep = sg.convert_song(p, samples, {9: 0}, {}, cfg, dict(cfg))
     assert rep.ghost_moves == 1 and rep.ghost_halts == 0 and _ghosts(grid, samples) == 0
+
+
+# --- song loops (the game's FF: play again from the start) ------------------------------
+
+def _loop_song(tmp_path, loop_end, held=False, late=None, first=0):
+    """Notes on a 30-tick grid; markers as the extractor writes them for an RO track ending in
+    FF. `held`: the last note sounds to the end (never released). `late`: a note at that tick."""
+    import mido
+    ev = [mido.MetaMessage("marker", text="loopStart", time=0),
+          mido.Message("program_change", channel=1, program=9, time=0)]
+    at = [(first + 60 * i, 60 + i % 5) for i in range(16 - first // 60)]
+    if late is not None:
+        at.append((late, 72))
+    tick = 0
+    for i, (a, k) in enumerate(at):
+        ev.append(mido.Message("note_on", channel=1, note=k, velocity=90, time=a - tick))
+        tick = a
+        if not (held and i == len(at) - 1):
+            ev.append(mido.Message("note_off", channel=1, note=k, velocity=0, time=20))
+            tick += 20
+    ev += [mido.MetaMessage("marker", text="loopEnd", time=loop_end - tick)]
+    return midi_song(tmp_path, ev)
+
+
+def _play(grid, patterns, rows_out=2000):
+    """(time s, grid row) of every row a MOD player plays, in order: Fxx (speed < 32, else
+    tempo) applies from its own row, Bxx/Dxx after it."""
+    cells = lambda r: [c.get(r, sg.CELL_EMPTY) for c in grid.cells]
+    speed, tempo, pos, row, t, out = 6, 125, 0, 0, 0.0, []
+    while len(out) < rows_out and pos < patterns:
+        r = pos * sg.ROWS + row
+        jump = None
+        for c in cells(r):
+            if c[2] == sg.FX_SPEED:
+                speed, tempo = (c[3], tempo) if c[3] < 32 else (speed, c[3])
+            elif c[2] == sg.FX_JUMP:
+                jump = (c[3], 0)
+            elif c[2] == sg.FX_BREAK:
+                jump = (pos + 1, c[3])
+        out.append((t, r))
+        t += speed * 2.5 / tempo
+        pos, row = jump if jump else ((pos, row + 1) if row + 1 < sg.ROWS else (pos + 1, 0))
+    return out
+
+
+def test_a_looping_song_repeats_exactly_as_long_as_the_game_loop(tmp_path):
+    """The pass is rows 1..end; Bxx on its last row jumps back to row 1, and the lead-in row 0
+    is alone in pattern 0 (D00), so it plays once. The fitted grid doesn't divide the loop
+    (16 units of 60 ticks + 17), so the last row gets its own tempo, and row 1 restores the
+    start tempo: every pass lasts the loop, to within a tempo step."""
+    loop_ticks = 16 * 60 + 17
+    p = _loop_song(tmp_path, loop_ticks)
+    assert sg.read_loop(p) == pytest.approx((0.0, loop_ticks * sg.RO_TIMEBASE.tick_s))
+    cfg = {"rows_per_unit": 2, "speed": 3, "quantize": 0.0, "oscillators": 31}
+    grid, patterns, rep = sg.convert_song(p, [fake_sample()], {9: 0}, {}, cfg, dict(cfg))
+    assert rep.loop_rows > 0 and abs(rep.loop_err_ms) < 3 and rep.loop_fit_rows >= 1
+    assert patterns == 1 + -(-rep.loop_rows // sg.ROWS)
+    assert any(c.get(0, sg.CELL_EMPTY)[2:] == [sg.FX_BREAK, 0] for c in grid.cells)
+    assert all(r == 0 or r >= sg.ROWS for c in grid.cells for r in c)          # pattern 0: row 0 only
+    jumps = [(r, c[r][3]) for c in grid.cells for r in c if c[r][2] == sg.FX_JUMP]
+    assert jumps == [(sg.ROWS + rep.loop_rows - 1, 1)]
+    played = _play(grid, patterns)
+    starts = [t for t, r in played if r == sg.ROWS]                            # pass row 1
+    assert len(starts) >= 3
+    for a, b in zip(starts, starts[1:]):
+        assert b - a == pytest.approx(loop_ticks * sg.RO_TIMEBASE.tick_s, abs=0.003)
+
+
+def test_a_song_that_plays_once_ends_after_its_last_row(tmp_path):
+    import mido
+    p = midi_song(tmp_path, [mido.Message("program_change", channel=1, program=9, time=0),
+                             mido.Message("note_on", channel=1, note=60, velocity=90, time=0),
+                             mido.Message("note_off", channel=1, note=60, velocity=0, time=240)])
+    assert sg.read_loop(p) is None
+    cfg = {"rows_per_unit": 2, "speed": 3, "quantize": 0.0, "oscillators": 31}
+    grid, _, rep = sg.convert_song(p, [fake_sample()], {9: 0}, {}, cfg, dict(cfg))
+    assert rep.loop_rows == 0
+    assert not any(c[r][2] == sg.FX_JUMP for c in grid.cells for r in c)
+    breaks = [r for c in grid.cells for r in c if c[r][2] == sg.FX_BREAK]
+    assert breaks == [rep.rows - 1] and rep.rows >= max(r for c in grid.cells for r in c) + 1
+
+
+def test_releases_that_cross_the_loop_sound_into_the_next_pass(tmp_path):
+    """The game's loop stops the notes still sounding (MidiParser jumpToTick), and the MT-32
+    plays their release into the next pass. A note held to the loop's end releases there:
+    its release cells move to the start of the pass, before the track's first note, and the
+    release still ends silent (the rest), so nothing rings on into the next pass."""
+    p = _loop_song(tmp_path, 16 * 60, held=True, first=120)
+    cfg = {"rows_per_unit": 2, "speed": 3, "quantize": 0.0, "oscillators": 31}
+    samples = [fake_sample(), smp.rest_sample()]
+    grid, patterns, rep = sg.convert_song(p, samples, {9: 0}, {}, cfg, dict(cfg))
+    assert rep.loop_wrapped > 0 and rep.loop_cut == 0
+    last = sg.ROWS + rep.loop_rows - 1
+    assert all(r <= last for c in grid.cells for r in c)
+    # the held note's track: its wrapped release comes before its first note, ending in the rest
+    for c in grid.cells:
+        first = min((r for r in c if c[r][0] and c[r][1] == 1), default=None)
+        early = [c[r] for r in sorted(c) if 0 < r and first is not None and r < first
+                 and (c[r][0] or c[r][2] == sg.FX_VOLUME)]
+        if early:
+            assert all(cell[0] == 0 or cell[1] == 2 for cell in early)            # releases, or the rest
+            assert early[-1][1] == 2 and early[-1][2:] == [sg.FX_VOLUME, 0]
+            break
+    else:
+        raise AssertionError("no release moved into the next pass")
+
+
+def test_a_note_the_grid_puts_past_the_loop_end_plays_on_the_last_row(tmp_path):
+    loop_ticks = 16 * 60
+    p = _loop_song(tmp_path, loop_ticks, held=True, late=loop_ticks - 4)
+    cfg = {"rows_per_unit": 2, "speed": 3, "quantize": 0.0, "oscillators": 31}
+    grid, _, rep = sg.convert_song(p, [fake_sample()], {9: 0}, {}, cfg, dict(cfg))
+    assert rep.loop_late == 1 and rep.loop_cut == 0 and rep.dropped == 0
+    last = sg.ROWS + rep.loop_rows - 1
+    assert any(c.get(last, sg.CELL_EMPTY)[0] for c in grid.cells)

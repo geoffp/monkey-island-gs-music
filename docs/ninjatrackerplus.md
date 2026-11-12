@@ -128,7 +128,7 @@ The MOD is the primary artefact: it renders on the desktop (ffmpeg's libopenmpt 
   - `keys = [lo, hi]` makes a **key split** (`sample_for`, `melodic_entry`).
   - `ntp_attack_bytes` overrides the loop-header length.
   - Currently Pipe Org 2 (MI153): "Pipe Organ" for keys 52+, sampled at key 60, and "Pipe Organ Lo" for keys ≤ 51, sampled at key 41. Both use 1016 B attacks (organs speak in about 50 ms). Total: 254/256 pages, 30 samples.
-- **Tracks:** created on demand within NTP's **31-oscillator** budget; see "Track allocation" below for the full rules. There's no separate control track: speed and tempo sit in row 0 (the lead-in), and the loop `B00` goes in a free cell of the last row.
+- **Tracks:** created on demand within NTP's **31-oscillator** budget; see "Track allocation" below for the full rules. There's no separate control track: speed and tempo sit in row 0 (the lead-in). How a song ends follows the game: see "Song ends and loops" below.
 - **Channel tag:** `nCHN` below 10 channels, `nnCH` from 10. libopenmpt didn't recognise `09CH` (it rendered silence), so the format matters.
 
 ### First build (2026-11-06)
@@ -391,7 +391,7 @@ There were about 3,500 such ghosts per build. Examples: MI152 ≈ 600, MI160 ≈
 - **Fix:**
   - **The rest is looped:** a silent 248 B header plus a silent 256 B loop. NTP treats it as a 2-oscillator instrument (converter types `%0010` and `%0111`), so tick 0 writes both volumes. Cost: 2 DOC pages instead of 1 (+1 page in every song; no loop changed), still 1 sample slot.
   - **Only 2-oscillator tracks get it:** on a 1-oscillator track it would make the converter give the track a pair. Cut one-shots there (MI160 and MI162 Xylophone: 179 and 130 halts) now end with `C00` alone. Ghost check on the built MODs: of 345–363 delayed notes on MI160's 1-oscillator tracks and 200–208 on MI162's, none follows a cut one-shot that is still sounding. This also removes a latent bug: `preceding_silent` could put a delayed drum note with no instrument right after a rest, which NTP would have played with the rest.
-  - **A melodic track whose first note is delayed** gets the rest on the row before it (idle on every pass, the loop jump included): +1 to +7 halts per song.
+  - **A melodic track whose first note is delayed** gets the rest on the row before it (a looping song's later passes find the track already 2-oscillator): +1 to +7 halts per song.
 - **After** (GSSquared, whole of per-song MI153): 199 attack-to-loop handovers. The only one with the loop more than 3 dB below the attack is a row's `Cxx` landing at the same moment (both oscillators 144 → 96). Every other build number is unchanged in both modes, apart from the halt counts.
 
 **Ghosts on still-sounding tracks (fixed 2026-11-11: `halt_before_delayed`, on by default).**
@@ -410,6 +410,22 @@ There were about 3,500 such ghosts per build. Examples: MI152 ≈ 600, MI160 ≈
 - **Listened** (user, 2026-11-11, GSSquared): "sounds really good"; made the default.
 
 **Still open (theory 2):** steals, i.e. a releasing note cut for a new one, are abrupt on the DOC. NTP halts oscillators outright, with no declick ramp, where desktop players ramp over a few milliseconds. MI160 had about 620–780 of them; since 2026-11-08 most fall on a release that has already reached 0 (see "Track allocation", step 4).
+
+## Song ends and loops (2026-11-11)
+**In the game.** An `RO` track ends either in `FF` or `00` (`docs/ro-format.md`). ScummVM's `MidiParser_RO` sets `_autoLoop` on `FF`, and `MidiParser` then answers the end of track with `jumpToTick(0)` (`ref/scummvm/audio/midiparser.cpp`, `parseNextEvent`/`onTimer`): the track plays again from its start, at once, with the notes still sounding stopped (`jumpToTick`'s `stopNotes` default), so their releases sound into the next pass. On `00` it stops. The extractor writes `loopStart`/`loopEnd` markers for `FF` tracks (`extract_music._conductor`), and `ntpsong.read_loop` reads them. In MI1, 12 of the 16 songs loop and 4 play once (`docs/games/monkey.md`). Scripts can also restart a sound; that isn't followed here (a byte search of the room scripts for the start-sound opcodes naming 150–168 finds mostly false hits, and decoding v4 scripts is a project of its own).
+
+**Before** every MOD ended with `B00` on the last row of its last *pattern*: every song looped, the play-once ones too, and each pass was padded to a 64-row boundary plus the lead-in row (MI154: 9.1 s of music, 13.7 s a pass).
+
+**Now** (`_Arranger.finish`, `seam`, `fit_pass`):
+- **Play-once songs** end after their last row, once the releases and one-shots are done: a `D00` there moves past the last order position. NTP then stops (`check_pattern_end_2`: `play_song_once`), or starts again if the player asked it to loop (SenseiPlay's "Loop NTP" toggle). MI154 now lasts 9.6 s, MI160 94.1 s (was 97.4 s).
+- **Looping songs** repeat by themselves, whatever the player's setting:
+  - **Lead-in once.** Row 0 (speed, tempo) is alone in pattern 0, ended at once by `D00`; the song proper starts at pattern 1, and `B01` on the pass's last row jumps back there. NTP's `B` and `D` share one variable (`pattern_jump`), so a single row can't hold both; this layout needs neither in the same row. Cost: one extra pattern.
+  - **The pass lasts the game's loop.** The rows follow the song's fitted grid (`detect_grid`), which doesn't divide the loop: rounding left passes 33–59 ms short or long. Fitting the rows to the loop instead cost timing (MI153 mean error 12.1 → 15.7 ms, shared MI164 8.1 → 13.4). So the grid stays, and the pass's last row gets its own tempo (`fit_pass`; tempo 35–166 in MI1), with pass row 1 restoring the start tempo. Every pass is within 2 ms of the game's loop (simulated from the MOD bytes: B/D/F replayed).
+  - **Across the seam.** A note the grid would put past the end plays on the last row (`loop_late`: one in MI153). Release cells past the end move to the same place in the next pass (`seam`): onto rows before the track's first note, where nothing of the first pass sounds; from that note on, it takes the track. 1–22 cells per song. The rest that ends a release moves with it, so no loop rings on into the next pass.
+- Track allocation, drops and steals are unchanged in both modes; timing error too except MI153 (12.1 → 12.7 ms, the late note).
+- **Checked in GSSquared** (SenseiPlay, Loop NTP off): MI154 stops by itself after its 9.6 s; MI158 is still playing after 30 s (its loop is 22.4 s).
+- Tests: `test_a_looping_song_repeats_exactly_as_long_as_the_game_loop`, `test_a_song_that_plays_once_ends_after_its_last_row`, `test_releases_that_cross_the_loop_sound_into_the_next_pass`, `test_a_note_the_grid_puts_past_the_loop_end_plays_on_the_last_row`.
+- **Limit:** loops from the song's start only (all `RO` loops are). iMUSE songs (SCUMM v5) loop to points inside the song; that needs the loop start on a pattern boundary (an intro pattern sequence ending in `D00`), not built yet.
 
 ## Build options: tradeoffs (2026-11-08)
 What each option buys and costs, as measured. Sizes are totals over all 16 songs. Pattern data is 256 B per track per 64-row pattern, so allocation options change it through the track count; sample options change the sample data. Where a cost hasn't been measured, the entry says so.
@@ -780,8 +796,8 @@ A track is *free* at row r when it isn't busy and its cell there is empty.
 
 **After allocation:**
 - **Track order:** all melodic tracks are emitted before the drum tracks. Ninjaforce's converter assigns oscillators first-fit, pairs on even oscillators, and interleaving strands odd oscillators (see "Ninjaforce converter: oscillator assignment bug"). `ntp_oscillators` replays its assignment, and the build fails if it wouldn't fit.
-- **Minimum:** at least 2 tracks.
-- **Control commands:** speed and tempo go in row 0, and `B00` in the last row.
+- **Minimum:** at least 2 tracks (3 in a looping song, whose row 0 also holds the `D00`).
+- **Control commands:** speed and tempo go in row 0; the song's end (`Bxx`, `D00`) is in "Song ends and loops".
 
 **What the numbers mean:** `trk` and `osc` in the build log are the tracks and oscillators used. Overload remains where demand really exceeds 31: MI160 peaks at 44 oscillators, over budget for 9.6 % of the song, measured with notes ringing to note-off plus release. That's where its steals and 9–11 dropped Claves come from. Loop-only (1-oscillator) organ samples would cut that to 2.3 %; that's a proposal, not built.
 

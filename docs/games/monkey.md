@@ -24,7 +24,7 @@ Both are in `game.toml`'s `[md5]`; `just extract` warns when the data differs, a
 - **Stale index entries:** sounds 72, 74, 76, 78, 80, 82, 84, 86, 88, 90, 92, 94, 95, 96 and 97 point mid-block into other data in their rooms (109 other entries resolve fine). The extractor skips them with a warning. None are Roland tracks. They are probably unused leftovers; not investigated further.
 
 ## The tracks (sounds 150–168)
-Durations are one pass at 120 BPM. *loop* means the track ends in `FF`; *end* means it runs to the end of the block.
+Durations are one pass at 120 BPM. *loop* means the track ends in `FF` (the game plays it again from the start); *end* means it ends in `00` and plays once. 12 of the 16 distinct tracks loop; 152, 154 (and its copies 155–157), 160 and 167 play once. The NTP songs do the same (`../ninjatrackerplus.md`, "Song ends and loops").
 
 | id | bytes | dur | end | channels (program) |
 |---|---|---|---|---|

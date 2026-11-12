@@ -32,7 +32,7 @@ from .ntpsamples import NOTES, ModSample
 ROWS = 64                                 # rows per pattern
 RHYTHM = 9
 CELL_EMPTY = (0, 0, -1, 0)                # note, instrument, effect (-1: none), parameter
-FX_JUMP, FX_VOLUME, FX_EXTENDED, FX_SPEED = 0xB, 0xC, 0xE, 0xF
+FX_JUMP, FX_VOLUME, FX_BREAK, FX_EXTENDED, FX_SPEED = 0xB, 0xC, 0xD, 0xE, 0xF
 NOTE_DELAY = 0xD0                         # EDx: delay the note by x ticks
 
 
@@ -67,13 +67,21 @@ def read_timebase(path: Path) -> Timebase:
     return _read_cached(path)[3]
 
 
+def read_loop(path: Path) -> tuple[float, float] | None:
+    """(start s, end s) of the song's loop, from its `loopStart`/`loopEnd` markers (the
+    extractor writes them for an RO track ending in FF, which ScummVM's MidiParser_RO plays
+    again from the start: docs/ro-format.md); None for a song that plays once."""
+    return _read_cached(path)[4]
+
+
 def _read_cached(path: Path):
     st = Path(path).stat()
     return _read_notes(str(Path(path).resolve()), st.st_mtime_ns, st.st_size)
 
 
 @functools.lru_cache(maxsize=None)
-def _read_notes(path: str, _mtime: int, _size: int) -> tuple[list[Note], dict[int, int], float, Timebase]:
+def _read_notes(path: str, _mtime: int, _size: int
+                ) -> tuple[list[Note], dict[int, int], float, Timebase, tuple[float, float] | None]:
     mf = mido.MidiFile(path)
     tempos = {msg.tempo for trk in mf.tracks for msg in trk if msg.type == "set_tempo"}
     if len(tempos) > 1:          # MI1 songs have one tempo; times below assume a single one
@@ -95,8 +103,11 @@ def _read_notes(path: str, _mtime: int, _size: int) -> tuple[list[Note], dict[in
     sounding: dict[tuple[int, int], Note] = {}
     volume: dict[int, int] = {}
     end = 0.0
+    marks: dict[str, float] = {}
     for tick, m in events:
-        if m.type == "program_change":
+        if m.type == "marker" and m.text in ("loopStart", "loopEnd"):
+            marks.setdefault(m.text, sec(tick))
+        elif m.type == "program_change":
             programs.setdefault(m.channel, m.program)
         elif m.type == "control_change" and m.control == 7:
             volume[m.channel] = m.value
@@ -117,8 +128,13 @@ def _read_notes(path: str, _mtime: int, _size: int) -> tuple[list[Note], dict[in
         n.off = end
         notes.append(n)
     notes.sort(key=lambda n: (n.t, n.channel, n.key))
+    loop = None
+    if "loopEnd" in marks:
+        loop = (marks.get("loopStart", 0.0), marks["loopEnd"])
+        if not 0 <= loop[0] < loop[1]:
+            raise ValueError(f"{path}: loop {loop} is empty")
     return (notes, programs, max(end, max((n.off for n in notes), default=0)),
-            Timebase(mf.ticks_per_beat, tempo / 1e6 / mf.ticks_per_beat))
+            Timebase(mf.ticks_per_beat, tempo / 1e6 / mf.ticks_per_beat), loop)
 
 
 RO_TIMEBASE = Timebase(ro.PPQN, ro.TEMPO_US / 1e6 / ro.PPQN)   # extracted SCUMM RO songs: 120 PPQN, 120 BPM
@@ -184,6 +200,15 @@ class Report:
     speed: int = 0
     row_ms: float = 0.0
     timing_err_ms: float = 0.0
+    loop_rows: int = 0          # a looping song: rows in one pass (0: the song plays once)
+    loop_err_ms: float = 0.0    # that pass's length minus the game's loop
+    loop_late: int = 0          # notes the grid put past the loop's end, played on its last row
+    loop_cut: int = 0           # notes that would start past the loop's end (dropped)
+    loop_wrapped: int = 0       # release cells moved into the next pass
+    loop_fit_rows: int = 0      # the pass's last rows that get their own tempo (fit_pass) ...
+    loop_fit_tempo: int = 0     # ... and that tempo
+    loop_tempo_kept: bool = False        # no free cell on pass row 1 for the start tempo
+    loop_jump_over_volume: bool = False  # the Bxx took a sustain volume step's cell
     melodic_cap: int | None = None   # planned 2-oscillator track cap (plan_tracks); None: first come
     borrow: str = ""                 # drum-path borrowing order plan_tracks chose ("last" / "first")
 
@@ -523,18 +548,116 @@ class _Arranger:
 
     # --- finishing
 
-    def finish(self, timing: _Timing, end: float) -> int:
+    def seam(self, end_row: int) -> None:
+        """A looping song's cells at or past `end_row` (the first row after its last pass row)
+        belong to the next pass: they move `end_row - 1` rows back, onto pass rows 1.. . The
+        game's loop stops the hanging notes (MidiParser jumpToTick), so their releases sound
+        into the next pass; here they do the same. Only releases move (volume steps and the
+        rest that ends one), and only onto free cells before the track's first note, where
+        nothing of the first pass sounds; from there on that note takes the track. A note that
+        would start past the end is dropped with what follows it (counted in `loop_cut`)."""
+        body, rest = end_row - 1, (None if self.rest is None else self.rest + 1)
+        for tr, cells in enumerate(self.grid.cells):
+            tail = sorted(r for r in cells if r >= end_row)
+            if not tail:
+                continue
+            first = min((r for r, c in cells.items() if r < end_row and c[0] and c[1] != rest), default=end_row)
+            cut = False
+            for r in tail:
+                c = cells.pop(r)
+                if cut:
+                    continue
+                if c[0] and c[1] != rest:
+                    self.rep.loop_cut += 1
+                    cut = True
+                    continue
+                if r - body < first and self.grid.free(tr, r - body):
+                    cells[r - body] = c
+                    self.rep.loop_wrapped += 1
+
+    def _overwritable(self, row: int) -> int | None:
+        """A track whose effect cell on `row` can take a control command: a free one, else a
+        sustain volume step (no note starts there), else None."""
+        tracks = range(len(self.grid.cells))
+        free = next((t for t in tracks if self.grid.effect_free(t, row)), None)
+        if free is not None:
+            return free
+        return next((t for t in tracks if self.grid.cells[t][row][0] == 0
+                     and self.grid.cells[t][row][2] == FX_VOLUME), None)
+
+    def fit_pass(self, timing: _Timing, changes: list[tuple[int, int]], end_row: int, loop_s: float) -> None:
+        """Make a pass (rows 1..end_row-1) last `loop_s`: the rows follow the song's fitted grid,
+        which needn't divide the game's loop, so the pass's last k rows get a tempo of their own
+        (the fewest rows that keep it within MOD tempos 32-255), and pass row 1 restores the
+        start tempo. `changes` are the dithering commands (already written); those inside the
+        last k rows are taken back."""
+        grid, rep, per_row = self.grid, self.rep, 2.5 * timing.speed
+        tracks = range(len(grid.cells))
+        start = changes[0][1]
+        for k in range(1, min(end_row - 1, 16) + 1):
+            j0 = end_row - k
+            kept = [(r, tp) for r, tp in changes if r < j0]
+            cur, at, before = start, 0, 0.0
+            tempo_at = dict(kept)
+            for r in range(1, j0):
+                cur = tempo_at.get(r, cur)
+                before += per_row / cur
+            tp = round(k * per_row / max(loop_s - before, 1e-6))
+            free = [t for t in tracks if grid.effect_free(t, j0) or
+                    (grid.cells[t][j0][2] == FX_SPEED and (j0, grid.cells[t][j0][3]) in changes)]
+            if 32 <= tp <= 255 and len(free) >= (2 if j0 == end_row - 1 else 1):
+                break
+        else:
+            raise ValueError(f"no tempo makes the pass last {loop_s:.3f} s")
+        for r, old in changes:
+            if r >= j0:                                    # take back the dithering there
+                tr = next(t for t in tracks if grid.cells[t].get(r, CELL_EMPTY)[2] == FX_SPEED
+                          and grid.cells[t][r][3] == old)
+                grid.cells[tr][r][2], grid.cells[tr][r][3] = -1, 0
+        tr = next(t for t in tracks if grid.effect_free(t, j0))
+        grid.set_effect(tr, j0, FX_SPEED, tp)
+        rep.loop_err_ms = 1000 * (before + k * per_row / tp - loop_s)
+        rep.loop_fit_rows, rep.loop_fit_tempo = k, tp
+        if tp != start and all(r != 1 for r, _ in changes):
+            tr = next((t for t in tracks if grid.effect_free(t, 1)), None)
+            if tr is not None:                             # each pass starts at the start tempo
+                grid.set_effect(tr, 1, FX_SPEED, start)
+            else:
+                rep.loop_tempo_kept = True
+
+    def finish(self, timing: _Timing, end: float, loop: tuple[float, float] | None = None) -> int:
         """Pattern count, track order (2-oscillator tracks first), tempo commands, speed and
-        tempo on row 0, and the loop jump on the last row."""
+        tempo on row 0 (the lead-in), and the song's end.
+
+        A song that plays once ends after its last row (a `D00` there), once its notes have
+        released and its one-shots played out. A looping song (`loop`: start, end s; only a loop
+        from the start, as SCUMM's RO tracks have) repeats exactly as long as the game's loop:
+        its pass is rows 1..body, the `Bxx` on the last pass row jumps back to row 1, and the
+        lead-in row 0 sits alone in pattern 0 (a `D00` ends that pattern at once), so it plays
+        only before the first pass. Releases that cross the loop sound on into the next pass
+        (`seam`), and pass row 1 restores the start tempo, so every pass plays alike."""
         rep, grid = self.rep, self.grid
-        rows_needed = max([max(c, default=0) for c in grid.cells]) + 1
-        rows_needed = max(rows_needed, int((end + timing.shift) / timing.row_s) + 1)
-        patterns = math.ceil(rows_needed / ROWS)
+        end_row = None
+        if loop is not None:
+            if loop[0] > 0:
+                raise ValueError(f"loop {loop}: only loops from the song's start are supported")
+            body = max(1, round((loop[1] - loop[0]) / timing.row_s))
+            end_row = body + 1
+            rep.loop_rows, rep.loop_err_ms = body, 1000 * (body * timing.row_s - (loop[1] - loop[0]))
+            self.seam(end_row)
+            rows_needed = end_row
+            patterns = 1 + math.ceil(body / ROWS)
+        else:
+            rows_needed = max([max(c, default=0) for c in grid.cells]) + 1
+            rows_needed = max(rows_needed, int((end + timing.shift) / timing.row_s) + 1)
+            ring = max((t.oneshot_end for t in self.tracks), default=-1.0)    # one-shots play out
+            rows_needed = max(rows_needed, math.ceil(ring / timing.row_s) + 1)
+            patterns = math.ceil(rows_needed / ROWS)
         if patterns > 128:
             raise ValueError(f"{patterns} patterns > 128 (MOD order list); raise row length")
         rep.rows, rep.patterns = rows_needed, patterns
         rep.tracks_used, rep.oscillators = len(grid.cells), self.osc_used
-        if len(grid.cells) < 2:
+        while len(grid.cells) < (3 if loop is not None else 2):     # row 0: speed, tempo (and D00)
             self.new_track("drum")
         # Two-oscillator (looped) tracks first: Ninjaforce's converter assigns oscillators first-fit
         # in track order with pairs on even oscillators, so interleaved 1- and 2-oscillator tracks
@@ -545,7 +668,7 @@ class _Arranger:
         self.tracks = [self.tracks[t] for t in order]
         rep.track_kinds = [t.kind for t in self.tracks]
         tracks = range(len(grid.cells))
-        changes = tempo_commands(timing.tempo_ideal, timing.speed, patterns * ROWS,
+        changes = tempo_commands(timing.tempo_ideal, timing.speed, rows_needed if loop else patterns * ROWS,
                                  lambda r: any(grid.effect_free(t, r) for t in tracks),
                                  self.opt("tempo_tolerance_ms", 2.0) / 1000)
         tempo = changes[0][1]
@@ -556,22 +679,35 @@ class _Arranger:
             if not grid.free(tr, 0):
                 raise AssertionError("row 0 must be free (lead-in)")
             grid.set_effect(tr, 0, FX_SPEED, param)
-        last_row = patterns * ROWS - 1
-        tr = next((t for t in tracks if grid.effect_free(t, last_row)), None)
-        if tr is not None:
-            grid.set_effect(tr, last_row, FX_JUMP, 0)          # loop to the start (like the game's FF)
+        if loop is not None:
+            self.fit_pass(timing, changes, end_row, loop[1] - loop[0])
         # A melodic track whose first note is delayed has no 2-oscillator instrument yet, so NTP
         # writes that note's tick-0 volume to its attack oscillator only and the loop starts at
         # volume 0 until the next row (ntpsamples.rest_sample). The rest on the row before
-        # (idle on every pass, the loop jump included) makes the track 2-oscillator first.
+        # makes the track 2-oscillator first (a later pass has played the track already).
+        rest = None if self.rest is None else self.rest + 1
         for t in tracks:
             if self.rest is None or self.tracks[t].kind != "melodic":
                 continue
-            first = min((r for r, c in grid.cells[t].items() if c[0]), default=None)
+            first = min((r for r, c in grid.cells[t].items() if c[0] and c[1] != rest), default=None)
             if first and grid.cells[t][first][2] == FX_EXTENDED and grid.cells[t][first][1]:
                 c = grid.get(t, first - 1)
                 c[0], c[1] = self.samples[self.rest].base_note + 1, self.rest + 1
                 rep.halted += 1
+        if loop is None and rows_needed % ROWS:
+            # the song ends after its last row, not at the end of that row's pattern: D00 there
+            # moves past the last order position (NTP stops, or plays again if told to loop)
+            tr = self._overwritable(rows_needed - 1)
+            if tr is not None:
+                grid.set_effect(tr, rows_needed - 1, FX_BREAK, 0)
+        if loop is not None:
+            tr = self._overwritable(end_row - 1)
+            if tr is None:
+                raise ValueError(f"no cell for the loop jump on row {end_row - 1}")
+            rep.loop_jump_over_volume = not grid.effect_free(tr, end_row - 1)
+            grid.set_effect(tr, end_row - 1, FX_JUMP, 1)           # back to pass row 1 (pattern 1)
+            grid.cells = [{(r if r == 0 else r + ROWS - 1): c for r, c in cells.items()} for cells in grid.cells]
+            grid.set_effect(2, 0, FX_BREAK, 0)                     # the lead-in is pattern 0's only row
         return patterns
 
 
@@ -584,6 +720,7 @@ def convert_song(path: Path, samples: list[ModSample], programs: dict, drums: di
     ntpsamples.cc7_curve(); None ignores channel volume. Sets each sample's default_volume
     for this song (the MOD writer stores it)."""
     notes, chan_prog, end = read_notes(path)
+    loop = read_loop(path)
     rep = Report()
     timing = _timing(notes, cfg, song_cfg, read_timebase(path))
     rep.tempo, rep.speed, rep.row_ms = timing.tempo, timing.speed, timing.row_s * 1000
@@ -634,6 +771,9 @@ def convert_song(path: Path, samples: list[ModSample], programs: dict, drums: di
     onsets = {ch: np.array([m.t for m in notes if m.channel == ch]) for ch in {m.channel for m in notes}}
     speed, tick_s, row_s = timing.speed, timing.tick_s, timing.row_s
     err_sum = 0.0
+    # a looping song's pass is rows 1..last (Arranger.finish): a note near the loop's end that
+    # the grid puts past it plays on the last row instead (fit_pass stretches that row to the end)
+    pass_end = max(1, round((loop[1] - loop[0]) / row_s)) if loop is not None else None
     for n in notes:
         rep.notes += 1
         if n.channel == RHYTHM:
@@ -653,6 +793,9 @@ def convert_song(path: Path, samples: list[ModSample], programs: dict, drums: di
                 note_idx += 12 * ((0 - note_idx) // 12 + 1) if note_idx < 0 else -12 * ((note_idx - NOTES) // 12 + 1)
         s = samples[si]
         r, d = timing.place(n.t)
+        if pass_end is not None and r > pass_end:
+            r, d = pass_end, 0
+            rep.loop_late += 1
         err_sum += timing.error(r, d, n.t)
         # Melodic one-shots (Xylophone) free their track when the sample ends (MI162 8 -> 0
         # dropped). `melodic_one_shots = "any"` (default) sends them down the drum path: a free
@@ -704,6 +847,8 @@ def convert_song(path: Path, samples: list[ModSample], programs: dict, drums: di
                 d = 0
                 err_sum += timing.error(r, 0, n.t)
                 rep.ghost_moves += 1
+        if pass_end is not None and r > pass_end:        # moved onto a row past the loop
+            r, d = pass_end, 0
         cell = arr.grid.get(tr, r)
         cell[0] = note_idx + 1
         silent_before = False
@@ -736,7 +881,7 @@ def convert_song(path: Path, samples: list[ModSample], programs: dict, drums: di
         track.busy = last
 
     rep.timing_err_ms = 1000 * err_sum / max(1, rep.notes - rep.dropped)
-    patterns = arr.finish(timing, end)
+    patterns = arr.finish(timing, end, loop)
     return arr.grid, patterns, rep
 
 

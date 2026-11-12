@@ -22,14 +22,17 @@ def stage(tmp_path, variants=("INST.PER.SONG", "INST.SHARED"), ids=(150, *range(
 
 
 def test_monkey_islands_readme_comes_out_as_it_was_written_by_hand(tmp_path):
-    """The template plus MI's 16 songs give the README that was in config before (commit a41ceb2)."""
+    """The template plus MI's 16 songs give the README that was in config before (commit a41ceb2),
+    plus the paragraph on looping songs added since (2026-11-11)."""
     old = subprocess.run(["git", "show", "a41ceb2:config/games/monkey/disk/README.TXT"], cwd=ROOT,
                          capture_output=True, text=True)
     if old.returncode:
         pytest.skip("git history not available")
     facts = dr.song_facts(stage(tmp_path), "MI")
     assert (facts["songs"], facts["first"], facts["last"], facts["gaps"]) == ("16", "MI150", "MI168", "GAP.13")
-    assert dr.render(TEMPLATE.read_text(), facts) == old.stdout
+    loops = ("Songs that loop in the game loop here too, from the start, for as\n"
+             "long as they play; the others play once and stop.\n\n")
+    assert dr.render(TEMPLATE.read_text(), facts) == old.stdout.replace("The file names (", loops + "The file names (")
 
 
 def test_placeholders_follow_p8_trees_rule():

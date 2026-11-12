@@ -492,6 +492,18 @@ def _print_reports(reports: list, prefix: str) -> None:
     if any(rep.ghost_halts or rep.ghost_moves for _, rep in reports):
         print("halt_before_delayed: " + ", ".join(f"{prefix}{sid} {rep.ghost_halts} halts {rep.ghost_moves} moved"
                                                 for sid, rep in reports if rep.ghost_halts or rep.ghost_moves))
+    loops = [(sid, rep) for sid, rep in reports if rep.loop_rows]
+    if loops:
+        def note(rep) -> str:
+            extra = [f"{rep.loop_wrapped} release cells into the next pass"] if rep.loop_wrapped else []
+            extra += [f"{rep.loop_late} late notes on the last row"] if rep.loop_late else []
+            extra += [f"{rep.loop_cut} notes past the end dropped"] if rep.loop_cut else []
+            extra += ["start tempo not restored"] if rep.loop_tempo_kept else []
+            extra += ["jump over a volume step"] if rep.loop_jump_over_volume else []
+            fit = f", last {rep.loop_fit_rows} at tempo {rep.loop_fit_tempo}" if rep.loop_fit_rows else ""
+            return f"{rep.loop_rows} rows ({rep.loop_err_ms:+.1f} ms{fit})" + "".join(f", {e}" for e in extra)
+        print("loops (like the game): " + "; ".join(f"{prefix}{sid} {note(rep)}" for sid, rep in loops))
+        print("play once: " + (", ".join(f"{prefix}{sid}" for sid, rep in reports if not rep.loop_rows) or "none"))
     for sid, rep in reports:
         if rep.dropped_by:
             print(f"{prefix}{sid} dropped (no oscillator): "
