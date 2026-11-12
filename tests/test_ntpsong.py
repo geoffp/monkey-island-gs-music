@@ -492,10 +492,11 @@ def test_halt_before_delayed_leaves_nothing_sounding_for_a_delayed_note(tmp_path
     note's default volume for d ticks (MI160 on the IIGS: +24 to +35 dB for 50-67 ms). With
     halt_before_delayed the track is halted (rest + C00) on the row before."""
     p, samples = _ghost_song(tmp_path, 307)
-    cfg = {"rows_per_unit": 2, "speed": 3, "quantize": 0.0, "oscillators": 2, "unit_ticks": 30, "phase_ticks": 0}
+    cfg = {"rows_per_unit": 2, "speed": 3, "quantize": 0.0, "oscillators": 2, "unit_ticks": 30, "phase_ticks": 0,
+           "halt_before_delayed": False}
     grid, _, rep = sg.convert_song(p, samples, {9: 0}, {}, cfg, dict(cfg))
-    assert rep.delayed == 1 and _ghosts(grid, samples) == 1                   # the old behaviour
-    on = {**cfg, "halt_before_delayed": True}
+    assert rep.delayed == 1 and _ghosts(grid, samples) == 1                   # the option off
+    on = {k: v for k, v in cfg.items() if k != "halt_before_delayed"}           # on by default
     grid, _, rep = sg.convert_song(p, samples, {9: 0}, {}, on, dict(on))
     assert _ghosts(grid, samples) == 0 and rep.ghost_halts == 1 and rep.ghost_moves == 0 and rep.delayed == 1
     cells = grid.cells[0]

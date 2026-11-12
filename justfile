@@ -53,7 +53,7 @@ ntpdemo_sha   := "350843388bde213b10101212fcd6e3f5affa3b4f25b74ea970b0b6ab85d14d
 # with a sample-set `base`: inst-per-song (per-song: each song carries only its own sounds,
 # longer loops) and inst-shared (shared: one set for every song, like the MIDI Synth bank), plus
 # any trial variants.
-ntp_modes     := "inst-per-song inst-shared per-song-halt shared-halt"
+ntp_modes     := "inst-per-song inst-shared"
 # The helpers below expand to `f() {...}; f`: use them as whole commands (a line, or inside
 # if/then), never after `||` or `&&`, which would skip only the definition.
 # Copy build/<game>/ntp/<mode>/*.ntp (typed $D5/$0008) into <dir>/<MODE>/, one folder per variant.

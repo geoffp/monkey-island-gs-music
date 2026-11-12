@@ -626,7 +626,7 @@ def convert_song(path: Path, samples: list[ModSample], programs: dict, drums: di
     hyst = arr.opt("volume_hysteresis", 0.75)
     max_rise_db = arr.opt("env_max_rise_db", 1.5)
     snap_db = arr.opt("delay_snap_db")
-    halt_ghosts = arr.opt("halt_before_delayed", False)
+    halt_ghosts = arr.opt("halt_before_delayed", True)
     flexible = arr.opt("melodic_one_shots", "any") == "any"
     onsets = {ch: np.array([m.t for m in notes if m.channel == ch]) for ch in {m.channel for m in notes}}
     speed, tick_s, row_s = timing.speed, timing.tick_s, timing.row_s
