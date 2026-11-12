@@ -34,7 +34,7 @@ from .imuse import read_timbres
 from .modfile import mod_file
 from .mt32 import rhythm_keys
 from .munt import SR, Munt
-from .ntpsamples import (MAX_SAMPLES, ModSample, best_tuning, build_samples, cached_render, cc7_curve, floor_time,
+from .ntpsamples import (MAX_SAMPLES, ModSample, best_tuning, build_samples, cached_render, cc7_curve, forget_renders, floor_time,
                          drum_steps, is_steady, loop_problems, loop_summary, ntp_block, ntp_doc_pages, period_tables,
                          plan_loops)
 from .ntpsong import RHYTHM, Note, convert_song, ntp_oscillators, plan_tracks, program_of, read_notes, sample_for
@@ -521,6 +521,8 @@ def _build_song(job) -> tuple[str, object, str, str | None]:
             rep, err = _build_song_quiet(job)
         except Exception:
             rep, err = None, f"{job[-1].prefix}{job[0].sid}: build failed\n{traceback.format_exc()}"
+        finally:
+            forget_renders()                    # a worker builds many songs: don't keep them all
     return job[0].sid, rep, buf.getvalue(), err
 
 

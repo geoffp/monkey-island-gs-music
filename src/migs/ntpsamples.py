@@ -339,6 +339,15 @@ def cached_render(munt: Munt, program: int | None, key: int, hold: float, veloci
     return x
 
 
+def forget_renders() -> None:
+    """Drop the in-process renders (and their peaks, keyed by id: a freed array's id can come
+    back). They are re-read from the WAV cache on next use, so results don't change; a build
+    worker calls this after each song, or it would hold every song's renders (MI2: 0.26 GB a
+    song, growing past 1 GB a worker in six songs)."""
+    cached_render.cache_clear()
+    _PEAKS.clear()
+
+
 def _peak(x: np.ndarray) -> float:
     """Peak 5 ms RMS (memoised for cached renders, which cached_render keeps alive)."""
     if not x.flags.writeable and id(x) in _PEAKS:

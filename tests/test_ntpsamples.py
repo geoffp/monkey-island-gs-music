@@ -260,3 +260,24 @@ def test_sustain_contour_does_not_droop_into_the_release():
     assert 20 * np.log10(c[int(1.95 * sr)]) > -0.1
     old = np.exp(smp.smooth(np.log(np.maximum(env, 1e-6)), int(0.8 * sr)))
     assert 20 * np.log10(old[int(1.95 * sr)]) < -10                 # the old droop
+
+
+def test_forget_renders_drops_the_in_process_renders():
+    """A build worker forgets its renders after each song (or holds every song's: MI2 grew
+    past 1 GB a worker); the next use reads them again, the same values."""
+    class Fake(tuple):
+        calls = 0
+
+        def render(self, **kw):
+            Fake.calls += 1
+            return np.full(10, 0.5)
+
+    m = Fake()
+    smp.forget_renders()
+    a = smp.cached_render(m, 1, 60, 0.5)
+    smp._peak(a)
+    assert smp.cached_render(m, 1, 60, 0.5) is a and Fake.calls == 1 and smp._PEAKS
+    smp.forget_renders()
+    assert not smp._PEAKS
+    b = smp.cached_render(m, 1, 60, 0.5)
+    assert Fake.calls == 2 and b is not a and np.array_equal(a, b) and not b.flags.writeable
