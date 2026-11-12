@@ -22,7 +22,7 @@ DEFAULT = "monkey"
 CONFIG = Path("config/games")
 BUILD = Path("build")
 ORIGINAL = Path("original files")
-ENGINES = ("scumm-v4",)
+ENGINES = ("scumm-v4", "scumm-v5")
 # build/ folders that aren't games: a game with one of these ids would mix its output into them
 RESERVED_IDS = ("cache", "selftest")
 # ProDOS names: 15 characters, letters/digits/periods, starting with a letter. The longest name
@@ -44,6 +44,19 @@ class GameInfo:
     label: str                   # titles: "MI1 150"
     md5: dict[str, str] = field(default_factory=dict)
     root: Path = Path(".")
+    mt32: dict = field(default_factory=dict)     # [mt32]: the game's MT-32 driver (init SysEx, GM for its timbres)
+    music: dict = field(default_factory=dict)    # [music]: which sounds are music (engines with sound effects mixed in)
+
+    @property
+    def mt32_init(self) -> list[bytes]:
+        """SysEx (from the 0x41 byte, without F0/F7) the game's MT-32 driver sends at start-up,
+        which renders must send too (MI2: its rhythm-key map)."""
+        return [bytes.fromhex(h) for h in self.mt32.get("init", [])]
+
+    @property
+    def timbre_gm(self) -> dict[str, int]:
+        """Custom MT-32 timbre name -> General MIDI program, for the GM rendition."""
+        return dict(self.mt32.get("timbre_gm", {}))
 
     @property
     def config_dir(self) -> Path:
@@ -99,8 +112,12 @@ def parse(game_id: str, text: str, root: Path = Path(".")) -> GameInfo:
     if len(c["label"]) + 4 > MOD_TITLE:
         raise ValueError(f"{game_id}/game.toml: label {c['label']!r} leaves no room in a MOD title "
                          f"({MOD_TITLE} bytes, '<label> <sound id>')")
+    for h in c.get("mt32", {}).get("init", []):
+        b = bytes.fromhex(h)
+        if len(b) < 6 or b[0] != 0x41 or b[3] != 0x12:
+            raise ValueError(f"{game_id}/game.toml: [mt32] init {h[:16]}...: not a Roland DT1 (41 dd 16 12 ...)")
     return GameInfo(game_id, c["name"], c["engine"], root / ORIGINAL / c["data"], c["prefix"], c["label"],
-                    dict(c.get("md5", {})), root)
+                    dict(c.get("md5", {})), root, dict(c.get("mt32", {})), dict(c.get("music", {})))
 
 
 def load(game_id: str | None = None, root: Path = Path(".")) -> GameInfo:

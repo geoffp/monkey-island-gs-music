@@ -49,6 +49,25 @@ MT32_TO_GM = (  # MT-32 preset program -> nearest GM program
 # MT-32 default rhythm setup: these keys sound, and map to the same GM percussion key.
 MT32_RHYTHM_KEYS = frozenset([*range(35, 52), 54, 56, *range(60, 74), 75])
 
+RHYTHM_SETUP = 0x03 << 14 | 0x01 << 7 | 0x10   # rhythm setup temporary area, key 24 (7-bit address 03 01 10)
+
+
+def rhythm_keys(setup: list[bytes] | tuple[bytes, ...] = ()) -> frozenset[int]:
+    """The rhythm keys an MT-32 sounds: its power-on map, plus keys a driver's start-up SysEx
+    (Roland DT1, from the 0x41 byte) assigns in the rhythm setup area (4 bytes per key from
+    key 24: timbre, level, pan, reverb). MI2's driver maps keys 24-34."""
+    keys = set(MT32_RHYTHM_KEYS)
+    for s in setup:
+        if len(s) < 8 or s[0] != 0x41 or s[3] != 0x12:
+            continue
+        addr = s[4] << 14 | s[5] << 7 | s[6]
+        n = len(s) - 8                                  # data bytes (minus header and checksum)
+        lo = max(addr, RHYTHM_SETUP)
+        for a in range(lo, addr + n):
+            if (a - RHYTHM_SETUP) % 4 == 0 and RHYTHM_SETUP <= a < RHYTHM_SETUP + 4 * 85:
+                keys.add(24 + (a - RHYTHM_SETUP) // 4)
+    return frozenset(keys)
+
 # Power-on panning of MT-32 parts 1-8 (MIDI channels 2-9), in MT-32 (reversed) pan sense.
 MT32_DEFAULT_PANNING = (0x40, 0x49, 0x40, 0x49, 0x25, 0x5B, 0x00, 0x7F)
 

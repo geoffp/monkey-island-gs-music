@@ -1,0 +1,43 @@
+# Monkey Island 2: LeChuck's Revenge, DOS floppy (English). The folder name (`monkey2`) is the
+# game id, ScummVM's (ref/scummvm/engines/scumm/detection_tables.h), and names the build
+# output: build/monkey2/. Read by migs.games (and, for the justfile, tools/game.py: keep the
+# top-level values plain strings). Facts about this game's data: docs/games/monkey2.md.
+
+name = "Monkey Island 2: LeChuck's Revenge"
+release = "DOS floppy"
+engine = "scumm-v5"              # SCUMM v5: iMUSE MIDI in SOUN blocks, MT-32 in their ROL part (docs/imuse-format.md)
+data = "monkey2"                 # folder under original files/
+prefix = "M2"                    # song files (M2100.mod, M2100.NTP) and disk volumes (M2.NTP)
+label = "MI2"                    # titles: song "MI2 100", MIDI "MI2 sound 100", emulator configs
+
+# The release this config was tuned on (ScummVM scumm-md5.h: monkey2, English, DOS).
+# `extract` warns when the data differs.
+[md5]
+"monkey2.000" = "3686cf8f89e102ececf4366e1d2c8126"
+"monkey2.001" = "50993d719990d2e212c50a915f6c50da"
+
+# Which sounds are music: the ROL sounds from 100 on (below are effects: spits, burps, the
+# foghorn), with at least 40 notes and 8 s of playing (drops stingers of a few notes).
+# A decision; 97 sounds pass (2026-11-11).
+[music]
+first_id = 100
+min_notes = 40
+min_seconds = 8.0
+
+# The MT-32 driver's start-up SysEx (ScummVM IMuseDriver_MT32::initDevice, the "old system"
+# of MI2 and Indy4, ref/scummvm/engines/scumm/imuse/drivers/midi.cpp), as Roland DT1 messages
+# (hex, from the 0x41 byte):
+#  1. system area 10 00 00: master tune 0x40, reverb mode 0, time 4, level 4, partial
+#     reserve 4 x 8 parts + 0 rhythm, parts 1-8 on channels 2-9 and rhythm on 10 (the
+#     MT-32's default), master volume 100;
+#  2. rhythm setup 03 01 10: keys 24-34 play rhythm timbres 0x40-0x51 (MI2's songs use them).
+# Renders send these first (then reverb off), so drums on keys 24-34 sound as in the game.
+[mt32]
+init = [
+  "41101612100000400004040404040404040404000102030405060708096477",
+  "41101612030110406407004a640600416407004b6408004564060044640b00516405004364080050640700426403004c64070044",
+]
+# General MIDI programs for MI2's custom timbres, for the GM rendition. From ScummVM's
+# roland_to_gm_map (ref/scummvm/engines/scumm/imuse/instrument.cpp); "Fire Pit" is
+# missing there and taken as Taiko (116) like "Big Drum", which it always plays beside.
+timbre_gm = { "Big Drum" = 116, "Fire Pit" = 116, "LeshBass" = 33, "ReggaeBass" = 32, "SdTrk Bend" = 97, "Swell 1" = 95, "Swell 2" = 95, "ML explosn" = 127, "badspit" = 62, "burp" = 58, "foghorn" = 60, "glop" = 39, "rumble" = 89, "spitting" = 62, "thnderclap" = 127 }

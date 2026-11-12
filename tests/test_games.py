@@ -47,7 +47,7 @@ def test_monkey_keeps_its_names():
 
 @pytest.mark.parametrize("field, value", [
     ("prefix", "mi"), ("prefix", "1MI"), ("prefix", "MONKEY1"), ("prefix", "M-I"), ("prefix", "AUDIT"),
-    ("label", "A LABEL FAR TOO LONG"), ("engine", "scumm-v5"),
+    ("label", "A LABEL FAR TOO LONG"), ("engine", "scumm-v6"),
 ])
 def test_bad_settings_are_refused(field, value):
     text = "\n".join(f'{field} = "{value}"' if line.startswith(field + " ") else line
@@ -148,3 +148,14 @@ def test_shared_build_folders_cant_be_game_ids(gid):
         games.load(gid, ROOT)
     r = _tool(gid, "data")
     assert r.returncode == 1 and "can't be a game id" in r.stderr
+
+
+def test_mt32_driver_settings_are_roland_sysex():
+    """[mt32] init: what the game's MT-32 driver sends at start-up, as Roland DT1 SysEx (hex,
+    from the 0x41 byte); timbre_gm: custom timbre names to GM programs."""
+    base = GOOD.format(md5="0" * 32)
+    g = games.parse("tg", base + '\n[mt32]\ninit = ["41101612030110407f0600"]\ntimbre_gm = { "Big Drum" = 116 }\n')
+    assert g.mt32_init == [bytes.fromhex("41101612030110407f0600")] and g.timbre_gm == {"Big Drum": 116}
+    assert games.parse("tg", base).mt32_init == []
+    with pytest.raises(ValueError, match="DT1"):
+        games.parse("tg", base + '\n[mt32]\ninit = ["7d00"]\n')

@@ -26,6 +26,7 @@ class Kind(StrEnum):
     CC = "cc"
     PROGRAM = "program"
     MARKER = "marker"
+    TIMBRE = "timbre"          # iMUSE (SCUMM v5): the channel's custom MT-32 timbre `a` (an id >= 128)
 
 
 @dataclass(frozen=True)
@@ -39,10 +40,16 @@ class Event:
 
 @dataclass
 class Track:
+    """A song as one stream of events. RO tracks use the defaults (120 PPQN, 120 BPM, loops
+    from the start); the iMUSE reader (imuse.py) fills in the rest."""
     events: list[Event] = field(default_factory=list)
     end_tick: int = 0          # includes any delay before the terminator (loop length)
     loops: bool = False        # ended with FF (ScummVM: autoLoop)
     terminated: bool = False   # ended with 00 or FF (vs. running off the block end)
+    ppqn: int = PPQN
+    tempo_us: int = TEMPO_US   # the tempo at tick 0
+    tempos: list[tuple[int, int]] = field(default_factory=list)   # later (tick, µs per quarter)
+    loop_start: int = 0        # where a loop goes back to (tick)
 
 
 def ticks_to_seconds(ticks: int) -> float:

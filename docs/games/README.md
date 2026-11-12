@@ -1,10 +1,12 @@
 # Games
 
-One page per game, named by its game id: what is true of that game's data only (release, md5s, where its music is, track list, open questions). The formats are documented once, in `../scumm-v4-resources.md` and `../ro-format.md`.
+One page per game, named by its game id: what is true of that game's data only (release, md5s, where its music is, track list, open questions). The formats are documented once: `../scumm-v4-resources.md` and `../ro-format.md` (v4, `RO` music), `../scumm-v5-resources.md` and `../imuse-format.md` (v5, iMUSE).
 
 | id | game | engine | page |
 |---|---|---|---|
 | `monkey` | The Secret of Monkey Island (DOS VGA floppy) | scumm-v4 | `monkey.md` |
+| `monkey2` | Monkey Island 2: LeChuck's Revenge (DOS floppy) | scumm-v5 | `monkey2.md` |
+| `atlantis` | Indiana Jones and the Fate of Atlantis (DOS CD) | scumm-v5 | `atlantis.md` |
 
 ## How a game is set up (since 2026-11-11)
 - **Id:** ScummVM's game id (`ref/scummvm/engines/scumm/detection_tables.h`: `monkey`, `monkey2`, `loom`, `indy3`, ...). Not `cache` or `selftest`: those `build/` folders are shared.
@@ -27,11 +29,11 @@ One page per game, named by its game id: what is true of that game's data only (
 2. `config/games/<id>/game.toml`, plus copies of Monkey Island 1's build configs as a starting point. `mt32sounds.toml` can start with no `[[melodic]]` or `[[drum]]` entries: every sound the songs play gets a default, and the build log names each one. Add entries where you decide otherwise (merging programs into one sample, a sampled key, sizes); `just extract`'s patch notes (`build/<id>/extracted/patches/`) list what each song plays. Drop Monkey Island's `[modes.shared] ntp_attack_bytes` and NTP-only `[[melodic]]` sounds: they are about its sounds. The MIDI Synth bank holds 14 melodic sounds (slots 1-15 but 9) and two kits of 8 drums (slots 0 and 9); `just mt32bank` fails, naming the sounds, when defaults don't fit.
 3. Put its files in `original files/<data>/`, then `just game=<id> extract`, `ntp`, `disk`.
 
-## Known limits for a second game (not yet needed by Monkey Island 1)
-- **Other SCUMM versions.** `scumm_v4` reads v4 containers (`000.LFL`, `DISKnn.LEC`, XOR 0x69) and `ro` reads `RO` streams. Games with other layouts need their own engine first:
-  - v3 games such as Loom EGA keep rooms in separate `nn.LFL` files;
-  - v5 games such as Monkey Island 2 are iMUSE, with other blocks and MIDI formats (`ref/scummvm/engines/scumm/imuse/`).
-- **Custom timbres.** Sounds are rendered by MT-32 program number, so they are the presets. A game whose driver uploads its own timbres by SysEx would need those sent before each render, and the cache key would have to include them.
-- **The ROM set.** There is one ROM folder (`original files/mt-32 roms`). The render cache (`build/cache/mt32samples/`, `docsim.json`) is keyed by what is played (program, key, hold, velocity, volume), not by which ROMs played it. So a game that wants other ROMs (another MT-32 ROM version, or a CM-32L with its extra rhythm sounds) needs a ROM folder of its own and a cache keyed by it. Otherwise it silently reuses the current renders.
+## Known limits (updated 2026-11-11, with Monkey Island 2)
+- **Other SCUMM versions.** `scumm_v4` reads v4 containers (`000.LFL`, `DISKnn.LEC`, XOR 0x69) and `ro` reads `RO` streams; `scumm_v5` reads v5 containers (`*.000`, `*.001`) and `imuse` plays their `ROL ` parts. v3 games such as Loom EGA keep rooms in separate `nn.LFL` files: not read yet. Of the games in `original files/` (2026-11-11): Indy 3 VGA has no MT-32 music (ScummVM: AdLib, PC speaker, PCjr, CMS) and Loom CD plays CD audio; Sam & Max (v6) prefers General MIDI. Fate of Atlantis (v5) reads with MI2's code.
+- **Custom timbres** (done for iMUSE, 2026-11-11): a song's Roland timbre uploads get ids from 128 (`extracted/timbres.toml`), and renders send the timbre instead of a program change. The render cache names a timbre by its content and the driver set-up by its hash, so games can't collide. The `RO` format has no SysEx, so v4 games are presets only.
+- **The driver's MT-32 set-up** (`game.toml` `[mt32] init`) is sent before every render: MI2 maps rhythm keys 24-34.
+- **iMUSE songs are extracted as they start**, with no hooks set by scripts; pitch bend isn't played (`imuse-format.md`, "Not followed").
+- **The ROM set.** There is one ROM folder (`original files/mt-32 roms`). The render cache (`build/cache/mt32samples/`, `docsim.json`) is keyed by what is played (program or timbre, key, hold, velocity, volume, driver set-up), not by which ROMs played it. So a game that wants other ROMs (another MT-32 ROM version, or a CM-32L with its extra rhythm sounds) needs a ROM folder of its own and a cache keyed by it. Otherwise it silently reuses the current renders.
 - **The NTP variants** (`ntp_modes` in the justfile) are the same for every game.
-- **Shared settings.** Each game has its own copy of the NTP defaults (`[defaults]` in `ntp.toml`) and of the MT-32 sound notes (such as the Pipe Org 2 key splits, which describe the MT-32, not the game). Splitting the shared part out waits until a second game shows where the line falls.
+- **Shared settings.** Each game has its own copy of the NTP defaults (`[defaults]` in `ntp.toml`). MI2's started as MI1's.

@@ -1,0 +1,9 @@
+# How to sample the MT-32 sounds Monkey Island 2's songs play, through Munt (see Monkey
+# Island 1's mt32sounds.toml for what entries can say). No entries yet (2026-11-11): every
+# program, custom timbre (ids from 128: build/monkey2/extracted/timbres.toml) and rhythm key
+# the songs play gets a default sound (src/migs/sounds.py), and the build log lists them.
+# Add entries here to merge sounds, choose sampled keys or sizes.
+
+bank = "MI2"
+reserve_pages = 16        # DOC pages kept free at the top for game sound effects (4 KB)
+hold_seconds = 2.0        # sampled note length (melodic)

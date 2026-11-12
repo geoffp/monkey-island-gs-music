@@ -1,0 +1,129 @@
+# Fate of Atlantis -> ProTracker MOD -> NinjaTrackerPlus. See docs/ninjatrackerplus.md.
+# Started as a copy of Monkey Island 1's ntp.toml (2026-11-11), less its decisions about MI1's
+# own sounds (shared-set attack cuts, NTP-only key splits). Instruments/drums: mt32sounds.toml
+# (this folder: no entries yet, so every sound is a default).
+#
+# Timing: rows sit on each song's detected grid unit (usually a 16th); rows_per_unit
+# subdivides it. Each note keeps its micro-timing with EDx (quantize = 0) or is snapped
+# toward its row (quantize = 1). Smaller rows = more pattern RAM and player CPU.
+
+[defaults]
+samples = "per-song"    # per-song: each .NTP carries only its own sounds, free DOC RAM -> longer
+                        # loops (NTPprepare loads samples per song anyway). shared: one set for
+                        # every song, like the MIDI Synth bank. Override: just ntpmod shared
+rows_per_unit = 2       # 32nd-note rows on a 16th-note grid
+speed = 3               # tracker ticks per row; EDx resolution = row / speed
+quantize = 0.0          # 0 = full performance timing, 1 = hard snap to rows
+oscillators = 31        # NTP budget: drum (one-shot) tracks use 1, looped melodic tracks 2
+attack_bytes = 2040     # loop header; NTP adds 8 stopper bytes -> one 2 KB DOC block
+loop_bytes = 512        # short loop: one cycle, tiled (decaying sounds; the minimum)
+loop_construction = "eprime"  # short loops. eprime: E'+ (whole samples per cycle, power-averaged
+                        # harmonic cycle, exact zero crossing, phase-aligned attack; no 8-bit
+                        # loop-rate buzz; docs/sample-construction.md). averaged: the original
+                        # averaged cycle (fractional samples per cycle). Long raw loops: same in both.
+max_loop_bytes = 16384  # long loops (raw sustain, crossfaded seam) for steady sounds, grown per
+                        # song into the DOC RAM that song's own samples leave free
+raw_loop_slow_hz = 2.0  # a raw loop size is used only if it repeats at most this often (its
+                        # movement then reads as the sound's own wobble: Elec Organ 8192 B at
+raw_loop_max_tremolo_db = 1.0  # 1.1 Hz), or is as clean as the averaged loop: cycle levels within
+raw_loop_max_buzz_db = -50.0   # this range and loop-rate content below this. Else it adds a tremolo
+                        # or buzz (shared Elec Organ 1024 B: 6.3 dB at 15 Hz; Trombone 1024 B: -39 dB)
+raw_loop_tune_cents = 1.0  # raw loops take the highest rate tuned within this (0: the closest tuning, which
+                        # landed anywhere in the window: Panpipes 16384 B at 14.9 kHz, Elec Organ 8192 B at
+                        # 9.2 kHz; the attack shares the rate). Not clean there: the highest that repeats
+                        # at most raw_loop_slow_hz
+raw_loop_max_rate_drop = 0.1  # a raw loop's rate at most this far below the short loop's (Sax 8192 B at
+                        # 16.3 kHz scored 1.4 dB worse than 512 B at 18.9 kHz; Elec Organ's 8192 B wobble
+                        # loop at 15.7 kHz is 6 % below)
+sub_octave_min_share = 0.02  # a loop cycle spans two note periods when the sustain has at least this
+                        # share of its power an octave below the note (Pipe Org 2: 8-19 % at every
+                        # key; a one-period loop dropped it and sounded an octave above its attack)
+reserve_pages = 16      # DOC pages kept free for game sound effects (4 KB)
+sustain_s = 0.4         # where the loop's cycles are taken (s after onset): the steady sustain,
+                        # not the attack's end (organs build their fundamental after ~0.12 s)
+min_rate = 9000         # sample-rate window for melodic samples (Hz)
+max_rate = 22000
+release_max = 0.3       # seconds of release ramp after note-off
+pitch_plan = true       # choose each sound's sampled key(s), key zones and short-loop rate from
+                        # the notes its songs play (pitchplan, measured with docsim against Munt;
+                        # default since 2026-11-09). false: mt32sounds.toml's fixed key
+pitch_move_gain_db = 0.5  # a single sample moves off the configured key only if this lowers the error
+                        # (the measure covers the first 0.6 s, not the loop the move changes)
+pitch_zones = "hybrid"  # what each played key counts for. hybrid (default since 2026-11-09): half an
+                        # equal share per played key, half by note seconds (pitch_key_share); unplayed
+                        # keys never count. weighted: note seconds only (samples gather where notes
+                        # are held longest: MI153 key 52 from a sample at 74)
+pitch_key_share = 0.5
+sample_budget = "value" # value (default since 2026-11-09): extra zones and bigger drum blocks compete
+                        # for DOC pages by dB x exposure per page, down to upgrade_min_db_per_page; the
+                        # rest grows loops. zones: extra zones while each gains pitch_zone_gain_db
+upgrade_min_db_per_page = 0.011  # (0.01 cost MI160 its Elec Organ 16 KB loop for a 3rd Acou Bass zone)
+drum_fill_block = true  # a drum takes the highest rate that still fits its block (seven drums sat at
+                        # 5872 Hz in half-empty blocks: docs/ninjatrackerplus.md "Hybrid key weights")
+pitch_max_zones = 3     # samples (key zones) one sound may get, each an attack + loop and a MOD slot
+pitch_zone_gain_db = 1.0  # sample_budget = "zones" only: an extra zone must lower its sound's mean
+                        # error by this much; zones take DOC RAM before loop growth
+env_max_rise_db = 1.5   # a held note's per-row Cxx rises at most this much (at least one step);
+                        # the DOC applies volume instantly, so beating contours (French Horn) pumped
+                        # in jumps. Falls are not limited (real decays). 0 = off. docs/ninjatrackerplus.md
+                        # "Smoother sustains" step 5
+drum_borrow = "last"    # drums use an idle melodic track when no drum track is free and the budget
+                        # is full ("first": before opening a new drum track; "never")
+steal_protect = 2        # steals prefer parts (channels) with more notes active than this: spare
+                        # bass lines and solos/duets, take a chord voice (0: quietest release only)
+melodic_one_shots = "any"  # one-shots (Xylophone) may use 1- or 2-oscillator tracks ("melodic": 2 only)
+delay_snap_db = 4.0     # a delayed (EDx) note whose start at the sample's default volume would be
+                        # more than this off moves one tick to the nearest row, velocity in-cell
+                        # (never onto a same-part neighbour: flams, rolls). Remove to keep all delays
+delay_snap_ms = 20      # also move a delayed note onto its nearest row when its onset is within this
+                        # many ms of it and its velocity isn't the default: no EDx, velocity in-cell.
+                        # 0 = off. Default-volume notes sat 15-43 ms from a row (10-90 %, per-song;
+                        # a tick is a third of a row, 18-51 ms). Default since 2026-11-11 (by ear: 20 over 30)
+track_plan = true       # choose each song's 2-/1-oscillator track split for the least polyphony loss
+                        # (plan_tracks) instead of letting the first notes fix it
+halt_released_loops = true  # end each release with a silent looped rest that replaces the loop: NTP
+                        # applies a delayed (EDx) cell's instrument volume at tick 0, which made
+                        # the old loop audible until the note (docs/ninjatrackerplus.md "Ghosts")
+halt_before_delayed = true  # also halt a 2-oscillator track that is still sounding (a release not
+                        # yet at 0, a note cut for this one) on the row before a delayed note; with
+                        # no free row there, put the note on the nearest row. MI160 on the IIGS:
+                        # 336 tick-0 jumps -> 2 (on by default since 2026-11-11, after listening)
+one_shots = true        # decaying sounds that reach the 8-bit floor (`one_shot_floor_lsb` RMS in
+one_shot_floor_lsb = 1.5  # a peak-normalised sample) within the DOC RAM their attack + loop would
+one_shot_max_rate_drop = 0.1  # take become one-shots (1 oscillator, exact tuning), at most 10 %
+                        # below the looped rate. docs/sample-construction.md "One-shots"
+drum_min_rate = 6000    # one-shot rate window (Hz); within it the rate follows each drum's
+drum_max_rate = 26000   # bandwidth, trading length for it (hats, shakers need ~26 kHz)
+drum_floor_lsb = 1.5    # drums end at the 8-bit floor (drum_end: junk near the floor after
+                        # the decay is cut too); 0 = the old -46 dB length
+
+[modes.shared]
+
+# The two builds (justfile `ntp_modes`): build/<game>/ntp/<name>/ and /songs/<NAME> on the disks
+# (INST.PER.SONG, INST.SHARED). Each is its sample-set mode with nothing overridden.
+[modes.inst-per-song]
+base = "per-song"
+[modes.inst-shared]
+base = "shared"
+
+# Trial variants, built side by side for listening: a `base` sample-set mode plus overrides.
+# Add the name to `ntp_modes` in the justfile. E.g. the original loops next to `shared`:
+# [modes.shared-avg]
+# base = "shared"
+# loop_construction = "averaged"
+# or the planner before the hybrid default (note-time weights, zones by gain, drums by bandwidth):
+# [modes.per-song-weighted]
+# base = "per-song"
+# pitch_zones = "weighted"
+# sample_budget = "zones"
+# drum_fill_block = false
+# or the configured keys without the pitch plan:
+# [modes.per-song-fixed]
+# base = "per-song"
+# pitch_plan = false
+
+# Per-song overrides, e.g.:
+# [songs.160]
+# rows_per_unit = 1
+# unit_ticks = 120      # override the detected grid unit (the song's MIDI ticks: 480 per beat)
+# phase_ticks = 12.0

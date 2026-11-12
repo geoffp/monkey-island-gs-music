@@ -632,6 +632,10 @@ def build_melodic(m: dict, cfg: dict, keys: tuple[int, int], munt: Munt, tables,
     """A melodic sample (attack + loop, or a one-shot) and its build-log line."""
     x = cached_render(munt, m["program"], m["key"], hold)
     a = audio.onset(x)
+    if len(x) < a + int((hold + 0.1) * SR):
+        # smf2wav drops trailing silence: a sound that ends before its note-off (the MT-32's
+        # effect presets 118-127, which MI2 plays) comes back shorter than the note
+        x = np.pad(x, (0, a + int((hold + 0.5) * SR) - len(x)))
     f0 = 440 * 2 ** ((m["key"] - 69) / 12)
     sustain_s = cfg.get("sustain_s", 0.4)
     period = audio.refine_period(x, a + int(0.25 * SR), f0)

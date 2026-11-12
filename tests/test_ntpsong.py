@@ -453,17 +453,38 @@ def test_drums_borrow_idle_melodic_tracks_when_the_budget_is_full(tmp_path):
     assert last.dropped == 0 and last.oscillators <= 31
 
 
-def test_read_notes_refuses_tempo_changes(tmp_path):
+def test_a_song_that_changes_tempo_is_arranged_in_beats_and_its_mod_follows_the_tempo(tmp_path):
+    """iMUSE songs change tempo (MI2: 4, Fate of Atlantis: 17). read_notes gives times at the
+    first tempo (beats), so the grid stays on the beat; the MOD's tempo commands follow the
+    map, and the song plays in time: here 16 beats at 120 BPM, then 16 at 150 BPM."""
     import mido
+    tr = mido.MidiTrack([mido.MetaMessage("set_tempo", tempo=500_000, time=0),
+                         mido.Message("program_change", channel=1, program=9, time=0)])
+    tick = 0
+    for i in range(64):                                   # 8ths
+        a = 60 * i
+        if a == 16 * 120:
+            tr.append(mido.MetaMessage("set_tempo", tempo=400_000, time=a - tick))
+            tick = a
+        tr += [mido.Message("note_on", channel=1, note=60 + i % 5, velocity=90, time=a - tick),
+               mido.Message("note_off", channel=1, note=60 + i % 5, time=30)]
+        tick = a + 30
     mf = mido.MidiFile(ticks_per_beat=120)
-    mf.tracks.append(mido.MidiTrack([mido.MetaMessage("set_tempo", tempo=500_000, time=0),
-                                     mido.Message("note_on", channel=1, note=60, velocity=90, time=0),
-                                     mido.MetaMessage("set_tempo", tempo=400_000, time=120),
-                                     mido.Message("note_off", channel=1, note=60, time=0)]))
-    p = tmp_path / "t.mid"
-    mf.save(p)
-    with pytest.raises(ValueError, match="tempo changes"):
-        sg.read_notes(p)
+    mf.tracks.append(tr)
+    mf.save(p := tmp_path / "t.mid")
+    notes, _, _ = sg.read_notes(p)
+    assert notes[32].t == pytest.approx(8.0)              # beat 16, at the first tempo
+    assert [tuple(map(round, m, (6, 6))) for m in sg.read_tempo_map(p)] == [(8.0, 1.25)]
+    cfg = {"rows_per_unit": 1, "speed": 3, "quantize": 0.0, "oscillators": 31}
+    grid, patterns, rep = sg.convert_song(p, [fake_sample()], {9: 0}, {}, cfg, dict(cfg))
+    assert rep.tempo_map == 1 and rep.timing_err_ms < 1.0
+    played = _play(grid, patterns, rows_out=4000)
+    at = {r: t for t, r in played}
+    note_rows = sorted(r for c in grid.cells for r, cell in c.items() if cell[0])
+    real = lambda b: b * 0.5 if b <= 16 else 8.0 + (b - 16) * 0.4      # beat -> seconds
+    lead = at[note_rows[0]]
+    for i, r in enumerate(note_rows):
+        assert at[r] - lead == pytest.approx(real(i / 2), abs=0.004)
 
 
 def test_a_struck_key_sounds_once_as_on_the_mt32(tmp_path):
@@ -662,3 +683,43 @@ def test_a_note_the_grid_puts_past_the_loop_end_plays_on_the_last_row(tmp_path):
     assert rep.loop_late == 1 and rep.loop_cut == 0 and rep.dropped == 0
     last = sg.ROWS + rep.loop_rows - 1
     assert any(c.get(last, sg.CELL_EMPTY)[0] for c in grid.cells)
+
+
+def _intro_song(tmp_path, start, loop_ticks):
+    import mido
+    ev, tick = [mido.Message("program_change", channel=1, program=9, time=0)], 0
+    for i in range(24):
+        a = 60 * i
+        ev += [mido.Message("note_on", channel=1, note=60 + i % 5, velocity=90, time=a - tick),
+               mido.Message("note_off", channel=1, note=60 + i % 5, velocity=0, time=20)]
+        tick = a + 20
+    marks = [mido.MetaMessage("marker", text="loopStart", time=start),
+             mido.MetaMessage("marker", text="loopEnd", time=loop_ticks)]
+    mf = mido.MidiFile(ticks_per_beat=120)
+    mf.tracks += [mido.MidiTrack(marks), mido.MidiTrack(ev)]
+    mf.save(p := tmp_path / "intro.mid")
+    return p
+
+
+def test_a_loop_after_an_intro_jumps_back_to_a_pattern_start(tmp_path):
+    """iMUSE songs loop to a point inside the song. NTP can't jump to a row (B and D share one
+    variable), so the intro gets patterns of its own (its last one ended by D00) and the pass
+    starts on a fresh pattern, which the Bxx jumps back to. The intro plays once."""
+    start, loop_ticks = 240 + 7, 16 * 60 + 17
+    p = _intro_song(tmp_path, start, loop_ticks)
+    tb = sg.RO_TIMEBASE.tick_s
+    assert sg.read_loop(p) == pytest.approx((start * tb, (start + loop_ticks) * tb))
+    cfg = {"rows_per_unit": 2, "speed": 3, "quantize": 0.0, "oscillators": 31}
+    grid, patterns, rep = sg.convert_song(p, [fake_sample()], {9: 0}, {}, cfg, dict(cfg))
+    assert rep.loop_start_row > 1 and abs(rep.loop_err_ms) < 3
+    jumps = [c[r][3] for c in grid.cells for r in c if c[r][2] == sg.FX_JUMP]
+    intro_patterns = -(-(rep.loop_start_row - 1) // sg.ROWS)
+    assert jumps == [1 + intro_patterns] and patterns == 1 + intro_patterns + -(-rep.loop_rows // sg.ROWS)
+    played = _play(grid, patterns, rows_out=4000)
+    assert sum(r == sg.ROWS for _, r in played) == 1                 # the intro plays once
+    starts = [t for t, r in played if r == jumps[0] * sg.ROWS]
+    assert len(starts) >= 3
+    for a, b in zip(starts, starts[1:]):
+        assert b - a == pytest.approx(loop_ticks * tb, abs=0.003)
+    # the lead-in, then the intro: the pass starts at the loop's start, to within half a row
+    assert starts[0] - played[1][0] == pytest.approx(start * tb, abs=0.0625 + 0.001)

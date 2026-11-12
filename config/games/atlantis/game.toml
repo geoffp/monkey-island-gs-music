@@ -1,0 +1,36 @@
+# Indiana Jones and the Fate of Atlantis, DOS CD-ROM (English). The folder name (`atlantis`)
+# is the game id, ScummVM's (ref/scummvm/engines/scumm/detection_tables.h), and names the
+# build output: build/atlantis/. Read by migs.games (and, for the justfile, tools/game.py:
+# keep the top-level values plain strings). Facts about this game's data: docs/games/atlantis.md.
+
+name = "Indiana Jones and the Fate of Atlantis"
+release = "DOS CD"
+engine = "scumm-v5"              # SCUMM v5: iMUSE MIDI in SOUN blocks, MT-32 in their ROL part (docs/imuse-format.md)
+data = "Indiana Jones 2 - Fate of Atlantis (CD DOS)"   # folder under original files/
+prefix = "FOA"                   # song files (FOA001.mod) and disk volumes (FOA.NTP)
+label = "FOA"                    # titles: song "FOA 1", MIDI "FOA sound 1", emulator configs
+
+# The release this config was tuned on (ScummVM scumm-md5.h: atlantis, CD, English, DOS).
+[md5]
+"ATLANTIS.000" = "182344899c2e2998fca0bebcd82aa81a"
+"ATLANTIS.001" = "4c8e73ac88f522b3452b37a607240190"
+
+# Which sounds are music: the ROL sounds up to 169 (170 on are effects: clicks, splashes,
+# shots), with at least 40 notes and 8 s of playing. A decision (2026-11-11).
+[music]
+last_id = 169
+min_notes = 40
+min_seconds = 8.0
+
+# The MT-32 driver's start-up SysEx: Atlantis uses the same iMUSE MT-32 driver generation as
+# MI2 (ScummVM IMuseDriver_MT32::initDevice, "old system", MI2 and Indy4); see
+# config/games/monkey2/game.toml for what each message sets.
+[mt32]
+init = [
+  "41101612100000400004040404040404040404000102030405060708096477",
+  "41101612030110406407004a640600416407004b6408004564060044640b00516405004364080050640700426403004c64070044",
+]
+# GM programs for the custom timbres its songs play (for the GM rendition only). ScummVM's
+# roland_to_gm_map (imuse/instrument.cpp) leaves Indy4's unmapped but for "rumble" (89, from
+# its MI2 entry) and "Big Drum"/"Fire Pit" (as MI2: Taiko); the rest are guesses by name.
+timbre_gm = { "Arabongo" = 116, "applause" = 126, "crash" = 119, "Big Drum" = 116, "Fire Pit" = 116, "Fzooom" = 102, "Fzooom 2" = 102, "Mellow Str" = 49, "boom15" = 127, "cb tpt 2" = 56, "rumble" = 89, "squirel" = 123, "street" = 122 }

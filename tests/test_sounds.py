@@ -108,3 +108,15 @@ def test_the_midisynth_bank_refuses_a_slot_used_by_a_sound_and_a_kit(tmp_path):
     spec = {**SPEC, "drum": [{**SPEC["drum"][0], "slot": 1}]}
     with pytest.raises(ValueError, match=r"slot\(s\) \[1\] hold both"):
         mt32bank.build(spec, tmp_path / "none", tmp_path, tmp_path)
+
+
+def test_custom_timbres_and_a_drivers_rhythm_keys_get_defaults_too():
+    """iMUSE games: a custom timbre (id >= 128) is named by the timbre's own name; rhythm keys
+    the game's driver maps (MI2: 24-34) are sounds, not silent."""
+    song = ([Note(0, 0.5, 40, 100, 1, program=139), note(9, 24)], {})
+    lines = []
+    out = sounds.complete({"melodic": [], "drum": []}, [song], lines.append, timbre_names={139: "ReggaeBass"},
+                          rhythm_keys=mt32.MT32_RHYTHM_KEYS | {24})
+    assert [(m["program"], m["name"]) for m in out["melodic"]] == [(139, "ReggaeBass")]
+    assert [d["key"] for d in out["drum"]] == [24] and "custom timbre 139" in lines[0]
+    assert sounds.complete({"melodic": [], "drum": []}, [([note(9, 24)], {})])["drum"] == []

@@ -20,6 +20,7 @@ from pathlib import Path
 
 from . import mt32
 from .ntpsong import RHYTHM as RHYTHM_CHANNEL     # 0-based (MIDI channel 10)
+from .ntpsong import program_of
 
 DRUM_BYTES = 2048
 BANK_SLOTS = range(16)            # MIDI Synth bank slots (instruments)
@@ -44,7 +45,7 @@ def played(songs: Iterable[tuple[list, dict]]) -> tuple[dict[int, list[int]], di
         for n in notes:
             if n.channel == RHYTHM_CHANNEL:
                 rhythm[n.key] = rhythm.get(n.key, 0) + 1
-            elif (p := chan_prog.get(n.channel, -1)) >= 0:
+            elif (p := program_of(n, chan_prog)) >= 0:
                 programs.setdefault(p, []).append(n.key)
     return programs, rhythm
 
@@ -59,9 +60,13 @@ def _median(keys: list[int]) -> int:
 
 
 def complete(spec: dict, songs: Iterable[tuple[list, dict]],
-             log: Callable[[str], None] = lambda line: None) -> dict:
+             log: Callable[[str], None] = lambda line: None, *, timbre_names: dict[int, str] | None = None,
+             rhythm_keys: frozenset[int] = mt32.MT32_RHYTHM_KEYS) -> dict:
     """`spec` plus a default entry for every program and MT-32 rhythm key the songs play that no
-    entry covers. Returns `spec` itself when nothing is missing."""
+    entry covers. Returns `spec` itself when nothing is missing. `timbre_names`: the game's
+    custom timbres' names (program ids >= 128); `rhythm_keys`: the keys its MT-32 sounds
+    (mt32.rhythm_keys: the power-on map plus what its driver sets up)."""
+    timbre_names = timbre_names or {}
     programs, rhythm = played(songs)
     covered = {p for m in spec["melodic"] for p in m["covers"]}
     covered_keys = {k for d in spec["drum"] for k in d["covers"]}
@@ -70,7 +75,7 @@ def complete(spec: dict, songs: Iterable[tuple[list, dict]],
     for d in spec["drum"]:
         kits[d["slot"]] = kits.get(d["slot"], 0) + 1
     names = {e["name"] for e in [*spec["melodic"], *spec["drum"]]}
-    missing_keys = [k for k in sorted(set(rhythm) - covered_keys) if k in mt32.MT32_RHYTHM_KEYS]
+    missing_keys = [k for k in sorted(set(rhythm) - covered_keys) if k in rhythm_keys]
     for s in KIT_SLOTS:                   # a game with no drum entries: its default drums need a kit
         if missing_keys and not kits and s not in melodic_slots:
             kits[s] = 0
@@ -88,13 +93,15 @@ def complete(spec: dict, songs: Iterable[tuple[list, dict]],
     melodic, drum = [], []
     for p in sorted(set(programs) - covered):
         slot = free.pop(0) if free else next(extra)
-        m = {"slot": slot, "name": unique(mt32.MT32_PRESET_NAMES[p], f"program {p}"), "program": p,
+        name = timbre_names.get(p, f"timbre {p}") if p >= 128 else mt32.MT32_PRESET_NAMES[p]
+        m = {"slot": slot, "name": unique(name, f"program {p}"), "program": p,
              "covers": [p], "key": _median(programs[p]), "default": True}
         melodic.append(m)
-        log(f"sounds: default for MT-32 program {p} ({m['name']}, {_notes(len(programs[p]))}): "
+        what = "custom timbre" if p >= 128 else "MT-32 program"
+        log(f"sounds: default for {what} {p} ({m['name']}, {_notes(len(programs[p]))}): "
             f"sampled at key {m['key']}, slot {slot}")
     for k in sorted(set(rhythm) - covered_keys):
-        if k not in mt32.MT32_RHYTHM_KEYS:
+        if k not in rhythm_keys:
             log(f"sounds: rhythm key {k} ({_notes(rhythm[k])}) is silent on the MT-32: skipped")
             continue
         roomy = [s for s, n in sorted(kits.items(), key=lambda kv: kv[1]) if n < KIT_ZONES]

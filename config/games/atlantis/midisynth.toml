@@ -1,0 +1,89 @@
+# Fate of Atlantis → MIDI Synth instrument mapping (experimental aside; copied from Monkey Island 1's,
+# 2026-11-11: only the stock COMBO profile, until it has a bank of its own) (hand-maintained; see docs/iigs-midisynth.md).
+#
+# In MIDI Synth the MIDI channel IS the instrument slot (0-15) in the bank, and Program
+# Change does nothing, so each source channel is rewritten onto the slot that should
+# play it. Drum kits are key zones, so GM drum keys are remapped onto each kit's zones.
+#
+# Keys here are GM program numbers (0-based) and GM drum keys, written as strings.
+
+# Export profiles: each writes build/<game>/seq/<profile>/ and a /synthLAB/<folder> on the HD image,
+# holding its sequences plus the bank/wave files they reference.
+[profiles.stock]          # Apple's stock synthLAB COMBO bank
+default_bank = "COMBO"
+folder = "Stock"
+
+# (No mt32 profile: Fate of Atlantis has no MT-32-sampled MIDI Synth bank yet.)
+
+[banks.COMBO]
+# Stock synthLAB bank (System 6.0.4 synthLAB disk, vendor/system6/synthLAB.po /SEQ.AND.INSTR/), slots:
+#  0 Drum Kit 1 | 1 Slap Bass | 2 Synth Lead | 3 Marimba | 4 Xylophone | 5 Flute
+#  6 Trombones  | 7 Chiff Flute | 8 Dx Marimba | 9 Drum Kit 2
+file = "COMBO.BNK"
+wave_file = "COMBO.WAV"
+rhythm_slot = 0
+fallback_slot = 2
+
+[banks.COMBO.programs]   # GM program -> slot
+"75" = 7    # Pan Flute        -> Chiff Flute
+"77" = 5    # Shakuhachi       -> Flute
+"76" = 5    # Blown Bottle     -> Flute
+"32" = 1    # Acoustic Bass    -> Slap Bass
+"34" = 1    # Electric Bass    -> Slap Bass
+"35" = 1    # Fretless Bass    -> Slap Bass
+"12" = 3    # Marimba
+"13" = 4    # Xylophone
+"11" = 8    # Vibraphone       -> Dx Marimba
+"57" = 6    # Trombone         -> Trombones
+"60" = 6    # French Horn      -> Trombones
+"63" = 6    # Synth Brass 2    -> Trombones
+"64" = 2    # Soprano Sax      -> Synth Lead
+"116" = 9   # Taiko            -> Drum Kit 2 (low keys = toms)
+# No close match in COMBO (needs the custom bank); nearest stock sounds for now:
+"0" = 8     # Acoustic Grand   -> Dx Marimba
+"17" = 2    # Percussive Organ -> Synth Lead
+"19" = 2    # Church Organ     -> Synth Lead
+"52" = 2    # Choir Aahs       -> Synth Lead
+"88" = 2    # Pad 1 (new age)  -> Synth Lead
+"40" = 2    # Violin           -> Synth Lead
+"49" = 2    # String Ens. 2    -> Synth Lead
+"96" = 8    # FX 1 (rain)      -> Dx Marimba
+
+# Drum Kit 1 zones by ear (docs/midisynth-drum-audition-notes.md, translated in
+# docs/iigs-midisynth.md "Drum kits"): kick 28-47 | snare 48-55 | toms 56-71 low->high |
+# ride 72-77 | open hat 78-83 | closed hat 84 (Hi-hat zone 79-84; hats at its top, like
+# Apple's 85-89 on Kit 3) | 85+ Rim, unusable. No real crash: the top of the cymbal zone stands in.
+# [A] = key Apple's SYNTH.SEQ uses on the same zone layout. "stand-in" = no real equivalent.
+[banks.COMBO.drums]      # GM drum key -> kit key
+"35" = 41   # Acoustic Bass Drum -> kick
+"36" = 43   # Bass Drum 1        -> kick [A]
+"38" = 52   # Acoustic Snare     -> snare [A]
+"40" = 53   # Electric Snare     -> snare
+"37" = 55   # Side Stick         -> snare, top of zone      stand-in
+"41" = 57   # Low Floor Tom      -> toms
+"43" = 59   # High Floor Tom
+"45" = 61   # Low Tom
+"47" = 63   # Low-Mid Tom
+"48" = 66   # Hi-Mid Tom
+"50" = 69   # High Tom
+"42" = 84   # Closed Hi-Hat      -> closed hat (key 84, by ear)
+"44" = 84   # Pedal Hi-Hat       -> closed hat
+"46" = 81   # Open Hi-Hat        -> open hat (78-83 by ear)
+"51" = 73   # Ride Cymbal        -> ride
+"49" = 78   # Crash Cymbal       -> top of cymbal zone       stand-in
+"57" = 78   # Crash Cymbal 2                                stand-in
+"54" = 84   # Tambourine         -> hi-hat zone, top        stand-in
+"56" = 71   # Cowbell            -> top tom                 stand-in
+"60" = 70   # Hi Bongo           -> high toms               stand-in
+"61" = 68   # Low Bongo                                     stand-in
+"62" = 67   # Mute Hi Conga                                 stand-in
+"63" = 66   # Open Hi Conga                                 stand-in
+"64" = 64   # Low Conga                                     stand-in
+"65" = 71   # High Timbale       -> high toms
+"66" = 69   # Low Timbale
+"67" = 71   # High Agogo         -> top toms                stand-in
+"68" = 70   # Low Agogo                                     stand-in
+"69" = 84   # Cabasa             -> hi-hat zone, top        stand-in
+"70" = 84   # Maracas            -> hi-hat zone, top        stand-in
+"73" = 82   # Short Guiro        -> hi-hat zone             stand-in
+"75" = 71   # Claves             -> top tom                 stand-in

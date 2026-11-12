@@ -3,13 +3,13 @@
 Guidance for Claude Code working in this repository.
 
 ## Goal
-Extract the Roland MT-32 soundtrack of *The Secret of Monkey Island* (DOS VGA floppy, SCUMM v4) and port it to the Apple IIGS as **NinjaTrackerPlus** songs: the MT-32 sampled through Munt, played by the Ensoniq DOC. MIDI Synth (System 6 / synthLAB) sequences are an **experimental aside**, kept working but not the target. The tools are being readied for other SCUMM games' MT-32 soundtracks (`docs/games/README.md`); Monkey Island 1 (`monkey`) is the only game so far, and the default.
+Extract the Roland MT-32 soundtrack of *The Secret of Monkey Island* (DOS VGA floppy, SCUMM v4) and port it to the Apple IIGS as **NinjaTrackerPlus** songs: the MT-32 sampled through Munt, played by the Ensoniq DOC. MIDI Synth (System 6 / synthLAB) sequences are an **experimental aside**, kept working but not the target. The tools are being readied for other SCUMM games' MT-32 soundtracks (`docs/games/README.md`); Monkey Island 1 (`monkey`, SCUMM v4) is the default; Monkey Island 2 (`monkey2`, SCUMM v5 with iMUSE, since 2026-11-11) is the second (`docs/games/monkey2.md`).
 
 **Per game** (since 2026-11-11): settings in `config/games/<id>/` (`game.toml` plus the build configs below), output in `build/<id>/`, facts about its data in `docs/games/<id>.md`. The id is ScummVM's. `src/migs/games.py` loads them; every CLI takes `--game` (default `$MIGS_GAME`, else `monkey`); recipes use `just game=<id> <recipe>`, and the justfile exports `MIGS_GAME` so nested `just` runs follow. Paths below written `build/<game>/...` and "the game's `ntp.toml`" mean `build/monkey/...` and `config/games/monkey/ntp.toml` today. Nothing game-specific belongs in code: names (`prefix`, `label`), paths and release facts go in `game.toml`.
 
 Pipeline:
 1. **Docs** (`docs/`): record format knowledge and sources before writing code that depends on it.
-2. **Extract** (`src/migs/extract_music.py` → `build/<game>/extracted/`): MT-32 `RO` tracks → Standard MIDI Files in **two renditions from one parse**:
+2. **Extract** (`src/migs/extract_music.py` → `build/<game>/extracted/`): MT-32 `RO` tracks (v4), or iMUSE `ROL ` parts played through iMUSE's rules (v5: `src/migs/scumm_v5.py`, `src/migs/imuse.py`, `docs/imuse-format.md`; custom timbres listed in `extracted/timbres.toml`) → Standard MIDI Files in **two renditions from one parse**:
    - `build/<game>/extracted/midi/mt32/`: faithful;
    - `build/<game>/extracted/midi/gm/`: converted per `docs/mt32-to-gm.md`;
    - plus per-song patch notes (`build/<game>/extracted/patches/*.toml`).

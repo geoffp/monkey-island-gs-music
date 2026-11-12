@@ -30,13 +30,14 @@ import numpy as np
 
 from . import audio, docram, games, pitchplan, sounds
 from .docsim import NoteError, key_hz
+from .imuse import read_timbres
 from .modfile import mod_file
-from .munt import Munt
-from .munt import SR
+from .mt32 import rhythm_keys
+from .munt import SR, Munt
 from .ntpsamples import (MAX_SAMPLES, ModSample, best_tuning, build_samples, cached_render, cc7_curve, floor_time,
                          drum_steps, is_steady, loop_problems, loop_summary, ntp_block, ntp_doc_pages, period_tables,
                          plan_loops)
-from .ntpsong import RHYTHM, Note, convert_song, ntp_oscillators, plan_tracks, read_notes, sample_for
+from .ntpsong import RHYTHM, Note, convert_song, ntp_oscillators, plan_tracks, program_of, read_notes, sample_for
 
 SAMPLE_SETS = ("per-song", "shared")
 
@@ -137,7 +138,7 @@ def _pitch_plans(spec: dict, usage_notes: list[tuple[int, Note]], cfg: dict, tab
         # A one-shot frees an oscillator per note (polyphony, which this measure doesn't see):
         # a sound that is one at its configured key stays one.
         shots = shot_rate(m["key"]) is not None
-        err = NoteError(m["program"], render, munt.cache.parent / "docsim.json")
+        err = NoteError(doc_key(munt, m["program"]), render, munt.cache.parent / "docsim.json")
         cands = pitchplan.candidates(min(w), max(w), lambda k: rates(k, shots),
                                      lambda k, r: base_note(k, r, whole=not shots))
         now_rates = [shot_rate(m["key"])] if shots else pitchplan.loop_rates(m["key"], loop, min_rate, cfg["max_rate"])
@@ -311,13 +312,13 @@ def sample_set(spec: dict, cfg: dict, songs: list[tuple[list[Note], dict]], last
             if n.channel == RHYTHM:
                 keys.add(n.key)
                 continue
-            m = melodic_entry(spec, chan_prog.get(n.channel, -1), n.key)
+            m = melodic_entry(spec, program_of(n, chan_prog), n.key)
             if m is None:
                 continue
             used[m["slot"]] = m
             lo, hi = ranges.get(m["slot"], (n.key, n.key))
             ranges[m["slot"]] = (min(lo, n.key), max(hi, n.key))
-            usage_notes.append((chan_prog.get(n.channel, -1), n))
+            usage_notes.append((program_of(n, chan_prog), n))
     song_spec = {**spec, "melodic": [m for m in spec["melodic"] if m["slot"] in used],
                  "drum": [d for d in spec["drum"] if keys & set(d["covers"])]}
     build = lambda sp, c=cfg: build_samples(sp, c, ranges, munt, tables, log=lambda *a: None)
@@ -545,6 +546,12 @@ def _build_song_quiet(job) -> tuple[object, str | None]:
     return rep, None
 
 
+def doc_key(munt: Munt, program: int) -> int | str:
+    """The DOC measure cache's name for a sound: its preset number (as it always was), or
+    what the MT-32 plays (munt.sound_tag) for a custom timbre or a game with a driver set-up."""
+    return program if program < 128 and not munt.setup else munt.sound_tag(program)
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     games.add_argument(ap)
@@ -568,12 +575,21 @@ def main(argv: list[str] | None = None) -> int:
     args.spec = args.spec or game.config("mt32sounds.toml")
     conf = tomllib.loads(args.config.read_text())
     mode, cfg = resolve_mode(conf, args.samples or conf["defaults"].get("samples", "per-song"))
-    songs = [_Song(p, *read_notes(p)[:2]) for p in args.inputs]
+    songs = []
+    for p in args.inputs:
+        try:
+            songs.append(_Song(p, *read_notes(p)[:2]))
+        except ValueError as e:                  # e.g. tempo changes: not built yet
+            print(f"skipped {p.name}: {e}")
     # the songs decide which sounds; mt32sounds.toml (and ntp.toml's [[melodic]]) how
+    timbres = read_timbres(game.build_dir / "extracted" / "timbres.toml")
     spec = with_attack_bytes(ntp_spec(sounds.load(args.spec), conf, mode), cfg)
-    spec = sounds.complete(spec, [(s.notes, s.programs) for s in songs], log=print)
+    spec = sounds.complete(spec, [(s.notes, s.programs) for s in songs], log=print,
+                           timbre_names={p: tb.name for p, tb in timbres.items()},
+                           rhythm_keys=rhythm_keys(game.mt32_init))
     tables = period_tables(args.make_tables)
-    munt = Munt(args.smf2wav, args.roms, args.cache)
+    munt = Munt(args.smf2wav, args.roms, args.cache, tuple(game.mt32_init),
+                tuple((p, tb.data) for p, tb in sorted(timbres.items())))
     cc7 = cc7_curve(munt)
     print("MT-32 CC7 curve: " + " ".join(f"{int(v)}:{g:.2f}" for v, g in zip(*cc7)))
 
