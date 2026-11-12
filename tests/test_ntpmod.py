@@ -178,3 +178,9 @@ def test_a_failed_song_is_logged_and_the_others_kept(capsys):
     assert reports == [("001", "rep1"), ("003", "rep3")] and failed == [("002", "KeyError: 'Str Sect 3'")]
     out = capsys.readouterr().out
     assert out.index("log 2") < out.index("FOA002: build failed") < out.index("log 3")
+
+
+def test_only_matches_song_ids_with_or_without_leading_zeros():
+    """ntpmod --only (just testdisk): Atlantis's songs are 009.mid ..., asked for as 9 or 009."""
+    assert nm._same_id("009", "9") and nm._same_id("009", "009") and nm._same_id("154", "154")
+    assert not nm._same_id("154", "15") and not nm._same_id("154a", "154")

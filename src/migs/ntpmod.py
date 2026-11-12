@@ -610,6 +610,12 @@ def doc_key(munt: Munt, program: int) -> int | str:
     return program if program < 128 and not munt.setup else munt.sound_tag(program)
 
 
+def _same_id(sid: str, want: str) -> bool:
+    """A song's id (its MIDI file's stem: 154, Atlantis 009) against one given on the command
+    line, with or without leading zeros."""
+    return sid == want or (sid.isdigit() and want.isdigit() and int(sid) == int(want))
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     games.add_argument(ap)
@@ -623,6 +629,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--cache", type=Path, default=Path("build/cache/mt32samples"))
     ap.add_argument("-j", "--jobs", type=int, default=0,
                     help="songs built at once (worker processes); default half the CPUs")
+    ap.add_argument("--only", nargs="+", metavar="ID",
+                    help="build only these songs (sound ids, e.g. 154 or 9). Every input is still read, so "
+                         "default sounds and a shared set come out as in a full build (just testdisk)")
     ap.add_argument("--samples", help="build variant: per-song, shared, or a [modes.<name>] with a `base` "
                                       "(e.g. shared-avg); default ntp.toml's `samples`")
     args = ap.parse_args(argv)
@@ -662,8 +671,13 @@ def main(argv: list[str] | None = None) -> int:
         print(f"shared samples ({len(shared[0])}, DOC {ntp_doc_pages(shared[0], last_page)}/256 pages, "
               f"reserve {reserve}): {loop_summary(shared[0], cfg)}")
         bank = _shared_levels(songs, shared, cfg, conf, cc7, args.out_dir, game)
+    built = songs
+    if args.only:
+        built = [s for s in songs if any(_same_id(s.sid, i) for i in args.only)]
+        if missing := [i for i in args.only if not any(_same_id(s.sid, i) for s in songs)]:
+            raise SystemExit(f"ntpmod: no song {', '.join(missing)} among the inputs")
     work = [(song, {**cfg, **conf.get("songs", {}).get(song.sid, {}), **bank}, spec, cfg, shared, last_page,
-             tables, munt, cc7, args.out_dir, game) for song in songs]
+             tables, munt, cc7, args.out_dir, game) for song in built]
     # songs are independent once the samples are known (per-song: each makes its own): one worker
     # each, logs printed in song order
     cpus = getattr(os, "process_cpu_count", os.cpu_count)() or 2   # 3.13+: honours CPU affinity

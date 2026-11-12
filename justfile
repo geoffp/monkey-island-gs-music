@@ -266,6 +266,45 @@ emu speed=emu_speed: fetch-gssquared disk
     @[ -x "{{gs2}}" ] || { echo "no GSSquared for {{platform}}"; exit 1; }
     "{{gs2}}" "$PWD/{{out}}/disks/{{lowercase(prefix)}}-ntp.gs2"
 
+# Builds from the current code into build/<game>/test/<variant>/ and build/<game>/disks/<prefix>.TEST.PO.
+# The MODs are the full build's (ntpmod --only reads every song); no README, archives, previews
+# or freshness stamps. Boot it with `just emu-test`.
+# Quick test disk with only the songs named (sound ids: just testdisk "154 152" [variants])
+testdisk songs modes=ntp_modes: extract fetch-ntp fetch-munt fetch-cp2
+    #!/usr/bin/env bash
+    set -euo pipefail
+    {{lowprio}}
+    command -v php >/dev/null || { echo "php not found (see just doctor)"; exit 1; }
+    t={{out}}/test; cp2="$PWD/{{cp2}}"; rm -rf "$t"
+    for m in {{modes}}; do
+      uv run ntpmod --game {{game}} {{out}}/extracted/midi/mt32/*.mid -o "$t/$m" --samples "$m" --only {{songs}} > "$t.$m.log" 2>&1 \
+        || { cat "$t.$m.log"; exit 1; }
+      mv "$t.$m.log" "$t/$m/build.log"; grep "^FAILED" "$t/$m/build.log" || true
+      for f in "$t/$m"/*.mod; do
+        [ -f "$f" ] || continue
+        php "{{vendor}}/ntp/src/ntpconverter.php" "$f" STREAM_FORBIDDEN > "${f%.mod}.log" || { echo "$f:"; cat "${f%.mod}.log"; exit 1; }
+      done
+      echo "$m: $(ls "$t/$m"/*.ntp 2>/dev/null | wc -l | tr -d ' ') songs (log: $t/$m/build.log)"
+    done
+    st="$PWD/$t/stage"; img="$PWD/{{out}}/disks/{{prefix}}.TEST.PO"; mkdir -p "$st" "{{out}}/disks"
+    "$cp2" extract --preserve=naps --overwrite --exdir="$st" "{{vendor}}/ntp/senseiplay800.2mg" \
+      PRODOS sensei.system ntpplayer dgr.radio.dgr >/dev/null
+    for m in {{modes}}; do
+      d="$st/songs/$(echo $m | tr a-z- A-Z.)"; mkdir -p "$d"
+      for f in "$t/$m"/*.ntp; do [ -f "$f" ] && cp "$f" "$d/$(basename "$f" .ntp | tr a-z A-Z).NTP#d50008"; done
+    done
+    {{fit_image}} "$img" {{prefix}}.TEST "$st" '{{p8_tree}} "$cp2" "$img" songs; "$cp2" add "$img" PRODOS* sensei.system* ntpplayer* dgr.radio.dgr*'
+    rm -rf "$st"
+    echo "test disk: {{out}}/disks/{{prefix}}.TEST.PO (just emu-test)"
+
+# Boot the test disk (`just testdisk`) like `just emu`
+emu-test speed=emu_speed: fetch-gssquared
+    @[ -f "{{out}}/disks/{{prefix}}.TEST.PO" ] || { echo "no test disk: just testdisk \"<song ids>\""; exit 1; }
+    uv run gs2-config {{out}}/disks/{{lowercase(prefix)}}-test.gs2 --name "{{label}} NTP test disk (SenseiPlay)" --speed {{speed}} \
+      --card 7=bazfast3 --disk 7:1={{prefix}}.TEST.PO --startup-slot 7 --your-card 6 --your-card 7 --seed {{seed_bram}}
+    @[ -x "{{gs2}}" ] || { echo "no GSSquared for {{platform}}"; exit 1; }
+    "{{gs2}}" "$PWD/{{out}}/disks/{{lowercase(prefix)}}-test.gs2"
+
 # Experimental aside: boot System 6 + synthLAB with the MIDI Synth sequences (`just synthlab-disk`)
 emu-synthlab speed=emu_speed: fetch-gssquared synthlab-disk
     uv run gs2-config {{out}}/disks/{{lowercase(prefix)}}-synthlab.gs2 --name "{{label}} synthLAB (experimental, BazFast HD)" --speed {{speed}} \
