@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITLE__</title>
+<!-- Made by src/migs/docmap.py (`just ntp`): the data and words are filled in per build variant. -->
+<style>
+/* Layout: a header, a legend row, then 16 equal small-multiple treemaps (each = the DOC's whole 64 KB), then the table view. */
+:root {
+  color-scheme: light;
+  --page: #f9f9f7;
+  --surface: #fcfcfb;
+  --ink: #0b0b0b;
+  --ink-2: #52514e;
+  --muted: #898781;
+  --hair: #e1e0d9;
+  --ring: rgba(11,11,11,0.10);
+  --long: #2a78d6;      /* series 1: long loops */
+  --base: #eb6834;      /* series 2: attacks and short loops */
+  --drum: #1baf7a;      /* series 3: one-shots */
+  --free: #ecebe6;
+  --free-ink: #52514e;
+  --reserve: #d9d8d1;
+  --rest: #c3c2b7;
+  --font: system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --page: #0d0d0d; --surface: #1a1a19; --ink: #f0efec; --ink-2: #c3c2b7; --muted: #898781;
+    --hair: #2c2c2a; --ring: rgba(255,255,255,0.10);
+    --long: #3987e5; --base: #d95926; --drum: #199e70;
+    --free: #262624; --free-ink: #c3c2b7; --reserve: #33332f; --rest: #4a4a45;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0d0d0d; --surface: #1a1a19; --ink: #f0efec; --ink-2: #c3c2b7; --muted: #898781;
+  --hair: #2c2c2a; --ring: rgba(255,255,255,0.10);
+  --long: #3987e5; --base: #d95926; --drum: #199e70;
+  --free: #262624; --free-ink: #c3c2b7; --reserve: #33332f; --rest: #4a4a45;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--page); color: var(--ink); font: 15px/1.5 var(--font); }
+.wrap { max-width: 1240px; margin: 0 auto; padding: 32px 20px 48px; display: grid; gap: 24px; }
+header { display: grid; gap: 8px; }
+h1 { margin: 0; font-size: 28px; line-height: 1.2; font-weight: 650; letter-spacing: -0.01em; text-wrap: balance; }
+.dek { margin: 0; max-width: 68ch; color: var(--ink-2); }
+.legend { display: flex; flex-wrap: wrap; gap: 8px 20px; margin: 0; padding: 0; list-style: none; color: var(--ink-2); font-size: 13px; }
+.legend li { display: flex; align-items: center; gap: 8px; }
+.sw { width: 14px; height: 14px; border-radius: 3px; box-shadow: inset 0 0 0 1px var(--ring); flex: none; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
+.panel { background: var(--surface); border-radius: 10px; box-shadow: 0 0 0 1px var(--ring); padding: 12px 12px 10px; display: grid; gap: 8px; min-width: 0; }
+.panel h2 { margin: 0; font-size: 15px; font-weight: 600; display: flex; gap: 8px; align-items: baseline; }
+.panel h2 .num { font-variant-numeric: tabular-nums; color: var(--muted); font-weight: 500; }
+.meta { margin: 0; font-size: 12.5px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.tm { position: relative; width: 100%; aspect-ratio: 4 / 3; }
+.tm svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.tm rect { cursor: default; }
+.tm rect.hot { stroke: var(--ink); stroke-width: 1.5; }
+.lbl { font-size: 10.5px; fill: #fff; pointer-events: none; }
+.lbl.dim { fill: var(--free-ink); }
+.lbl b { font-weight: 600; }
+.tip { position: fixed; z-index: 10; pointer-events: none; background: var(--surface); color: var(--ink); box-shadow: 0 0 0 1px var(--ring), 0 6px 20px rgba(0,0,0,0.14); border-radius: 8px; padding: 8px 10px; font-size: 12.5px; line-height: 1.45; max-width: 260px; display: none; }
+.tip .k { color: var(--ink-2); }
+.tip code { font-family: var(--mono); font-size: 12px; }
+details { background: var(--surface); border-radius: 10px; box-shadow: 0 0 0 1px var(--ring); padding: 12px 16px; }
+summary { cursor: pointer; font-weight: 600; }
+summary:focus-visible { outline: 2px solid var(--long); outline-offset: 3px; border-radius: 4px; }
+.tablewrap { overflow-x: auto; margin-top: 12px; }
+table { border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; min-width: 640px; width: 100%; }
+th, td { text-align: right; padding: 6px 10px; border-bottom: 1px solid var(--hair); white-space: nowrap; }
+th:first-child, td:first-child, th:nth-child(2), td:nth-child(2) { text-align: left; }
+th { color: var(--ink-2); font-weight: 600; }
+.foot { color: var(--muted); font-size: 12.5px; max-width: 80ch; margin: 0; }
+@media (max-width: 420px) { h1 { font-size: 23px; } .wrap { padding: 20px 16px 36px; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header id="top">
+  <h1>__TITLE__</h1>
+  <p class="dek">__DEK__</p>
+</header>
+<ul class="legend" id="legend" aria-label="Legend">
+  <li><span class="sw" style="background:var(--long)"></span>Long loop (8 or 16 KB of real sustain)</li>
+  <li><span class="sw" style="background:var(--base)"></span>Attack and short loop (512 B)</li>
+  <li><span class="sw" style="background:var(--drum)"></span>One-shot (drums and other unlooped sounds)</li>
+  <li><span class="sw" style="background:var(--free)"></span>Free</li>
+  <li><span class="sw" style="background:var(--reserve)"></span>Kept for sound effects</li>
+</ul>
+<div class="grid" id="grid"></div>
+<details id="table-view">
+  <summary>Table view: pages per song</summary>
+  <div class="tablewrap"><table id="totals"><thead><tr><th>Song</th><th>Title</th><th>Long loops</th><th>Attacks and short loops</th><th>One-shots</th><th>Free</th><th>Samples</th></tr></thead><tbody></tbody></table></div>
+</details>
+<details id="block-view">
+  <summary>Table view: every block</summary>
+  <div class="tablewrap"><table id="blocks"><thead><tr><th>Song</th><th>Sample</th><th>Part</th><th>Bytes</th><th>DOC address</th></tr></thead><tbody></tbody></table></div>
+</details>
+<p class="foot">__FOOT__ The rest sample, a silent 256 B pair that ends released notes, is drawn in grey.</p>
+</div>
+<div class="tip" id="tip" role="status"></div>
+<script>
+const SONGS = /*DATA*/null;
+const PAGES = 256, RESERVE = __RESERVE__;
+const CAT = { long: "Long loop", base: "Attack and short loop", drum: "One-shot (drum)", shot: "One-shot", rest: "Rest (silence)" };
+const FILL = { long: "var(--long)", base: "var(--base)", drum: "var(--drum)", shot: "var(--drum)", rest: "var(--rest)", free: "var(--free)", reserve: "var(--reserve)" };
+const kb = b => b >= 1024 ? (b / 1024) + " KB" : b + " B";
+const hex = a => "$" + a.toString(16).toUpperCase().padStart(4, "0");
+const pages = b => b / 256;
+
+// Squarified treemap (Bruls, Huizing & van Wijk): lays out items {v} in rect [x,y,w,h].
+function squarify(items, x, y, w, h) {
+  const out = [], total = items.reduce((s, i) => s + i.v, 0);
+  if (!total) return out;
+  const scale = (w * h) / total;
+  let rest = items.map(i => ({ ...i, area: i.v * scale })), rx = x, ry = y, rw = w, rh = h;
+  while (rest.length) {
+    const side = Math.min(rw, rh);
+    let row = [rest[0]], i = 1;
+    const worst = r => { const s = r.reduce((a, c) => a + c.area, 0), mx = Math.max(...r.map(c => c.area)), mn = Math.min(...r.map(c => c.area));
+      return Math.max(side * side * mx / (s * s), (s * s) / (side * side * mn)); };
+    while (i < rest.length && worst([...row, rest[i]]) <= worst(row)) { row.push(rest[i]); i++; }
+    const s = row.reduce((a, c) => a + c.area, 0), thick = s / side;
+    let off = 0;
+    for (const c of row) {
+      const len = c.area / thick;
+      if (rw >= rh) out.push({ ...c, x: rx, y: ry + off, w: thick, h: len });
+      else out.push({ ...c, x: rx + off, y: ry, w: len, h: thick });
+      off += len;
+    }
+    if (rw >= rh) { rx += thick; rw -= thick; } else { ry += thick; rh -= thick; }
+    rest = rest.slice(i);
+  }
+  return out;
+}
+
+function groupsOf(song) {
+  const by = new Map();
+  for (const b of song.blocks) {
+    const key = b.c === "drum" ? "Drums" : b.s;
+    if (!by.has(key)) by.set(key, []);
+    by.get(key).push(b);
+  }
+  const used = song.blocks.reduce((s, b) => s + b.b, 0);
+  const groups = [...by.entries()].map(([name, blocks]) => ({ name, blocks: blocks.sort((a, b) => b.b - a.b), v: blocks.reduce((s, b) => s + b.b, 0) }))
+    .sort((a, b) => (a.name === "Rest") - (b.name === "Rest") || b.v - a.v);
+  const free = PAGES * 256 - RESERVE * 256 - used;
+  if (free > 0) groups.push({ name: "Free", blocks: [{ n: "Free", c: "free", b: free }], v: free });
+  groups.push({ name: "Kept for sound effects", blocks: [{ n: "Kept for sound effects", c: "reserve", b: RESERVE * 256 }], v: RESERVE * 256 });
+  return { groups, used, free };
+}
+
+const NS = "http://www.w3.org/2000/svg";
+const tip = document.getElementById("tip");
+function showTip(e, b, song) {
+  tip.replaceChildren();
+  const line = (k, v, mono) => { const p = document.createElement("div"); const s = document.createElement("span"); s.className = "k"; s.textContent = k + " ";
+    const t = document.createElement(mono ? "code" : "span"); t.textContent = v; p.append(s, t); tip.append(p); };
+  const h = document.createElement("div"); h.style.fontWeight = "600"; h.textContent = b.n; tip.append(h);
+  if (b.c === "free" || b.c === "reserve") line("Size", pages(b.b) + " pages (" + kb(b.b) + ")");
+  else { line("Part", CAT[b.c] + (b.p === "attack" ? ", attack" : b.p === "loop" ? ", loop" : "")); line("Size", kb(b.b) + ", " + pages(b.b) + (b.b === 256 ? " page" : " pages")); line("DOC address", hex(b.a) + "–" + hex(b.a + b.b - 1), true); }
+  tip.style.display = "block";
+  moveTip(e);
+}
+function moveTip(e) {
+  const r = tip.getBoundingClientRect(), pad = 14;
+  let x = e.clientX + pad, y = e.clientY + pad;
+  if (x + r.width > innerWidth - 8) x = e.clientX - r.width - pad;
+  if (y + r.height > innerHeight - 8) y = e.clientY - r.height - pad;
+  tip.style.left = Math.max(8, x) + "px"; tip.style.top = Math.max(8, y) + "px";
+}
+function hideTip() { tip.style.display = "none"; }
+
+function draw(panel, song) {
+  const box = panel.querySelector(".tm");
+  const W = box.clientWidth, H = box.clientHeight;
+  const svg = document.createElementNS(NS, "svg");
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.setAttribute("role", "img");
+  const { groups } = groupsOf(song);
+  svg.setAttribute("aria-label", `${song.id} ${song.t}: ` + groups.map(g => `${g.name} ${pages(g.v)} pages`).join(", "));
+  const GAP = 2, GGAP = 3;
+  for (const g of squarify(groups, 0, 0, W, H)) {
+    const inner = squarify(g.blocks.map(b => ({ ...b, v: b.b })), g.x + GGAP / 2, g.y + GGAP / 2, Math.max(0, g.w - GGAP), Math.max(0, g.h - GGAP));
+    let labelled = false;
+    for (const c of inner) {
+      const w = Math.max(0, c.w - GAP), h = Math.max(0, c.h - GAP);
+      if (w <= 0 || h <= 0) continue;
+      const r = document.createElementNS(NS, "rect");
+      r.setAttribute("x", c.x + GAP / 2); r.setAttribute("y", c.y + GAP / 2);
+      r.setAttribute("width", w); r.setAttribute("height", h);
+      r.setAttribute("rx", Math.min(3, w / 3, h / 3));
+      r.setAttribute("fill", FILL[c.c]);
+      r.addEventListener("pointerenter", e => { r.classList.add("hot"); showTip(e, c, song); });
+      r.addEventListener("pointermove", moveTip);
+      r.addEventListener("pointerleave", () => { r.classList.remove("hot"); hideTip(); });
+      svg.append(r);
+      // one label per group, in its biggest cell, when it fits
+      if (!labelled && w > 46 && h > 17) {
+        labelled = true;
+        const t = document.createElementNS(NS, "text");
+        t.setAttribute("x", c.x + GAP / 2 + 5); t.setAttribute("y", c.y + GAP / 2 + 13);
+        t.setAttribute("class", "lbl" + (c.c === "free" || c.c === "reserve" || c.c === "rest" ? " dim" : ""));
+        const name = g.name === "Kept for sound effects" ? "SFX" : g.name;
+        const size = " " + pages(g.v);
+        const ts = document.createElementNS(NS, "tspan"); ts.setAttribute("font-weight", "600"); ts.textContent = name;
+        const tz = document.createElementNS(NS, "tspan"); tz.textContent = size;
+        t.append(ts, tz);
+        svg.append(t);
+        // trim to fit the cell
+        let full = name;
+        while (t.getComputedTextLength() > w - 8 && full.length > 2) { full = full.slice(0, -1); ts.textContent = full + "…"; tz.textContent = ""; }
+        if (t.getComputedTextLength() > w - 8) t.remove();
+      }
+    }
+  }
+  box.replaceChildren(svg);
+}
+
+const grid = document.getElementById("grid");
+const totals = document.querySelector("#totals tbody");
+const blockRows = document.querySelector("#blocks tbody");
+const td = (tr, v) => { const c = document.createElement("td"); c.textContent = v; tr.append(c); };
+for (const song of SONGS) {
+  const { used, free } = groupsOf(song);
+  const sum = cat => song.blocks.filter(b => cat.includes(b.c)).reduce((s, b) => s + b.b, 0);
+  const longs = song.blocks.filter(b => b.c === "long");
+  const panel = document.createElement("section");
+  panel.className = "panel"; panel.id = "song-" + song.id;
+  const h = document.createElement("h2");
+  const n = document.createElement("span"); n.className = "num"; n.textContent = song.id;
+  const t = document.createElement("span"); t.textContent = song.t;
+  h.append(n, t);
+  const m = document.createElement("p"); m.className = "meta";
+  const samples = new Set(song.blocks.filter(b => b.c !== "rest").map(b => b.n)).size;
+  m.textContent = `${pages(used)} of ${PAGES - RESERVE} pages used · ${samples} samples · ` +
+    (longs.length ? `${longs.length} long ${longs.length > 1 ? "loops" : "loop"} (${longs.map(b => b.n).join(", ")})` : "no long loops");
+  const tm = document.createElement("div"); tm.className = "tm";
+  panel.append(h, m, tm);
+  grid.append(panel);
+  const tr = document.createElement("tr");
+  td(tr, song.id); td(tr, song.t); td(tr, pages(sum(["long"]))); td(tr, pages(sum(["base"]))); td(tr, pages(sum(["drum", "shot"]))); td(tr, pages(free)); td(tr, samples);
+  totals.append(tr);
+  for (const b of [...song.blocks].sort((a, b) => a.a - b.a)) {
+    const r = document.createElement("tr");
+    td(r, song.id); td(r, b.n); td(r, CAT[b.c] + (b.p === "one-shot" ? "" : ", " + b.p)); td(r, b.b); td(r, hex(b.a));
+    blockRows.append(r);
+  }
+}
+function drawAll() { for (const song of SONGS) draw(document.getElementById("song-" + song.id), song); }
+drawAll();
+let raf = 0, lastW = grid.clientWidth;
+new ResizeObserver(() => { if (grid.clientWidth === lastW) return; lastW = grid.clientWidth; cancelAnimationFrame(raf); raf = requestAnimationFrame(drawAll); }).observe(grid);
+</script>
+</body>
+</html>

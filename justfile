@@ -457,6 +457,7 @@ looplab mode="shared": fetch-ntp fetch-munt
     {{nice}} uv run --group lab looplab --game {{game}} {{out}}/extracted/midi/mt32/*.mid --samples "{{mode}}"
 
 # MOD -> .NTP with Ninjaforce's converter (needs php-cli). Streaming forbidden: everything in DOC RAM.
+# Also maps each variant's DOC RAM, song by song: build/<game>/ntp/<variant>/docram.html (src/migs/docmap.py).
 # Converts only MODs newer than their .ntp (ntpmod rewrites a mode's folder when it rebuilds it).
 ntp modes=ntp_modes: (ntpmod modes)
     #!/usr/bin/env bash
@@ -471,6 +472,8 @@ ntp modes=ntp_modes: (ntpmod modes)
       echo "$m: $(ls {{out}}/ntp/$m/*.ntp | wc -l) .NTP files in {{out}}/ntp/$m/"
       case "$m" in *shared*)      # resident bank: identical instruments + samples in every song
         uv run ntpcheck --shared {{out}}/ntp/$m/*.ntp | tail -1;; esac
+      # each song's DOC RAM as a treemap, from the converter logs (docs/ninjatrackerplus.md, "Converter rules")
+      uv run docmap --game {{game}} {{out}}/ntp/$m
     done
 
 # Tuning experiment bank/sequence (build/<game>/seq/tune/TUNE.*, for the synthLAB disk), see src/migs/midisynth_tunetest.py

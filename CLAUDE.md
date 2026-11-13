@@ -56,7 +56,7 @@ Pipeline:
   - `just test`: unit tests;
   - `just extract`: MT-32 + GM MIDI and patch notes into `build/<game>/extracted/`;
   - `just render`: WAVs through Munt and FluidSynth;
-  - `just ntp`: MODs and `.NTP` songs for every build variant in `build/<game>/ntp/` (`just ntpmod` stops at the MODs and desktop previews);
+  - `just ntp`: MODs and `.NTP` songs for every build variant in `build/<game>/ntp/`, plus each variant's DOC RAM map (`docram.html`: a treemap per song from the converter logs, `src/migs/docmap.py`) (`just ntpmod` stops at the MODs and desktop previews);
   - `just disk`: the NinjaTrackerPlus disk `build/<game>/disks/MI.NTP.PO`;
   - `just emu`: boot it in GSSquared.
   - `just testdisk "154 152" [variants]`: a quick test disk with only those songs (`build/<game>/disks/<prefix>.TEST.PO`, about 12 s for two songs). `ntpmod --only` still reads every song, so its MODs equal the full build's. `just emu-test` boots it. Use it to check a change on the IIGS instead of rebuilding the whole disk.

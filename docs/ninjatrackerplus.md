@@ -58,6 +58,12 @@ samples:     raw bytes, already DOC-ready (no 0 bytes; "stopper bytes" appended 
   - Over 32760 bytes, or used with effect 9, means **streamed** (if streaming is allowed).
 - **DOC RAM:** samples are placed largest first, with stream buffers added only for tracks that play a streamed sample. The player handles oscillator use per track ("one-oscillator tracks" since Jan 2022).
 - Running it: `php ntpconverter.php SONG.MOD` (needs PHP CLI), or Ninjaforce's online converter.
+- **Its log (`<song>.log` beside each `.ntp`)** lists every NTP instrument as `number=…, modnumber=…, type=%…, streamed=…, length=…, volume=…, finetune=…, docptr=$…, docsiz=%…, pos=$…`:
+  - `modnumber` is the MOD sample it came from, numbered from 1.
+  - `type` is `%0000zxyy` [file_format.txt]: z = streamed; x = the size is an ideal power of two; yy = 0 not looped (a one-shot), 1 looped whole, 2 loop header (our attack), 3 the loop.
+  - `docptr` is the block's DOC RAM address.
+  - `docsiz` is the value for the DOC's wavetable-size register. Bits 5–3 hold n for a block of 2ⁿ pages (256 << n bytes, 0–7: 256 B to 32 KB), and bits 2–0 repeat n as the resolution. The converter picks the smallest block that holds the instrument, aligned to its own size [ntpconverter_lib.php `DOC_PAGE_BOUNDARIES`, `DOC_REGISTER_SIZES`, `find_doc_register_size`].
+  - `just ntp` reads these logs to draw each variant's DOC RAM map (`src/migs/docmap.py` → `build/<game>/ntp/<variant>/docram.html`).
 
 ## MI1 timing (measured 2026-11-06)
 MI1's MT-32 data is **performed, not quantized**. Note-ons sit on a quarter-beat grid only 5% of the time, even with the best per-song offset. Inter-onset gaps cluster around 33–36 ticks (at 120 PPQN) with 0–4 ticks of jitter. A tracker conversion therefore uses a fine grid:

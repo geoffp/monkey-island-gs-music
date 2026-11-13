@@ -24,6 +24,7 @@ mt32bank = "migs.mt32bank:main"
 midisynth-voices = "migs.midisynth_voices:main"
 ntpmod = "migs.ntpmod:main"
 ntpcheck = "migs.ntpfile:main"
+docmap = "migs.docmap:main"
 looplab = "migs.looplab:main"
 
 [dependency-groups]
