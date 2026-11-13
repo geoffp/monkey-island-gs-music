@@ -63,14 +63,36 @@ def test_more_distortion_scores_worse():
 
 
 def test_drums_skip_the_modulation_term():
-    """A decay is not movement: a drum scores its segment means only."""
+    """A decay is not movement: a drum scores the mean over the whole hit only."""
     t = np.arange(int(0.6 * FS)) / FS
     rng = np.random.default_rng(1)
     hit = rng.standard_normal(len(t)) * np.exp(-t / 0.08)
     faster = rng.standard_normal(len(t)) * np.exp(-t / 0.06)
     a, b = pattern(hit), pattern(faster)
-    assert d2.distance(a, b, drum=True) == d2.seg_distance(a, b)
+    assert d2.distance(a, b, drum=True) == d2.mean_distance(a, b)
     assert d2.distance(a, b) > d2.distance(a, b, drum=True)
+
+
+def test_a_one_frame_drum_is_still_measured():
+    """A 37 ms bongo is one analysis frame: it must not score as identical to anything."""
+    rng = np.random.default_rng(2)
+    t = np.arange(int(0.04 * FS)) / FS
+    hit = rng.standard_normal(len(t)) * np.exp(-t / 0.01)
+    dull = np.convolve(hit, np.ones(8) / 8, "same")
+    a, b = pattern(hit), pattern(dull)
+    assert a.shape[1] == 1 and d2.distance(a, b, drum=True) > 0.05
+
+
+def test_forward_masking_hides_noise_in_a_hits_tail():
+    """Quiet noise just after a loud hit counts less with forward masking (the ear's)."""
+    rng = np.random.default_rng(4)
+    t = np.arange(int(0.3 * FS)) / FS
+    hit = np.sin(2 * np.pi * 200 * t) * np.exp(-t / 0.03)
+    noisy = hit + 0.003 * rng.standard_normal(len(t))
+    plain = d2.mean_distance(pattern(hit), pattern(noisy))
+    masked = d2.mean_distance(d2.loudness_pattern(hit, FS, d2.DRUM_FORWARD_S),
+                              d2.loudness_pattern(noisy, FS, d2.DRUM_FORWARD_S))
+    assert masked < 0.8 * plain
 
 
 def test_db_halving_the_distance_gains_6_db():

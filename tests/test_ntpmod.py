@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """The NTP build's configuration: NTP-only sounds, key splits, modes (ntpmod)."""
 
+import numpy as np
+
 from migs import ntpmod as nm
 from migs import ntpsong as sg
 
@@ -210,3 +212,55 @@ def test_only_matches_song_ids_with_or_without_leading_zeros():
     """ntpmod --only (just testdisk): Atlantis's songs are 009.mid ..., asked for as 9 or 009."""
     assert nm._same_id("009", "9") and nm._same_id("009", "009") and nm._same_id("154", "154")
     assert not nm._same_id("154", "15") and not nm._same_id("154a", "154")
+
+
+def test_merge_options_list_what_a_spec_merges():
+    spec = {"melodic": [{"name": "Trombone", "program": 91, "covers": [90, 91, 27]},
+                        {"name": "Marimba", "program": 104, "covers": [104]}],
+            "drum": [{"name": "Tom", "key": 45, "covers": [41, 43, 45]}, {"name": "Kick", "key": 36, "covers": [36]}]}
+    assert nm.merge_options(spec) == {"melodic": [("Trombone", 90), ("Trombone", 27)],
+                                      "drum": [("Tom", 41), ("Tom", 43)]}
+
+
+def test_priced_merges_keep_a_merge_only_when_it_costs_little(monkeypatch):
+    """merges = "priced": a program shares the merged sound's sample when its notes score at
+    most merge_max_cost_db worse from it than from their own sample; drums alike."""
+    class S:
+        def __init__(self, name):
+            self.name, self.data, self.rate, self.seconds = name, None, 1.0, 1.0
+
+    monkeypatch.setattr(nm, "build_melodic", lambda m, *a, **k: (S(m["name"]), ""))
+    monkeypatch.setattr(nm, "build_drum", lambda d, *a, **k: (S(d["name"]), {c: (0, 1.0) for c in d["covers"]}, ""))
+    monkeypatch.setattr(nm, "cached_render", lambda *a, **k: np.zeros(100))
+    # score of (sample, program/key): own samples -20; the merged sound's: by how alike they are
+    melodic_cost = {("Trombone", 90): -19.5, ("Trombone", 27): -15.0}
+    drum_cost = {("Tom", 43): -24.8, ("Tom", 41): -10.0}
+
+    class Scorer:
+        cache = type("C", (), {"save": lambda self: None})()
+
+        def sample_db(self, s, p, keys):
+            return melodic_cost.get((s.name, p), -20.0)
+
+    monkeypatch.setattr(nm, "docsim2_scorer", lambda munt, cfg: Scorer())
+    # drum_db is called merged sample then own sample, per rhythm key in option order: the
+    # merged sound's score comes from drum_cost, the own sample's is -25
+    calls = [("Tom", 43), None, ("Tom", 41), None]
+    monkeypatch.setattr(nm.docsim2, "drum_db", lambda ref, sr, data, rate, semis, secs: drum_cost.get(calls.pop(0), -25.0))
+    spec = {"melodic": [{"name": "Trombone", "program": 91, "covers": [91], "key": 60, "slot": 5},
+                        {"name": "Trombone 1", "program": 90, "covers": [90], "key": 55, "slot": 20},
+                        {"name": "Syn Brass4", "program": 27, "covers": [27], "key": 72, "slot": 21}],
+            "drum": [{"name": "Tom", "key": 45, "covers": [45]},
+                     {"name": "High Floor Tom", "key": 43, "covers": [43]},
+                     {"name": "Low Floor Tom", "key": 41, "covers": [41]}]}
+    opts = {"melodic": [("Trombone", 90), ("Trombone", 27)], "drum": [("Tom", 43), ("Tom", 41)]}
+    notes = [sg.Note(0.0, 1.0, 55, 100, 0, program=90), sg.Note(0.0, 1.0, 72, 100, 1, program=27),
+             sg.Note(0.0, 0.1, 43, 100, sg.RHYTHM), sg.Note(0.0, 0.1, 41, 100, sg.RHYTHM)]
+    lines = []
+    out = nm._priced_merges(spec, opts, [(notes, {})], {"merge_max_cost_db": 1.0}, None, None, lines.append)
+    names = [m["name"] for m in out["melodic"]]
+    assert names == ["Trombone", "Syn Brass4"]                 # Trombone 1 merged (+0.5 dB)
+    assert out["melodic"][0]["covers"] == [91, 90]             # Syn Brass4 kept (+5 dB)
+    assert [d["name"] for d in out["drum"]] == ["Tom", "Low Floor Tom"]
+    assert out["drum"][0]["covers"] == [45, 43]
+    assert any("Syn Brass4" in l and "own sample" in l for l in lines)

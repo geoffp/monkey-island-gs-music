@@ -15,7 +15,14 @@ The two loudness patterns are compared phase-free over the whole note:
   mod  how much each band's loudness moves (modulation depth in 0.5-2, 2-4, 4-8, 8-16 Hz
        over the sustain), compared per band and weighted by the band's loudness (after Dau,
        Kollmeier & Kohlrausch 1997): what a raw loop's chorus or rotary wobble is for.
-Melodic sounds score seg + mod; drums (one-shots) seg only, as a decay is not movement.
+Melodic sounds score seg + w x mod (`docsim2_mod_weight`, 1 by default; the trials use 3:
+all five listening verdicts hold for 1-6, and above 4 Syn Brass falls below Fretless: docs/similarity-
+measures.md). Drums (one-shots) score the mean over the whole hit only (a
+decay is not movement, and a 37 ms bongo is one frame), with forward masking: each band's
+excitation decays no faster than a 25 ms time constant after a loud frame, so the 8-bit noise
+and drop-sample images in a hit's quiet tail count as the ear hears them (fitted to ISO 532-1
+time-varying Zwicker loudness on Conga, Kick, Tom and Snare: within 0.05; without it they
+scored 1.5-3x worse; PEAQ's time-domain spreading uses 8-30 ms).
 `db()` gives a score as 20 log10(distance): halving the distance gains 6 dB.
 
 Why: docs/similarity-measures.md (bake-off against listening verdicts and ISO 532-1 Zwicker
@@ -43,7 +50,7 @@ F_LO, F_HI = 40.0, 12000.0
 SEGMENTS = ((0.03, 0.15), (0.15, 0.6), (0.6, 1.5), (1.5, None))
 MOD_BANDS = ((0.5, 2.0), (2.0, 4.0), (4.0, 8.0), (8.0, 16.0))
 MOD_FROM_S = 0.15                # modulation is measured in the sustain, after the attack
-VERSION = 1                      # bump when the measure changes (invalidates the disk cache)
+VERSION = 2                      # bump when the measure changes (invalidates the disk cache)
 
 
 def bark(f):
@@ -78,8 +85,12 @@ def _model(fs: float):
     return keep, starts, used, w.astype(np.float32), spread.astype(np.float32), nb, win.astype(np.float32)
 
 
-def loudness_pattern(y: np.ndarray, fs: float = DOC_RATE) -> np.ndarray:
-    """Specific loudness (bands x frames, frame rate fs / HOP) of `y`, RMS-normalised."""
+DRUM_FORWARD_S = 0.025
+
+
+def loudness_pattern(y: np.ndarray, fs: float = DOC_RATE, forward_s: float = 0.0) -> np.ndarray:
+    """Specific loudness (bands x frames, frame rate fs / HOP) of `y`, RMS-normalised;
+    `forward_s` > 0 adds forward masking with that time constant (drums)."""
     keep, starts, used, w, spread, nb, win = _model(float(fs))
     y = np.asarray(y, dtype=np.float32)
     y = y / (np.sqrt(np.mean(y.astype(np.float64) ** 2)) or 1.0)
@@ -90,7 +101,12 @@ def loudness_pattern(y: np.ndarray, fs: float = DOC_RATE) -> np.ndarray:
     P = (X.real ** 2 + X.imag ** 2)[:, keep] * w
     E = np.zeros((nb, P.shape[0]), dtype=np.float32)
     E[used] = np.add.reduceat(P, starts, axis=1).T
-    return (1 + spread @ E) ** 0.23 - 1                 # threshold after ear weighting: 0 dB SPL
+    E = spread @ E
+    if forward_s > 0:
+        a = np.float32(np.exp(-HOP / fs / forward_s))
+        for t in range(1, E.shape[1]):
+            np.maximum(E[:, t], E[:, t - 1] * a, out=E[:, t])
+    return (1 + E) ** 0.23 - 1                          # threshold after ear weighting: 0 dB SPL
 
 
 def _frames(t: float, fs: float) -> int:
@@ -133,10 +149,20 @@ def mod_distance(a: np.ndarray, b: np.ndarray, fs: float = DOC_RATE) -> float:
     return float(np.sum(w[:, None] * np.abs(dg - da)) / ((np.sum(w) * len(MOD_BANDS)) or 1.0))
 
 
-def distance(ref: np.ndarray, got: np.ndarray, drum: bool = False, fs: float = DOC_RATE) -> float:
-    """seg (+ mod unless a drum) between two loudness patterns (reference first)."""
-    d = seg_distance(ref, got, fs)
-    return d if drum else d + mod_distance(ref, got, fs)
+def mean_distance(a: np.ndarray, b: np.ndarray) -> float:
+    """sum|mean_b - mean_a| / sum mean_a over the whole of both patterns (drums)."""
+    t = min(a.shape[1], b.shape[1])
+    ma, mb = a[:, :t].mean(axis=1), b[:, :t].mean(axis=1)
+    return float(np.sum(np.abs(mb - ma)) / (np.sum(ma) or 1.0))
+
+
+def distance(ref: np.ndarray, got: np.ndarray, drum: bool = False, fs: float = DOC_RATE,
+             mod_weight: float = 1.0) -> float:
+    """Melodic: seg + mod_weight x mod between two loudness patterns (reference first). Drum:
+    the whole hit's mean (make drum patterns with forward_s=DRUM_FORWARD_S)."""
+    if drum:
+        return mean_distance(ref, got)
+    return seg_distance(ref, got, fs) + mod_weight * mod_distance(ref, got, fs)
 
 
 def db(d: float) -> float:
@@ -219,8 +245,10 @@ class Scorer:
     custom timbre or a driver set-up is not the preset of the same number)."""
 
     def __init__(self, render: Callable[[object, int], np.ndarray], sr: int, seconds: float = 3.0,
-                 cache: Path | None = None, name: Callable[[object], object] = lambda p: p):
+                 cache: Path | None = None, name: Callable[[object], object] = lambda p: p,
+                 mod_weight: float = 1.0):
         self.render, self.sr, self.seconds, self.name = render, sr, seconds, name
+        self.mod_weight = mod_weight
         self.cache = Cache(cache)
         self._ref = functools.lru_cache(maxsize=256)(self._ref_pattern)
 
@@ -233,11 +261,11 @@ class Scorer:
         program than the sample's own prices a merge); `semis` defaults to key - s.key0 (a
         drum's offset is passed)."""
         sh = key - s.key0 if semis is None else semis
-        k = f"{sample_tag(s)}:{self.name(tag)}:{key}:{round(sh, 3)}:{int(drum)}:{self.seconds}"
+        k = f"{sample_tag(s)}:{self.name(tag)}:{key}:{round(sh, 3)}:{int(drum)}:{self.seconds}:w{self.mod_weight:g}"
 
         def compute() -> float:
             got = loudness_pattern(play_sample(s, sh, self.seconds))
-            return db(distance(self._ref(tag, key), got, drum))
+            return db(distance(self._ref(tag, key), got, drum, mod_weight=self.mod_weight))
         return self.cache.get(k, compute)
 
     def sample_db(self, s, tag, keys: dict[int, float], drum: bool = False) -> float:
@@ -268,9 +296,11 @@ class NoteError:
     held note, against Munt's render of n. `render(key)` gives a render at `sr` from its
     onset; results are cached on disk under `name` (ntpmod.doc_key)."""
 
-    def __init__(self, name, render: Callable[[int], np.ndarray], sr: int, cache: Path | None = None):
+    def __init__(self, name, render: Callable[[int], np.ndarray], sr: int, cache: Path | None = None,
+                 mod_weight: float = 1.0):
         from . import docsim
         self.name, self.render, self.sr, self._docsim = name, render, sr, docsim
+        self.mod_weight = mod_weight
         self.cache = Cache(cache)
         self._ref = functools.lru_cache(maxsize=None)(lambda n: loudness_pattern(to_doc_rate(self.render(n), self.sr)))
         self._sample = functools.lru_cache(maxsize=64)(lambda k, r: docsim.stored(self.render(k), r))
@@ -281,15 +311,15 @@ class NoteError:
             s = self._sample(k, r)
             seconds = len(self.render(k)) / self.sr
             y = self._docsim.doc_play(s, r, n - k, seconds)
-            return db(distance(self._ref(n), loudness_pattern(y)))
-        return self.cache.get(f"pitch:{self.name}:{k}:{round(rate)}:{n}", compute)
+            return db(distance(self._ref(n), loudness_pattern(y), mod_weight=self.mod_weight))
+        return self.cache.get(f"pitch:{self.name}:{k}:{round(rate)}:{n}:w{self.mod_weight:g}", compute)
 
     def save(self) -> None:
         self.cache.save()
 
 
 def drum_db(ref: np.ndarray, sr: int, sample: np.ndarray, rate: float, semis: float, seconds: float) -> float:
-    """docsim.drum_error_db's interface on this measure (segment means only): the DOC playing
+    """docsim.drum_error_db's interface on this measure (whole-hit mean, forward masking): the DOC playing
     `sample` (values -1..1, rounded to 8 bits here, stored at `rate`) `semis` above its key,
     against `ref` (Munt's render of the played key, from its onset), over `seconds` + 20 ms."""
     from . import docsim
@@ -298,4 +328,5 @@ def drum_db(ref: np.ndarray, sr: int, sample: np.ndarray, rate: float, semis: fl
     got = docsim.doc_play(q, rate, semis, n / DOC_RATE)
     got = np.pad(got, (0, max(0, n - len(got))))
     want = to_doc_rate(ref[:int(n / DOC_RATE * sr) + 1], sr)[:n]
-    return db(distance(loudness_pattern(want), loudness_pattern(got), drum=True))
+    return db(distance(loudness_pattern(want, forward_s=DRUM_FORWARD_S),
+                       loudness_pattern(got, forward_s=DRUM_FORWARD_S), drum=True))

@@ -147,13 +147,32 @@ merges = false
 [modes.ds2-loops]
 base = "per-song"
 loop_budget = "docsim2"
+docsim2_mod_weight = 3.0     # movement 3x: keeps the 5 verdicts and Syn Brass above Fretless
 # ds2-pitch: ds2-loops, plus the pitch plan, zones and drum sizes priced with docsim2 over the
 # whole held note (docsim's first 0.6 s missed MI165's harsh sustain). Its scores are on
 # docsim2's scale (20 log10 of the loudness distance); the gain thresholds are unchanged.
+# Exposure counts each note up to 3 s, the window docsim2 hears, and loops trade pages with
+# zones and drums on that one scale (a loop may take back a drum upgrade worth less per page).
 [modes.ds2-pitch]
 base = "per-song"
 loop_budget = "docsim2"
 pitch_measure = "docsim2"
+exposure_cap_s = 3.0
+docsim2_mod_weight = 3.0     # movement 3x: keeps the 5 verdicts and Syn Brass above Fretless
+drum_value_weight = 0.5      # a drum's dB at half a melodic one's: starved toms went unheard in the mix
+# ds2-merges: ds2-pitch, plus merges priced per song: a program (rhythm key) shares a merged
+# sound's sample only when its notes score at most merge_max_cost_db (docsim2 dB) worse from it
+# than from their own sample. The bake-off put the line between Fretless 2 (0.08 of a train
+# wreck: fine) and Syn Brass4 (0.20: heard as harsh), about 1 dB.
+[modes.ds2-merges]
+base = "per-song"
+loop_budget = "docsim2"
+pitch_measure = "docsim2"
+exposure_cap_s = 3.0
+docsim2_mod_weight = 3.0     # movement 3x: keeps the 5 verdicts and Syn Brass above Fretless
+drum_value_weight = 0.5      # a drum's dB at half a melodic one's: starved toms went unheard in the mix
+merges = "priced"
+merge_max_cost_db = 1.0
 
 # Per-song overrides, e.g.:
 # [songs.160]

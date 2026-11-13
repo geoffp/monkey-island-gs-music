@@ -318,7 +318,7 @@ def test_valued_loop_planner_grows_what_measures_better_per_page():
               2: {512: -20.0, 8192: -19.0, 16384: -18.0},     # longer is worse: stays short
               3: {512: -30.0}}
     usage = {0: 10.0, 1: 10.0, 2: 10.0, 3: 50.0}
-    sizes, lines = smp.plan_loops_valued(samples, usage, 239, 16384, lambda i, z: scores[i][z])
+    sizes, lines, _ = smp.plan_loops_valued(samples, usage, 239, 16384, lambda i, z: scores[i][z])
     assert sizes == {0: 16384, 1: 8192, 2: 512, 3: 512}
     assert any("organ" in l and "512 -> 16384" in l for l in lines)
 
@@ -328,5 +328,27 @@ def test_valued_loop_planner_spends_tight_room_on_the_best_value():
     scores = {0: {512: -20.0, 8192: -22.0, 16384: -22.5}, 1: {512: -20.0, 8192: -26.0, 16384: -26.2}}
     # room for the attacks, the short loops and one 8 KB block: the horn's gain is bigger
     last = (2 * 2048 + 2 * 512 + 8192) // 256 - 1
-    sizes, _ = smp.plan_loops_valued([organ, horn], {0: 10.0, 1: 10.0}, last, 16384, lambda i, z: scores[i][z])
+    sizes, _, _ = smp.plan_loops_valued([organ, horn], {0: 10.0, 1: 10.0}, last, 16384, lambda i, z: scores[i][z])
     assert sizes == {0: 512, 1: 8192}
+
+
+def test_a_loop_takes_back_drum_upgrades_worth_less_per_page():
+    """With the value budget's drum upgrades on the same scale, a loop that doesn't fit takes
+    back the cheapest ones (a drum's last step first) when each is worth less per page."""
+    organ = _steady("organ")
+    kick = smp.ModSample("Kick", np.zeros(8184), kind="drum")             # 8 KB block (upgraded 2 -> 4 -> 8 KB)
+    snare = smp.ModSample("Snare", np.zeros(4088), kind="drum")           # 4 KB block (upgraded 2 -> 4 KB)
+    scores = {0: {512: -20.0, 8192: -26.0, 16384: -26.5}}
+    # room: attack, short loop, the two drums as upgraded, and 2 KB more: the 8 KB loop needs
+    # 30 pages, so the 24 that Kick's two upgrades hold must come back too
+    last = (2048 + 512 + 8192 + 4096 + 2048) // 256 - 1
+    revert = [(0.010, 1, 4096, 8192, "Kick"), (0.030, 1, 2048, 4096, "Kick"), (0.500, 2, 2048, 4096, "Snare")]
+    sizes, lines, over = smp.plan_loops_valued([organ, kick, snare], {0: 30.0}, last, 16384,
+                                               lambda i, z: scores[i][z], total=30.0, revertible=revert)
+    # the 8 KB loop (6 dB / 30 pages, 0.2/page) takes back both Kick steps, never the Snare's
+    assert sizes[0] == 8192 and over == {1: 2048}
+    assert sum(1 for l in lines if "takes back" in l) == 2
+    # a loop worth less per page than every upgrade takes nothing back
+    sizes, _, over = smp.plan_loops_valued([organ, kick, snare], {0: 0.01}, last, 16384,
+                                           lambda i, z: scores[i][z], total=30.0, revertible=revert)
+    assert sizes[0] == 512 and over == {}

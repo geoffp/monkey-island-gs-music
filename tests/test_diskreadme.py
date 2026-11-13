@@ -24,7 +24,11 @@ NO_MERGES = ("               shorter and coarser.\n\n"
              "               chorus) go where a new measure hears them help most.\n"
              "\n"
              "DS2.PITCH      Like DS2.LOOPS, but the same measure also chooses which\n"
-             "               notes each sample is taken from, and how finely.\n")
+             "               notes each sample is taken from, and how finely.\n"
+             "\n"
+             "DS2.MERGES     Like DS2.PITCH, but similar sounds share a sample only\n"
+             "               where the measure hears little difference, song by\n"
+             "               song.\n")
 
 
 def stage(tmp_path, variants=("INST.PER.SONG", "INST.SHARED"), ids=(150, *range(158, 169), 151, 152, 153, 154)):
@@ -47,7 +51,7 @@ def test_monkey_islands_readme_comes_out_as_it_was_written_by_hand(tmp_path):
     assert (facts["songs"], facts["first"], facts["last"], facts["gaps"]) == ("16", "MI150", "MI168", "GAP.13")
     loops = ("Songs that loop in the game loop here too, from the start, for as\n"
              "long as they play; the others play once and stop.\n\n")
-    trial = (old.stdout.replace("built two ways:", "built five ways:")
+    trial = (old.stdout.replace("built two ways:", "built six ways:")
              .replace("               shorter and coarser.\n", NO_MERGES, 1))
     assert dr.render(TEMPLATE.read_text(), facts) == trial.replace("The file names (", loops + "The file names (")
 
@@ -63,7 +67,7 @@ def test_a_short_folder_drops_the_placeholder_sentence(tmp_path):
     facts = dr.song_facts(stage(tmp_path, ids=(1, 2, 3)), "MI")
     text = dr.render(TEMPLATE.read_text(), facts)
     assert "GAP" not in text and "[[" not in text and "{" not in text
-    assert "/SONGS holds the same 3 songs built five ways:" in text
+    assert "/SONGS holds the same 3 songs built six ways:" in text
     assert text.rstrip().endswith("The file names (MI1 to MI3) are the game's sound numbers.")
     assert max(len(l) for l in text.splitlines()) <= dr.WIDTH
 

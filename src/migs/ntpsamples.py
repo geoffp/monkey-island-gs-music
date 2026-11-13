@@ -516,23 +516,31 @@ def plan_loops(samples: list[ModSample], usage: dict[int, float], last_page: int
 
 
 def plan_loops_valued(samples: list[ModSample], usage: dict[int, float], last_page: int, max_loop: int,
-                      score: Callable[[int, int], float], floor: float = 0.0
-                      ) -> tuple[dict[int, int], list[str]]:
+                      score: Callable[[int, int], float], floor: float = 0.0, total: float | None = None,
+                      revertible: list[tuple[float, int, int, int, str]] = ()
+                      ) -> tuple[dict[int, int], list[str], dict[int, int]]:
     """plan_loops priced by measurement (`loop_budget = "docsim2"`): the steady sounds' loops
     grow to the raw sizes that most improve `score(i, size)` (dB, lower = closer to the
-    MT-32), weighted by their share of the held note-seconds (`usage`), per DOC page, best
-    value first, while it is above `floor` and the set still packs. A loop may jump to any
-    larger raw size (Elec Organ: 512 B -> 16384 B; 8192 B can be the worse of the two).
-    Returns (loop size per melodic sample index, log lines)."""
+    MT-32), weighted by their share of `usage` (held time; out of `total` if given, else of
+    the steady sounds' own), per DOC page, best value first, while it is above `floor` and the
+    set still packs. A loop may jump to any larger raw size (Elec Organ: 512 B -> 16384 B;
+    8192 B can be the worse of the two).
+    `revertible`: upgrades bought earlier on the same scale, as (value per page, sample index,
+    block bytes before, after, name), drums from the value budget. A loop that doesn't fit may
+    take them back, cheapest per page first and a drum's later steps before its earlier ones,
+    when each is worth less per page than the loop.
+    Returns (loop size per melodic sample index, log lines, block bytes per reverted sample)."""
     sizes = {i: s.loop_len for i, s in enumerate(samples) if s.kind == "melodic" and s.loop_len}
     grow = {i for i, s in enumerate(samples) if s.kind == "melodic" and s.steady and usage.get(i, 0) > 0}
-    total = sum(usage.get(i, 0.0) for i in grow) or 1.0
+    total = total or sum(usage.get(i, 0.0) for i in grow) or 1.0
     lines: list[str] = []
+    over: dict[int, int] = {}                       # reverted samples: their block bytes now
+    live = sorted(revertible)                       # cheapest first
 
-    def fits(sz: dict[int, int]) -> bool:
+    def fits(sz: dict[int, int], ov: dict[int, int]) -> bool:
         blocks = []
         for i, s in enumerate(samples):
-            b = s.ntp_blocks()
+            b = [ov[i]] if i in ov else s.ntp_blocks()
             if i in sz:
                 b = [sz[i]] if not s.loop_start else [b[0], sz[i]]
             blocks += b
@@ -541,6 +549,21 @@ def plan_loops_valued(samples: list[ModSample], usage: dict[int, float], last_pa
             return True
         except ValueError:
             return False
+
+    def take_back(v_loop: float, trial: dict[int, int]) -> tuple[dict[int, int], list] | None:
+        """Drum upgrades (cheapest per page first, a drum's last step first) worth less per
+        page than `v_loop`, reverted until `trial` fits; None if that isn't enough."""
+        ov, used, pool = dict(over), [], [r for r in live if r[0] < v_loop]
+        while not fits(trial, ov):
+            # a drum's later step goes back before its earlier ones (any still in place blocks)
+            nxt = next((r for r in pool if not any(o[1] == r[1] and o[3] > r[3] for o in live if o not in used)),
+                       None)
+            if nxt is None:
+                return None
+            pool.remove(nxt)
+            used.append(nxt)
+            ov[nxt[1]] = nxt[2]
+        return ov, used
 
     banned: set[tuple[int, int]] = set()
     while True:
@@ -558,9 +581,15 @@ def plan_loops_valued(samples: list[ModSample], usage: dict[int, float], last_pa
             break
         v, i, z, g, pages = max(opts)
         trial = {**sizes, i: z}
-        if not fits(trial):
+        swap = (dict(over), []) if fits(trial, over) else take_back(v, trial)
+        if swap is None:
             banned.add((i, z))
             continue
+        over, used = swap
+        for r in used:
+            live.remove(r)
+            lines.append(f"  loop takes back {r[4]:<14} {r[3] // 256:3d} -> {r[2] // 256:3d} pages "
+                         f"({r[0]:.4f}/page < {v:.4f})")
         lines.append(f"  loop value {samples[i].name:<16} {sizes[i]:5d} -> {z:5d} B: {score(i, sizes[i]):+5.1f} -> "
                      f"{score(i, z):+5.1f} dB, {pages} pages ({v:.4f}/page)")
         sizes = trial
@@ -569,7 +598,7 @@ def plan_loops_valued(samples: list[ModSample], usage: dict[int, float], last_pa
         if cands:
             lines.append(f"  loop sizes {samples[i].name:<16} " + "  ".join(
                 f"{z}:{score(i, z):+.1f}" for z in [samples[i].loop_len, *cands]) + f"  -> {sizes[i]}")
-    return sizes, lines
+    return sizes, lines, over
 
 
 @dataclass

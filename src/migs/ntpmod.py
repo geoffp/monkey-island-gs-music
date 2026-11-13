@@ -36,7 +36,7 @@ from .mt32 import GM_DRUM_NAMES, rhythm_keys
 from .munt import SR, Munt
 from .ntpsamples import (MAX_SAMPLES, ModSample, best_tuning, build_samples, cached_render, cc7_curve, forget_renders, floor_time,
                          drum_steps, is_steady, loop_problems, loop_summary, ntp_block, ntp_doc_pages, period_tables,
-                         build_melodic, plan_loops, plan_loops_valued)
+                         build_drum, build_melodic, plan_loops, plan_loops_valued)
 from .ntpsong import RHYTHM, Note, convert_song, ntp_oscillators, plan_tracks, program_of, read_notes, sample_for
 
 SAMPLE_SETS = ("per-song", "shared")
@@ -73,6 +73,79 @@ def unmerged(spec: dict) -> dict:
                 names.add(name)
                 drum.append({**d, "name": name, "key": k, "covers": [k]})
     return {**spec, "melodic": melodic, "drum": drum}
+
+
+def merge_options(spec: dict) -> dict[str, list[tuple[str, int]]]:
+    """The merges `spec` makes, as (sound name, program or rhythm key it also plays): what
+    `merges = "priced"` decides per song (_priced_merges)."""
+    return {"melodic": [(m["name"], p) for m in spec["melodic"] for p in m["covers"] if p != m["program"]],
+            "drum": [(d["name"], k) for d in spec["drum"] for k in d["covers"] if k != d["key"]]}
+
+
+def _priced_merges(spec: dict, opts: dict, songs: list[tuple[list[Note], dict]], cfg: dict, tables, munt: Munt,
+                   log) -> dict:
+    """`spec` (unmerged) with the merges worth making for these songs (`merges = "priced"`):
+    a program (rhythm key) the song plays shares a merged sound's sample when playing its
+    notes from that sample scores at most `merge_max_cost_db` (docsim2, dB) worse than its own
+    sample does, both built as they would ship. Synth brass on the trombone was heard as harsh,
+    the toms sharing one sample as no loss (docs/similarity-measures.md)."""
+    limit = cfg.get("merge_max_cost_db", 1.0)
+    hold = spec.get("hold_seconds", 2.0)
+    held: dict[int, dict[int, float]] = {}
+    hits: dict[int, float] = {}
+    for notes, chan_prog in songs:
+        for n in notes:
+            if n.channel == RHYTHM:
+                hits[n.key] = hits.get(n.key, 0.0) + 1
+            else:
+                w = held.setdefault(program_of(n, chan_prog), {})
+                w[n.key] = w.get(n.key, 0.0) + (n.off - n.t)
+    scorer = docsim2_scorer(munt, cfg)
+    cfg1 = {**cfg, "one_shots": False}
+    melodic = [dict(m) for m in spec["melodic"]]
+    drum = [dict(d) for d in spec["drum"]]
+    gone: set[int] = set()
+    for name, p in opts.get("melodic", []):
+        if p not in held:
+            continue
+        e = next((m for m in melodic if m["name"] == name), None)
+        own = next((m for m in melodic if m["covers"] == [p] and m is not e), None)
+        if e is None or own is None or "keys" in e or "keys" in own:
+            continue
+        w = held[p]
+        lo, hi = min(w), max(w)
+        s_e = build_melodic(e, cfg1, (min(lo, e["key"]), max(hi, e["key"])), munt, tables, hold)[0]
+        s_o = build_melodic(own, cfg1, (min(lo, own["key"]), max(hi, own["key"])), munt, tables, hold)[0]
+        keys = docsim2.pick_keys(w)
+        a, b = scorer.sample_db(s_e, p, keys), scorer.sample_db(s_o, p, keys)
+        keep = a - b <= limit
+        log(f"  merge {own['name']:<16} -> {name:<14} {a:+5.1f} vs own {b:+5.1f} dB: "
+            f"{a - b:+4.1f} ({'merged' if keep else 'own sample'})")
+        if keep:
+            e["covers"] = [*e["covers"], p]
+            gone.add(id(own))
+    for name, c in opts.get("drum", []):
+        if c not in hits:
+            continue
+        d = next((x for x in drum if x["name"] == name), None)
+        own = next((x for x in drum if x["covers"] == [c] and x is not d), None)
+        if d is None or own is None:
+            continue
+        s_d, covers, _ = build_drum({**d, "covers": [d["key"], c]}, cfg, munt, tables)
+        s_o, _, _ = build_drum(own, cfg, munt, tables)
+        x = cached_render(munt, None, c, 0.5)
+        ref = x[audio.onset(x):]
+        a = docsim2.drum_db(ref, SR, s_d.data, s_d.rate, covers[c][0], s_d.seconds)
+        b = docsim2.drum_db(ref, SR, s_o.data, s_o.rate, 0, s_o.seconds)
+        keep = a - b <= limit
+        log(f"  merge {own['name']:<16} -> {name:<14} {a:+5.1f} vs own {b:+5.1f} dB: "
+            f"{a - b:+4.1f} ({'merged' if keep else 'own sample'})")
+        if keep:
+            d["covers"] = [*d["covers"], c]
+            gone.add(id(own))
+    scorer.cache.save()
+    return {**spec, "melodic": [m for m in melodic if id(m) not in gone],
+            "drum": [d for d in drum if id(d) not in gone]}
 
 
 def melodic_entry(spec: dict, prog: int, key: int) -> dict | None:
@@ -162,7 +235,8 @@ def _pitch_plans(spec: dict, usage_notes: list[tuple[int, Note]], cfg: dict, tab
         # a sound that is one at its configured key stays one.
         shots = shot_rate(m["key"]) is not None
         if cfg.get("pitch_measure", "docsim") == "docsim2":           # the whole note, as the ear hears it
-            err = docsim2.NoteError(doc_key(munt, m["program"]), render, SR, munt.cache.parent / "docsim2.json")
+            err = docsim2.NoteError(doc_key(munt, m["program"]), render, SR, munt.cache.parent / "docsim2.json",
+                                    mod_weight=cfg.get("docsim2_mod_weight", 1.0))
         else:
             err = NoteError(doc_key(munt, m["program"]), render, munt.cache.parent / "docsim.json")
         cands = pitchplan.candidates(min(w), max(w), lambda k: rates(k, shots),
@@ -232,9 +306,12 @@ def _extra_zones(plans: dict, samples: list[ModSample], spec: dict, cfg: dict, l
 
 
 def _budget(plans, samples, song_spec, unplanned, songs, usage_notes, cfg, last_page, tables, munt, log
-            ) -> tuple[dict[str, int], dict[str, int]]:
-    """Exposures and drum steps for _value_budget, which it runs; logs its choices."""
-    cap = lambda d: min(d, 0.6)
+            ) -> tuple[dict[str, int], dict[str, int], dict]:
+    """Exposures and drum steps for _value_budget, which it runs; logs its choices. Returns
+    (zones per sound, drum bytes, what the loop budget needs to trade pages with it: the
+    exposures, their total, and the drum upgrades taken)."""
+    limit = cfg.get("exposure_cap_s", 0.6)       # each note counted up to the window the measure sees
+    cap = lambda d: min(d, limit)
     exposure: dict[str, float] = {}
     for prog, n in usage_notes:
         m = melodic_entry(unplanned, prog, n.key)
@@ -251,15 +328,17 @@ def _budget(plans, samples, song_spec, unplanned, songs, usage_notes, cfg, last_
         steps[d["name"]] = st
         exposure[d["name"]] = sum(hits.get(c, 0.0) for c in d["covers"]) * cap(st[0][2])
     # sounds by their own names (unplanned): a sound too wide for one sample starts zoned already
-    count, drum_bytes, lines = _value_budget(plans, samples, unplanned, cfg, last_page, exposure, steps)
+    taken: list = []
+    count, drum_bytes, lines = _value_budget(plans, samples, unplanned, cfg, last_page, exposure, steps, taken)
     for line in lines:
         log(line)
-    return count, drum_bytes
+    return count, drum_bytes, {"exposure": exposure, "total": sum(exposure.values()) or 1.0, "steps": steps,
+                               "taken": taken, "cap": limit}
 
 
 def _value_budget(plans: dict, samples: list[ModSample], spec: dict, cfg: dict, last_page: int,
-                  exposure: dict[str, float], steps: dict[str, list[tuple[int, float, float]]]
-                  ) -> tuple[dict[str, int], dict[str, int], list[str]]:
+                  exposure: dict[str, float], steps: dict[str, list[tuple[int, float, float]]],
+                  taken: list | None = None) -> tuple[dict[str, int], dict[str, int], list[str]]:
     """sample_budget = "value": extra key zones and bigger drum blocks compete for the same DOC
     pages (and zones for MOD slots), the best value per page first, while it is at least
     `upgrade_min_db_per_page`. Value = dB gained (the sound's mean docsim error) x the sound's
@@ -275,6 +354,7 @@ def _value_budget(plans: dict, samples: list[ModSample], spec: dict, cfg: dict, 
     slots = MAX_SAMPLES - len(samples)
     total = sum(exposure.values()) or 1.0
     floor = cfg.get("upgrade_min_db_per_page", 0.01)
+    drum_w = cfg.get("drum_value_weight", 1.0)      # a drum's dB against a melodic sound's (masked in the mix)
     zone_cost = lambda m: [ntp_block(m.get("ntp_attack_bytes", cfg["attack_bytes"])), ntp_block(cfg["loop_bytes"])]
     lines = []
 
@@ -300,7 +380,7 @@ def _value_budget(plans: dict, samples: list[ModSample], spec: dict, cfg: dict, 
                 if ("drum", name, j) in banned:
                     continue
                 g, pages = st[i][1] - st[j][1], (st[j][0] - st[i][0]) // 256
-                opts.append((g * exposure.get(name, 0.0) / total / pages, "drum", name, j, g, pages))
+                opts.append((drum_w * g * exposure.get(name, 0.0) / total / pages, "drum", name, j, g, pages))
         opts = [o for o in opts if o[0] >= floor]
         if not opts:
             break
@@ -322,34 +402,44 @@ def _value_budget(plans: dict, samples: list[ModSample], spec: dict, cfg: dict, 
             st = steps[name]
             lines.append(f"  budget drum {name:<13} {st[level[name]][0] // 256:3d} -> {st[to][0] // 256:3d} pages: "
                          f"{st[level[name]][1]:+.1f} -> {st[to][1]:+.1f} dB ({v:.3f}/page)")
+            if taken is not None:                       # (drum, from level, to level, value per page)
+                taken.append((name, level[name], to, v))
             drum_blocks, level[name] = trial, to
     return count, drum_blocks, lines
 
 
-def docsim2_scorer(munt: Munt, seconds: float = 3.0) -> docsim2.Scorer:
+def docsim2_scorer(munt: Munt, cfg: dict, seconds: float = 3.0) -> docsim2.Scorer:
     """Scores built samples against Munt's notes held `seconds`, cached in
     build/cache/docsim2.json (keyed by what is played, like docsim.json)."""
     def render(prog, key):
         x = cached_render(munt, prog, key, seconds)
         return x[audio.onset(x):]
-    return docsim2.Scorer(render, SR, seconds, munt.cache.parent / "docsim2.json", name=lambda p: doc_key(munt, p))
+    return docsim2.Scorer(render, SR, seconds, munt.cache.parent / "docsim2.json", name=lambda p: doc_key(munt, p),
+                          mod_weight=cfg.get("docsim2_mod_weight", 1.0))
 
 
 def _valued_loops(samples: list[ModSample], song_spec: dict, ranges: dict, usage: dict[int, float],
                   usage_notes: list[tuple[int, Note]], programs: dict, cfg: dict, last_page: int, tables, munt: Munt,
-                  log) -> dict[int, int]:
+                  log, trade: dict | None = None) -> tuple[dict[int, int], dict[str, int]]:
     """Loop sizes by measured value (ntpsamples.plan_loops_valued): every raw size a steady
     sound allows is built as it would ship and scored with docsim2 against Munt, on up to 5
-    of its keys (weighted by held note-seconds)."""
+    of its keys (weighted by held note-seconds). With `trade` (the value budget's exposures and
+    drum upgrades, on docsim2's scale too: pitch_measure = "docsim2"), a loop is valued like a
+    zone or drum (dB x share of the set's exposure, per page) and may take back drum upgrades
+    worth less per page. Returns (loop sizes, drum bytes after any take-back, by name)."""
     hold = song_spec.get("hold_seconds", 2.0)
     melodic = song_spec["melodic"]                  # build_samples puts melodic samples first, in order
     weights: dict[int, dict[int, float]] = {}
+    exposure: dict[int, float] = {}
+    limit = trade["cap"] if trade else None
     for prog, n in usage_notes:
         si = sample_for(programs, prog, n.key)
         if si is not None:
             w = weights.setdefault(si, {})
             w[n.key] = w.get(n.key, 0.0) + (n.off - n.t)
-    scorer = docsim2_scorer(munt)
+            if trade:
+                exposure[si] = exposure.get(si, 0.0) + min(n.off - n.t, limit)
+    scorer = docsim2_scorer(munt, cfg)
     built: dict[tuple[int, int], ModSample] = {}
 
     def score(i: int, z: int) -> float:
@@ -360,12 +450,20 @@ def _valued_loops(samples: list[ModSample], song_spec: dict, ranges: dict, usage
                 ranges.get(m["slot"], (m["key"], m["key"])), munt, tables, hold)[0]
         return scorer.sample_db(built[(i, z)], m["program"], docsim2.pick_keys(weights.get(i, {m["key"]: 1.0})))
 
-    sizes, lines = plan_loops_valued(samples, usage, last_page, cfg.get("max_loop_bytes", 16384), score,
-                                     cfg.get("loop_min_db_per_page", 0.0))
+    revertible = []
+    if trade:
+        index = {s.name: i for i, s in enumerate(samples) if s.kind == "drum"}
+        for name, frm, to, v in trade["taken"]:
+            if name in index:
+                st = trade["steps"][name]
+                revertible.append((v, index[name], st[frm][0], st[to][0], name))
+    sizes, lines, reverted = plan_loops_valued(
+        samples, exposure if trade else usage, last_page, cfg.get("max_loop_bytes", 16384), score,
+        cfg.get("loop_min_db_per_page", 0.0), total=trade["total"] if trade else None, revertible=revertible)
     scorer.cache.save()
     for line in lines:
         log(line)
-    return sizes
+    return sizes, {samples[i].name: b for i, b in reverted.items()}
 
 
 def drop_least_used(spec: dict, songs: list[tuple[list[Note], dict]], room: int, log=lambda *a: None) -> dict:
@@ -399,6 +497,10 @@ def sample_set(spec: dict, cfg: dict, songs: list[tuple[list[Note], dict]], last
     the DOC RAM they leave free (pages up to `last_page`). One song: a per-song set; all songs:
     the shared set. With `pitch_plan`, each sound's sampled key(s), zones and rate are chosen
     from the notes the songs play (pitchplan; extra zones before loop growth)."""
+    if spec.get("_merge_options"):                 # merges = "priced": decided per song
+        opts = spec["_merge_options"]
+        spec = _priced_merges({k: v for k, v in spec.items() if k != "_merge_options"}, opts, songs, cfg, tables,
+                              munt, log)
     used, ranges, keys = {}, {}, set()
     usage_notes = []
     for notes, chan_prog in songs:
@@ -455,9 +557,10 @@ def sample_set(spec: dict, cfg: dict, songs: list[tuple[list[Note], dict]], last
                 raise
     for line in dropped:
         log(line)
+    budget_info = None
     if cfg.get("sample_budget", "zones") == "value":
-        count, drum_bytes = _budget(plans, samples, song_spec, unplanned, songs, usage_notes, cfg, last_page,
-                                    tables, munt, log)
+        count, drum_bytes, budget_info = _budget(plans, samples, song_spec, unplanned, songs, usage_notes, cfg,
+                                                 last_page, tables, munt, log)
         song_spec = {**planned(count), "drum": [{**d, "ntp_bytes": drum_bytes[d["name"]]} if d["name"] in drum_bytes
                                                 else d for d in song_spec["drum"]]}
         for name, (ps, secs, now, _) in plans.items():
@@ -480,8 +583,12 @@ def sample_set(spec: dict, cfg: dict, songs: list[tuple[list[Note], dict]], last
         if si is not None:
             usage[si] = usage.get(si, 0.0) + (n.off - n.t)
     if cfg.get("loop_budget", "usage") == "docsim2":
-        sizes = _valued_loops(samples, song_spec, ranges, usage, usage_notes, programs, cfg, last_page, tables,
-                              munt, log)
+        trade = budget_info if cfg.get("pitch_measure", "docsim") == "docsim2" else None   # one scale only
+        sizes, reverted = _valued_loops(samples, song_spec, ranges, usage, usage_notes, programs, cfg, last_page,
+                                        tables, munt, log, trade)
+        if reverted:
+            song_spec = {**song_spec, "drum": [{**d, "ntp_bytes": reverted[d["name"]]} if d["name"] in reverted else d
+                                               for d in song_spec["drum"]]}
     else:
         sizes = plan_loops(samples, usage, last_page, cfg.get("max_loop_bytes", 16384))
     if cfg.get("one_shots", True) or any(sizes[i] != samples[i].loop_len for i in sizes):
@@ -724,10 +831,16 @@ def main(argv: list[str] | None = None) -> int:
     # the songs decide which sounds; mt32sounds.toml (and ntp.toml's [[melodic]]) how
     timbres = read_timbres(game.build_dir / "extracted" / "timbres.toml")
     spec = ntp_spec(sounds.load(args.spec), conf, mode, variant)
-    spec = with_attack_bytes(spec if cfg.get("merges", True) else unmerged(spec), cfg)
+    merges = cfg.get("merges", True)
+    if merges not in (True, False, "priced"):
+        raise SystemExit(f"merges must be true, false or \"priced\", not {merges!r}")
+    opts = merge_options(spec) if merges == "priced" else None
+    spec = with_attack_bytes(spec if merges is True else unmerged(spec), cfg)
     spec = sounds.complete(spec, [(s.notes, s.programs) for s in songs], log=print,
                            timbre_names={p: tb.name for p, tb in timbres.items()},
                            rhythm_keys=rhythm_keys(game.mt32_init))
+    if opts:
+        spec = {**spec, "_merge_options": opts}
     tables = period_tables(args.make_tables)
     munt = Munt(args.smf2wav, args.roms, args.cache, tuple(game.mt32_init),
                 tuple((p, tb.data) for p, tb in sorted(timbres.items())))
