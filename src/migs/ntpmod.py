@@ -32,7 +32,7 @@ from . import audio, docram, games, pitchplan, sounds
 from .docsim import NoteError, key_hz
 from .imuse import read_timbres
 from .modfile import mod_file
-from .mt32 import rhythm_keys
+from .mt32 import GM_DRUM_NAMES, rhythm_keys
 from .munt import SR, Munt
 from .ntpsamples import (MAX_SAMPLES, ModSample, best_tuning, build_samples, cached_render, cc7_curve, forget_renders, floor_time,
                          drum_steps, is_steady, loop_problems, loop_summary, ntp_block, ntp_doc_pages, period_tables,
@@ -42,14 +42,37 @@ from .ntpsong import RHYTHM, Note, convert_song, ntp_oscillators, plan_tracks, p
 SAMPLE_SETS = ("per-song", "shared")
 
 
-def ntp_spec(spec: dict, conf: dict, mode: str | None = None) -> dict:
+def ntp_spec(spec: dict, conf: dict, mode: str | None = None, variant: str | None = None) -> dict:
     """The bank spec (mt32sounds.toml) plus ntp.toml's NTP-only `[[melodic]]` sounds. An extra sound takes
     its `covers` away from the shared bank's merges (NTP has DOC RAM the 16-slot MIDI Synth
-    bank doesn't), e.g. Pipe Org 2, which MI1.BNK plays with Elec Org 2's sample."""
-    extra = [m for m in conf.get("melodic", []) if mode is None or mode in m.get("modes", [mode])]
+    bank doesn't), e.g. Pipe Org 2, which MI1.BNK plays with Elec Org 2's sample. A sound's
+    `modes` names sample-set modes or build variants (a trial's own sound)."""
+    extra = [m for m in conf.get("melodic", [])
+             if mode is None or "modes" not in m or {mode, variant} & set(m["modes"])]
     taken = {p for m in extra for p in m["covers"]}
     melodic = [{**m, "covers": [p for p in m["covers"] if p not in taken]} for m in spec["melodic"]]
     return {**spec, "melodic": [m for m in melodic if m["covers"]] + list(extra)}
+
+
+def unmerged(spec: dict) -> dict:
+    """`spec` without its merges (mode option `merges = false`): each sound keeps only its own
+    program or rhythm key. A melodic program it covered is left uncovered, so sounds.complete
+    gives it a default sound (its preset, at its median key); a rhythm key it covered becomes a
+    drum of its own, the same length, named by its GM name. The 16-slot MIDI Synth bank needs
+    the merges; NTP's per-song sets may not (docs/ninjatrackerplus.md)."""
+    melodic = [{**m, "covers": [m["program"]] if m["program"] in m["covers"] else m["covers"][:1]}
+               for m in spec["melodic"]]
+    names = {e["name"] for e in [*spec["melodic"], *spec["drum"]]}
+    drum = []
+    for d in spec["drum"]:
+        drum.append({**d, "covers": [d["key"]]})
+        for k in d["covers"]:
+            if k != d["key"]:
+                name = GM_DRUM_NAMES.get(k, f"Rhythm {k}")
+                name = name if name not in names else f"{name} (key {k})"
+                names.add(name)
+                drum.append({**d, "name": name, "key": k, "covers": [k]})
+    return {**spec, "melodic": melodic, "drum": drum}
 
 
 def melodic_entry(spec: dict, prog: int, key: int) -> dict | None:
@@ -641,7 +664,8 @@ def main(argv: list[str] | None = None) -> int:
     args.config = args.config or game.config("ntp.toml")
     args.spec = args.spec or game.config("mt32sounds.toml")
     conf = tomllib.loads(args.config.read_text())
-    mode, cfg = resolve_mode(conf, args.samples or conf["defaults"].get("samples", "per-song"))
+    variant = args.samples or conf["defaults"].get("samples", "per-song")
+    mode, cfg = resolve_mode(conf, variant)
     songs = []
     for p in args.inputs:
         try:
@@ -650,7 +674,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"skipped {p.name}: {e}")
     # the songs decide which sounds; mt32sounds.toml (and ntp.toml's [[melodic]]) how
     timbres = read_timbres(game.build_dir / "extracted" / "timbres.toml")
-    spec = with_attack_bytes(ntp_spec(sounds.load(args.spec), conf, mode), cfg)
+    spec = ntp_spec(sounds.load(args.spec), conf, mode, variant)
+    spec = with_attack_bytes(spec if cfg.get("merges", True) else unmerged(spec), cfg)
     spec = sounds.complete(spec, [(s.notes, s.programs) for s in songs], log=print,
                            timbre_names={p: tb.name for p, tb in timbres.items()},
                            rhythm_keys=rhythm_keys(game.mt32_init))

@@ -11,7 +11,7 @@ The Roland MT-32 soundtrack of The Secret of Monkey Island, sampled
 from the MT-32 and arranged as NinjaTrackerPlus songs for the IIGS's
 Ensoniq DOC. The disk boots into SenseiPlay; the songs are in /SONGS.
 
-/SONGS holds the same {songs} songs built two ways:
+/SONGS holds the same {songs} songs built three ways:
 
 INST.PER.SONG  Each song carries its own instrument samples, chosen
                for the notes that song plays, with all of the sound
@@ -23,6 +23,11 @@ INST.SHARED    Every song uses one common set of instrument samples,
                only each song's notes. The sound RAM is split among
                the instruments of all the songs, so samples are
                shorter and coarser.
+
+NO.MERGES      A trial: like INST.PER.SONG, but every MT-32 sound
+               gets its own sample, where the other folders play a
+               few similar sounds with one (e.g. the synth brass in
+               the Voodoo Lady's theme with a trombone).
 
 Songs that loop in the game loop here too, from the start, for as
 long as they play; the others play once and stop.

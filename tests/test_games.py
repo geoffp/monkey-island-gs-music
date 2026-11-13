@@ -115,7 +115,7 @@ def test_the_justfile_reader_agrees_with_migs_games(gid):
 
 def test_a_game_lists_its_ntp_variants_or_gets_both():
     """iMUSE games play too many sounds for a shared set: their disks are per-song only."""
-    assert games.load("monkey", ROOT).ntp_variants == ("inst-per-song", "inst-shared")
+    assert games.load("monkey", ROOT).ntp_variants[:2] == ("inst-per-song", "inst-shared")   # plus any trials
     assert games.load("monkey2", ROOT).ntp_variants == ("inst-per-song",)
     assert _tool("monkey", "no_such_key").returncode == 1
     r = _tool("monkey", "no_such_key", "x y")

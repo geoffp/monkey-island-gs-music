@@ -13,6 +13,13 @@ ROOT = Path(__file__).resolve().parents[1]
 TEMPLATE = ROOT / "config/games/monkey/disk/README.TXT"
 
 
+NO_MERGES = ("               shorter and coarser.\n\n"
+             "NO.MERGES      A trial: like INST.PER.SONG, but every MT-32 sound\n"
+             "               gets its own sample, where the other folders play a\n"
+             "               few similar sounds with one (e.g. the synth brass in\n"
+             "               the Voodoo Lady's theme with a trombone).\n")
+
+
 def stage(tmp_path, variants=("INST.PER.SONG", "INST.SHARED"), ids=(150, *range(158, 169), 151, 152, 153, 154)):
     for v in variants:
         (tmp_path / v).mkdir(parents=True)
@@ -23,7 +30,8 @@ def stage(tmp_path, variants=("INST.PER.SONG", "INST.SHARED"), ids=(150, *range(
 
 def test_monkey_islands_readme_comes_out_as_it_was_written_by_hand(tmp_path):
     """The template plus MI's 16 songs give the README that was in config before (commit a41ceb2),
-    plus the paragraph on looping songs added since (2026-11-11)."""
+    plus the paragraph on looping songs added since (2026-11-11) and the no-merges trial's
+    folder (2026-11-12)."""
     old = subprocess.run(["git", "show", "a41ceb2:config/games/monkey/disk/README.TXT"], cwd=ROOT,
                          capture_output=True, text=True)
     if old.returncode:
@@ -32,7 +40,9 @@ def test_monkey_islands_readme_comes_out_as_it_was_written_by_hand(tmp_path):
     assert (facts["songs"], facts["first"], facts["last"], facts["gaps"]) == ("16", "MI150", "MI168", "GAP.13")
     loops = ("Songs that loop in the game loop here too, from the start, for as\n"
              "long as they play; the others play once and stop.\n\n")
-    assert dr.render(TEMPLATE.read_text(), facts) == old.stdout.replace("The file names (", loops + "The file names (")
+    trial = (old.stdout.replace("built two ways:", "built three ways:")
+             .replace("               shorter and coarser.\n", NO_MERGES, 1))
+    assert dr.render(TEMPLATE.read_text(), facts) == trial.replace("The file names (", loops + "The file names (")
 
 
 def test_placeholders_follow_p8_trees_rule():
@@ -46,7 +56,7 @@ def test_a_short_folder_drops_the_placeholder_sentence(tmp_path):
     facts = dr.song_facts(stage(tmp_path, ids=(1, 2, 3)), "MI")
     text = dr.render(TEMPLATE.read_text(), facts)
     assert "GAP" not in text and "[[" not in text and "{" not in text
-    assert "/SONGS holds the same 3 songs built two ways:" in text
+    assert "/SONGS holds the same 3 songs built three ways:" in text
     assert text.rstrip().endswith("The file names (MI1 to MI3) are the game's sound numbers.")
     assert max(len(l) for l in text.splitlines()) <= dr.WIDTH
 

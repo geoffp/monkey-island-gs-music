@@ -39,6 +39,32 @@ def test_key_split_falls_back_to_the_nearest_range_and_modes_filter_sounds():
     assert sg.sample_for({13: [(52, 127, 0), (40, 51, 1)]}, 13, 30) == 1
 
 
+def test_a_trial_variant_can_have_its_own_sound():
+    spec = {"melodic": [{"slot": 5, "name": "Trombone", "program": 91, "covers": [90, 91, 27], "key": 60}], "drum": []}
+    conf = {"melodic": [{"slot": 104, "name": "Syn Brass", "program": 27, "covers": [27], "key": 75,
+                         "modes": ["per-song-trial"]}]}
+    names = lambda out: {m["name"]: m["covers"] for m in out["melodic"]}
+    assert names(nm.ntp_spec(spec, conf, "per-song", "per-song-trial")) == {"Trombone": [90, 91], "Syn Brass": [27]}
+    assert names(nm.ntp_spec(spec, conf, "per-song", "inst-per-song")) == {"Trombone": [90, 91, 27]}
+    assert names(nm.ntp_spec(spec, conf, "per-song")) == {"Trombone": [90, 91, 27]}
+
+
+def test_unmerged_sounds_keep_only_their_own_program_or_key():
+    from migs import sounds
+    spec = {"melodic": [{"slot": 5, "name": "Trombone", "program": 91, "covers": [90, 91, 27], "key": 60}],
+            "drum": [{"slot": 9, "name": "Kick", "key": 36, "covers": [35, 36], "bytes": 2048},
+                     {"slot": 9, "name": "Tom", "key": 45, "covers": [41, 45], "bytes": 1024}]}
+    out = nm.unmerged(spec)
+    assert [(m["name"], m["covers"]) for m in out["melodic"]] == [("Trombone", [91])]
+    assert [(d["key"], d["covers"], d["bytes"]) for d in out["drum"]] == [(36, [36], 2048), (35, [35], 2048),
+                                                                          (45, [45], 1024), (41, [41], 1024)]
+    assert len({d["name"] for d in out["drum"]}) == 4
+    assert spec["melodic"][0]["covers"] == [90, 91, 27]               # the bank spec untouched
+    notes = [sg.Note(t=0.0, off=1.0, key=k, vel=100, channel=0, volume=100, program=p) for p, k in ((90, 50), (27, 75))]
+    done = sounds.complete(out, [(notes, {0: 90})])
+    assert {m["program"]: m["key"] for m in done["melodic"]} == {91: 60, 27: 75, 90: 50}
+
+
 # --- hybrid trial: key weights and the value budget -------------------------------------------
 
 def test_hybrid_key_weights_mix_an_equal_share_with_note_time():

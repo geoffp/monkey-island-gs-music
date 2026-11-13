@@ -132,6 +132,15 @@ base = "shared"
 # base = "per-song"
 # pitch_plan = false
 
+# Trial (2026-11-12): no merges. Every MT-32 program and rhythm key the songs play gets its own
+# sample, instead of the one mt32sounds.toml's `covers` share for the 16-slot MIDI Synth bank
+# (e.g. MI165's Syn Brass4 chords on Trombone 2's sample: 5-7 dB more at 2-4 kHz; its Elec
+# Bass1 on Acou Bass2's: 15-30 dB less at 1-4 kHz). Per-song only: the shared set's 31 MOD
+# slots are full.
+[modes.no-merges]
+base = "per-song"
+merges = false
+
 # Per-song overrides, e.g.:
 # [songs.160]
 # rows_per_unit = 1
@@ -143,7 +152,7 @@ base = "shared"
 # Optional: `keys = [lo, hi]` limits a sound to a key range (key splits: the MT-32 voices some
 # timbres differently by register; keys outside every range use the nearest one);
 # `ntp_attack_bytes` overrides the loop-header length; `modes` limits the sound to some
-# sample-set modes (default: all).
+# sample-set modes or build variants (default: all).
 [[melodic]]
 slot = 101
 name = "Pipe Organ"

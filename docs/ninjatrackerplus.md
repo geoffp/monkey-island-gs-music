@@ -443,6 +443,37 @@ A song whose build raises is logged with its traceback and a closing `FAILED <so
 A MOD holds 31 samples, and one of them is the rest; the sounds must also fit DOC RAM at their smallest (`check_fit`). MI1 needs neither rule. MI2's sound 222 plays 17 melodic sounds and 20 drum keys, and sounds that share no sample (`covers`) need one each. So `sample_set` drops the least-played sounds (`drop_least_used`: fewest notes, the later entry first on a tie) until there are at most 30. If the set still doesn't fit DOC RAM, it drops one more each time (222: 8 drum keys of 1-6 notes, which leaves 30 samples and 237/256 pages). The build log lists each dropped sound (`dropped <name> (<n> notes)`). Their notes are counted in the report's dropped notes and go unplayed. This is a stopgap: merging sounds (`covers` in the game's `mt32sounds.toml`) keeps them, but each merge needs listening. Test: `test_too_many_sounds_drop_the_least_played`.
 - **Shared sets for iMUSE games.** Across all their songs, MI2 plays 71 melodic sounds and 47 drum keys, and Fate of Atlantis 75 and 32. One shared set of 30 would drop most of them, so the shared variant isn't a fit for these games without many merges.
 
+## Sound merges (trial `no-merges`, 2026-11-12)
+**Heard:** MI165's brass is "quite a bit more harsh on the MOD than the wav".
+
+**Cause.** The NTP builds read the game's `mt32sounds.toml`, whose `covers` let several MT-32 programs and rhythm keys share one sample. The 16-slot MIDI Synth bank needs those merges. Each NTP song carries its own samples, so it may not. MI165's Syn Brass4 chords (keys 69-81) played on Trombone 2's sample (`covers = [90, 91, 27]`).
+
+**Measured (Munt renders of each pair at keys the songs play, 0.05-1.5 s; each band's share of the note's energy, the sample that plays it minus the program's own, dB):**
+
+| merge (own <- played by) | songs | difference |
+|---|---|---|
+| Syn Brass4 <- Trombone 2 | 165 | +5-7 at 2-4 kHz, up to +12 above 4 kHz; level within 1 dB |
+| Elec Bass1 <- Acou Bass2 | 165 | -15 to -30 at 1-4 kHz (much duller); level -8 |
+| Fretless 2 <- Acou Bass2 | 162 | -8 to -12 at 0.5-2 kHz; level -3 |
+| Ice Rain <- Vibe 1 | 162 | a different sound |
+| BottleBlow <- Shakuhachi | 160, 162, 163 | the spectrum's shape differs, depending on the key; level +2 |
+| Violin 2 <- Str Sect 3 | 161 | +9 near the fundamental; level +3 |
+| Trombone 1 <- Trombone 2 | 163, 165, 167, 168 | within 1 dB: a sound merge |
+
+In the song, against the MT-32 recording (`build/monkey/extracted/wav/mt32/165.wav`), the MOD's 1-4 kHz bands were +3.1 to +4.6 dB too strong in the four windows where the chords play, and within 1.3 dB without them. So the sampling and the DOC add no brightness of their own; the substituted sound does.
+
+**Option `merges = false`** (`ntpmod.unmerged`; trial mode `no-merges`, base per-song; the shared set's 31 MOD slots are already full). Each sound keeps only its own program or rhythm key. A melodic program it covered gets a default sound (`sounds.complete`: its preset, at its median key, then the pitch plan). A rhythm key it covered becomes a drum of its own, of the same length, named by its GM name.
+
+**MI1 build (vs `inst-per-song`):**
+- Unchanged: MI151, 152, 153, 154, 158.
+- New melodic samples: MI160 BottleBlow; MI161 Violin 2; MI162 Fretless 2, BottleBlow, Ice Rain; MI163 Trombone 1, BottleBlow; MI165 Syn Brass4, Elec Bass1, Trombone 1; MI167, MI168 Trombone 1.
+- New drums in most other songs (separate toms, Low Bongo, Low Conga, Acoustic Bass Drum; MI162 five toms).
+- Raw loops lost to the extra DOC RAM (8192 or 16384 B -> 512 B): MI159 Chorale, MI163 Elec Organ, MI165 Shakuhachi, MI167 French Horn. In MI160 and MI168 the long loop moves to the other Elec Organ sample.
+- Drops 1 (unchanged); steals 315 -> 299 in all (MI160 300 -> 284). `.NTP` 1,434 -> 1,447 KB (MI166 +11 KB, MI160 -6 KB).
+- MI165 against the MT-32: in the brass windows, 2-4 kHz +3.1-3.9 -> +1.4-2.4 dB; 1-2 kHz mixed (+1.1/+4.6/+3.2 -> +0.7/+2.8/+3.8).
+
+**Listening (user, 2026-11-13): not a win.** Instruments' identity comes out (the synth brass, the violin), but the lost raw loops cost more: "I really miss the detailed organ loop in 160". Some merges are fine by ear (the toms: "doesn't matter much"), others are not (Elec Org 2 + Pipe Org 2: "a train wreck"; Violin 2 vs Str Sect 3: "quite different"). So neither all merges nor none: merges should be priced per song against what their pages buy. That needs a measure that hears loops, which `docsim` doesn't (`docs/similarity-measures.md`, `plans/docsim2.md`). The variant stays as a trial for comparison. Tests: `test_unmerged_sounds_keep_only_their_own_program_or_key`, `test_a_trial_variant_can_have_its_own_sound` (a `[[melodic]]` sound's `modes` may name a build variant).
+
 ## Staccato (trials `stacc-per-song` / `rel-per-song`, 2026-11-12; mean release rows the default since)
 **Heard:** MI2's 101 lost its extreme staccato, and its drums sounded quieter than in the Munt render.
 
@@ -487,6 +518,7 @@ What each option buys and costs, as measured. Sizes are totals over all 16 songs
 **Sounds**
 - **`one_shots`** (default on). A decaying sound that fades into 8-bit noise within its attack + loop budget is stored whole: only Xylophone qualifies. *Gains:* exactly in tune (was −1.0 cents), no loop of quantisation noise, 1 oscillator, frees its track when the sample ends (MI162 drops 8 → 0). *Cost:* none measured; shared bank 240 → 238 pages.
 - **Loop-only Elec Organ** (trial `per-song-lo` / `shared-lo`; **rejected and removed 2026-11-09**, user: "I don't think they hold up"). *Gains:* 1 oscillator instead of 2: drops 11 → 1, audible steals 262 → 195, and with the track plan and one-shot routing 184 → 39 (shared). *Costs:* the attack is lost. Over the first 100 ms the tone is about 2 dB further from Munt, and the first 0.2–0.3 s is quieter: the 5.4 dB onset peak and the gain-1 handover are gone. **Listening: clearly audible and significantly quieter, much more so in shared.** *Size:* patterns +29…+30 KB (more 1-oscillator tracks), samples −16…−20 KB (no attack headers), `.NTP` +10…+13 KB; DOC −4 pages (shared 237 → 233). The converter rule it relied on (a loop starting at 0 takes 1 oscillator) stays modelled in `ntp_blocks` and track kinds.
+- **`merges = false`** (trial `no-merges`, per-song, 2026-11-12). Every MT-32 program and rhythm key gets its own sample instead of sharing one through `mt32sounds.toml`'s `covers` ("Sound merges"). *Gains:* the songs' own timbres (MI165's synth brass: 2-4 kHz excess vs the MT-32 +3.1-3.9 -> +1.4-2.4 dB); steals 315 -> 299. *Costs:* the extra samples take DOC RAM from raw loops (MI159 Chorale, MI163 Elec Organ, MI165 Shakuhachi, MI167 French Horn lose theirs); `.NTP` +13 KB. Not possible in shared (31 slots full). *Listening:* not a win; the lost loops (MI160's organ) cost more than the timbres gained ("Sound merges").
 - **Song-sized one-shots** (rejected 2026-11-08): +100 KB of samples (+9 %) for no polyphony gain and little audible difference; see `docs/sample-construction.md`.
 - **`drum_floor_lsb = 1.5`** (default since 2026-11-08; 0 = the old −46 dB length). Drums end at the 8-bit floor, with junk near the floor after the decay cut too (above). *Gains:* the kick, snare, bongo and mute conga drop to smaller DOC blocks: shared bank 237 → 220 pages (shared-lo 233 → 216); `.NTP` shared 1480 → 1376 KB (−7 %), per-song 1142 → 1101 KB. Per-song free DOC RAM goes to loop growth: MI167, the one song at its page limit, gets its Strings 16384 B raw loop back (was halved to 8192). The shared bank's freed pages are unused so far. A shorter drum also frees its track sooner. *Polyphony:* unchanged (drops and steals identical in all four variants). *Cost:* the last few dB of each tail (below 8-bit resolution); not yet listened to.
 - **`tremolo`** (trial `shared-trem`, 2026-11-09; **rejected and removed**: the organ pumped, its wobble being tonal, and no measurement predicts which sounds are safe). Replayed the MT-32's chorus/beating level modulation in the per-row `Cxx` of sounds whose 512 B averaged loop is flat ("Tremolo trial" below). *Gains:* MI159's chords pulse as in Munt instead of holding still. *Size:* `.NTP` unchanged (fixed cells); deflated patterns 92 → 93 KB; DOC unchanged. *Polyphony:* audible steals 181 → 185 (the quietest-release choice moves). Not yet listened to.
