@@ -141,6 +141,13 @@ base = "shared"
 base = "per-song"
 merges = false
 
+# Trials (2026-11-13): docsim 2.0 (src/migs/docsim2.py; plans/docsim2.md), cumulative.
+# ds2-loops: raw loops grow by measured value per DOC page (every raw size a steady sound
+# allows is built as it would ship and scored against Munt, notes held 3 s), not by usage.
+[modes.ds2-loops]
+base = "per-song"
+loop_budget = "docsim2"
+
 # Per-song overrides, e.g.:
 # [songs.160]
 # rows_per_unit = 1

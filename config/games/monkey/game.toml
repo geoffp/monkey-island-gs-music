@@ -9,7 +9,7 @@ engine = "scumm-v4"              # SCUMM v4 container, MT-32 music in RO blocks 
 data = "The Secret of Monkey Island (Floppy DOS VGA)"   # folder under original files/
 prefix = "MI"                    # song files (MI150.mod, MI150.SEQ) and disk volumes (MI.NTP)
 label = "MI1"                    # titles: song "MI1 150", MIDI "MI1 sound 150", emulator configs
-ntp_variants = "inst-per-song inst-shared no-merges"   # trial: no merges (ntp.toml)
+ntp_variants = "inst-per-song inst-shared no-merges ds2-loops"   # trials (ntp.toml)
 
 # The release this config was tuned on (ScummVM scumm-md5.h: monkey, VGA, English, DOS).
 # `extract` warns when the data differs.

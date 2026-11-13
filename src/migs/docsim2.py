@@ -213,13 +213,14 @@ class Cache:
 
 
 class Scorer:
-    """Scores built samples against Munt. `render(tag, key)` returns the reference (a Munt
-    render at `sr`, from its onset) of the sound named `tag` (a program, or a sound_tag) at
-    `key`; references are held `seconds` (long enough to hear a 16 KB loop repeat)."""
+    """Scores built samples against Munt. `render(program, key)` returns the reference (a
+    Munt render at `sr`, from its onset); references are held `seconds` (long enough to hear a
+    16 KB loop repeat). `name(program)` names the sound in the cache (ntpmod.doc_key: a
+    custom timbre or a driver set-up is not the preset of the same number)."""
 
     def __init__(self, render: Callable[[object, int], np.ndarray], sr: int, seconds: float = 3.0,
-                 cache: Path | None = None):
-        self.render, self.sr, self.seconds = render, sr, seconds
+                 cache: Path | None = None, name: Callable[[object], object] = lambda p: p):
+        self.render, self.sr, self.seconds, self.name = render, sr, seconds, name
         self.cache = Cache(cache)
         self._ref = functools.lru_cache(maxsize=256)(self._ref_pattern)
 
@@ -228,10 +229,11 @@ class Scorer:
         return loudness_pattern(to_doc_rate(x, self.sr))
 
     def note_db(self, s, tag, key: int, drum: bool = False, semis: float | None = None) -> float:
-        """Score (dB) of sample `s` playing `key` against reference `tag` at `key`; `semis`
-        defaults to key - s.key0 (a drum's offset is passed)."""
+        """Score (dB) of sample `s` playing `key` against program `tag`'s note `key` (another
+        program than the sample's own prices a merge); `semis` defaults to key - s.key0 (a
+        drum's offset is passed)."""
         sh = key - s.key0 if semis is None else semis
-        k = f"{sample_tag(s)}:{tag}:{key}:{round(sh, 3)}:{int(drum)}:{self.seconds}"
+        k = f"{sample_tag(s)}:{self.name(tag)}:{key}:{round(sh, 3)}:{int(drum)}:{self.seconds}"
 
         def compute() -> float:
             got = loudness_pattern(play_sample(s, sh, self.seconds))

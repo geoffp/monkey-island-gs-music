@@ -28,7 +28,7 @@ from pathlib import Path
 
 import numpy as np
 
-from . import audio, docram, games, pitchplan, sounds
+from . import audio, docram, docsim2, games, pitchplan, sounds
 from .docsim import NoteError, key_hz
 from .imuse import read_timbres
 from .modfile import mod_file
@@ -36,7 +36,7 @@ from .mt32 import GM_DRUM_NAMES, rhythm_keys
 from .munt import SR, Munt
 from .ntpsamples import (MAX_SAMPLES, ModSample, best_tuning, build_samples, cached_render, cc7_curve, forget_renders, floor_time,
                          drum_steps, is_steady, loop_problems, loop_summary, ntp_block, ntp_doc_pages, period_tables,
-                         plan_loops)
+                         build_melodic, plan_loops, plan_loops_valued)
 from .ntpsong import RHYTHM, Note, convert_song, ntp_oscillators, plan_tracks, program_of, read_notes, sample_for
 
 SAMPLE_SETS = ("per-song", "shared")
@@ -323,6 +323,48 @@ def _value_budget(plans: dict, samples: list[ModSample], spec: dict, cfg: dict, 
     return count, drum_blocks, lines
 
 
+def docsim2_scorer(munt: Munt, seconds: float = 3.0) -> docsim2.Scorer:
+    """Scores built samples against Munt's notes held `seconds`, cached in
+    build/cache/docsim2.json (keyed by what is played, like docsim.json)."""
+    def render(prog, key):
+        x = cached_render(munt, prog, key, seconds)
+        return x[audio.onset(x):]
+    return docsim2.Scorer(render, SR, seconds, munt.cache.parent / "docsim2.json", name=lambda p: doc_key(munt, p))
+
+
+def _valued_loops(samples: list[ModSample], song_spec: dict, ranges: dict, usage: dict[int, float],
+                  usage_notes: list[tuple[int, Note]], programs: dict, cfg: dict, last_page: int, tables, munt: Munt,
+                  log) -> dict[int, int]:
+    """Loop sizes by measured value (ntpsamples.plan_loops_valued): every raw size a steady
+    sound allows is built as it would ship and scored with docsim2 against Munt, on up to 5
+    of its keys (weighted by held note-seconds)."""
+    hold = song_spec.get("hold_seconds", 2.0)
+    melodic = song_spec["melodic"]                  # build_samples puts melodic samples first, in order
+    weights: dict[int, dict[int, float]] = {}
+    for prog, n in usage_notes:
+        si = sample_for(programs, prog, n.key)
+        if si is not None:
+            w = weights.setdefault(si, {})
+            w[n.key] = w.get(n.key, 0.0) + (n.off - n.t)
+    scorer = docsim2_scorer(munt)
+    built: dict[tuple[int, int], ModSample] = {}
+
+    def score(i: int, z: int) -> float:
+        m = melodic[i]
+        if (i, z) not in built:
+            built[(i, z)] = samples[i] if z == samples[i].loop_len else build_melodic(
+                {**m, "ntp_loop_bytes": z}, {**cfg, "one_shots": False},
+                ranges.get(m["slot"], (m["key"], m["key"])), munt, tables, hold)[0]
+        return scorer.sample_db(built[(i, z)], m["program"], docsim2.pick_keys(weights.get(i, {m["key"]: 1.0})))
+
+    sizes, lines = plan_loops_valued(samples, usage, last_page, cfg.get("max_loop_bytes", 16384), score,
+                                     cfg.get("loop_min_db_per_page", 0.0))
+    scorer.cache.save()
+    for line in lines:
+        log(line)
+    return sizes
+
+
 def drop_least_used(spec: dict, songs: list[tuple[list[Note], dict]], room: int, log=lambda *a: None) -> dict:
     """`spec` with its least-played sounds (fewest notes; ties: the later entry) left out until
     at most `room` remain: a MOD holds 31 samples, one of them the rest. Their notes go
@@ -434,7 +476,11 @@ def sample_set(spec: dict, cfg: dict, songs: list[tuple[list[Note], dict]], last
         si = sample_for(programs, prog, n.key)
         if si is not None:
             usage[si] = usage.get(si, 0.0) + (n.off - n.t)
-    sizes = plan_loops(samples, usage, last_page, cfg.get("max_loop_bytes", 16384))
+    if cfg.get("loop_budget", "usage") == "docsim2":
+        sizes = _valued_loops(samples, song_spec, ranges, usage, usage_notes, programs, cfg, last_page, tables,
+                              munt, log)
+    else:
+        sizes = plan_loops(samples, usage, last_page, cfg.get("max_loop_bytes", 16384))
     if cfg.get("one_shots", True) or any(sizes[i] != samples[i].loop_len for i in sizes):
         by_name = {samples[i].name: sz for i, sz in sizes.items()}
         song_spec = {**song_spec, "melodic": [{**m, "ntp_loop_bytes": by_name.get(m["name"], cfg["loop_bytes"])}

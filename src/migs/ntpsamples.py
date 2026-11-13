@@ -515,6 +515,63 @@ def plan_loops(samples: list[ModSample], usage: dict[int, float], last_page: int
     return sizes
 
 
+def plan_loops_valued(samples: list[ModSample], usage: dict[int, float], last_page: int, max_loop: int,
+                      score: Callable[[int, int], float], floor: float = 0.0
+                      ) -> tuple[dict[int, int], list[str]]:
+    """plan_loops priced by measurement (`loop_budget = "docsim2"`): the steady sounds' loops
+    grow to the raw sizes that most improve `score(i, size)` (dB, lower = closer to the
+    MT-32), weighted by their share of the held note-seconds (`usage`), per DOC page, best
+    value first, while it is above `floor` and the set still packs. A loop may jump to any
+    larger raw size (Elec Organ: 512 B -> 16384 B; 8192 B can be the worse of the two).
+    Returns (loop size per melodic sample index, log lines)."""
+    sizes = {i: s.loop_len for i, s in enumerate(samples) if s.kind == "melodic" and s.loop_len}
+    grow = {i for i, s in enumerate(samples) if s.kind == "melodic" and s.steady and usage.get(i, 0) > 0}
+    total = sum(usage.get(i, 0.0) for i in grow) or 1.0
+    lines: list[str] = []
+
+    def fits(sz: dict[int, int]) -> bool:
+        blocks = []
+        for i, s in enumerate(samples):
+            b = s.ntp_blocks()
+            if i in sz:
+                b = [sz[i]] if not s.loop_start else [b[0], sz[i]]
+            blocks += b
+        try:
+            docram.allocate([docram.Wave(f"b{j}", bytes(b)) for j, b in enumerate(blocks)], 0, last_page)
+            return True
+        except ValueError:
+            return False
+
+    banned: set[tuple[int, int]] = set()
+    while True:
+        opts = []
+        for i in grow:
+            cur = sizes[i]
+            for z in samples[i].raw_ok:
+                if z <= cur or z > min(max_loop, samples[i].max_loop) or (i, z) in banned:
+                    continue
+                g = score(i, cur) - score(i, z)
+                pages = (ntp_block(z) - ntp_block(cur)) // 256
+                opts.append((g * usage[i] / total / max(pages, 1), i, z, g, pages))
+        opts = [o for o in opts if o[0] > floor]
+        if not opts:
+            break
+        v, i, z, g, pages = max(opts)
+        trial = {**sizes, i: z}
+        if not fits(trial):
+            banned.add((i, z))
+            continue
+        lines.append(f"  loop value {samples[i].name:<16} {sizes[i]:5d} -> {z:5d} B: {score(i, sizes[i]):+5.1f} -> "
+                     f"{score(i, z):+5.1f} dB, {pages} pages ({v:.4f}/page)")
+        sizes = trial
+    for i in sorted(grow):
+        cands = [z for z in samples[i].raw_ok if z <= min(max_loop, samples[i].max_loop)]
+        if cands:
+            lines.append(f"  loop sizes {samples[i].name:<16} " + "  ".join(
+                f"{z}:{score(i, z):+.1f}" for z in [samples[i].loop_len, *cands]) + f"  -> {sizes[i]}")
+    return sizes, lines
+
+
 @dataclass
 class _Source:
     """A melodic sound's render and what the build measures on it."""
