@@ -13,6 +13,26 @@ This project ports the Roland MT-32 soundtrack of *The Secret of Monkey Island* 
 3. **NinjaTrackerPlus.** Convert the MT-32 MIDI to ProTracker MODs that fit NinjaTrackerPlus's limits (up to 31 oscillators, samples packed into the 64 KB DOC RAM), preview them on the desktop, then convert them to `.NTP` with Ninjaforce's converter (`docs/ninjatrackerplus.md`).
 4. **Experimental aside: MIDI Synth.** Convert the MIDI files to MIDI Synth sequences, keeping the channel→instrument mapping as far as the IIGS allows (`build/<game>/seq/`, configured in `config/games/<game>/`; `docs/iigs-midisynth.md`).
 
+## The DOC RAM planner
+Every song has to fit its instruments into the Ensoniq DOC's 64 KB of sound RAM: 256 pages of 256 bytes, of which 16 are kept free for the game's sound effects. A sample is stored in a power-of-two block. A MOD has 31 sample slots, and NinjaTrackerPlus 31 oscillators: a looped instrument plays on two (attack, then loop), a one-shot on one. The planner (`src/migs/ntpmod.py`, `ntpsamples.py`, `pitchplan.py`) decides, per song, how to spend that room so the song sounds as close to the MT-32 as it can.
+
+**How it judges "close".** Each candidate sample is built exactly as it would ship, played through a model of the DOC, and compared with Munt's render of the same notes by **docsim 2.0** (`src/migs/docsim2.py`). That is a small auditory model: specific loudness in half-Bark bands, with ear weighting and masking. It compares the note's time shape, how each band moves (a loop's chorus or wobble), and how alive the whole sound is. The measure was chosen and tuned against the maintainer's listening verdicts, which are the only ground truth (`docs/similarity-measures.md`). Every trade below is made in its units: dB gained per DOC page.
+
+**The steps, for the per-song set (`INST.PER.SONG`):**
+1. **Which sounds.** Every MT-32 program and rhythm key the song plays. A sound may share another's sample (a merge) when its notes score at most 1 dB worse from it. Rhythm keys that the MT-32 renders identically always share, and so do drums that are one sound at another pitch (the six toms are one sample, played at three pitches).
+2. **The smallest set first.** Each melodic sound starts as a 2 KB attack plus a 512 B single-cycle loop. Each drum is a one-shot. If even that doesn't fit, the least-played sounds are dropped.
+3. **Pitch.** For each sound, the planner picks which key(s) to sample and at what rate (9–22 kHz), from the notes the song actually plays. A wide-ranging sound may get up to three key zones, each with its own sample.
+4. **Spending the free pages.** Extra key zones, bigger (higher-rate) drum blocks, and long loops (8 or 16 KB of real sustain, so a steady sound keeps its movement) all bid for pages. Value = dB gained × the sound's share of the song's exposure ÷ pages. The best value per page wins, until nothing fits or is worth it.
+   - **Exposure is listening time, weighted.** A note counts more with little else in the mix: 1 + 2/(1 + k) while k other parts sound.
+   - **Loops count only the time after the attack**, so staccato notes never buy one. They also count long sustains up to 20 s, because a short loop's sameness grows the longer a note is held.
+   - **Calibration by ear.** An extra zone counts half as much as a loop, and a drum half as much as a melodic sound.
+5. **Taking back.** A long loop that still doesn't fit may take back upgrades bought for less per page than it: drum blocks, extra zones, or an own sample (which goes back to sharing). The set is then rebuilt, and the result is kept only if the loop fits.
+6. **Finishing.** Decaying sounds that fade out within the space they'd take become one-shots. Every choice is written to the build log (`build/<game>/ntp/<variant>.log`) with its numbers: `merge`, `pitch`, `budget zone`/`budget drum`, `loop value`, and `takes back` lines. A warning flags any note whose DOC playback has much more inharmonic energy than Munt's.
+
+**The shared set (`INST.SHARED`)** runs the same steps once for all 16 songs together, with the earlier settings: the configured merges and the older measure. Whether a game port wants the shared set at all is still open. It only pays off with a custom NTP loader that keeps the instruments in sound RAM between songs.
+
+The settings are in `config/games/<game>/ntp.toml`. What each option gains and costs is in `docs/ninjatrackerplus.md` ("Build options: tradeoffs"), and the history of the current planner is in "docsim 2.0 trials" there.
+
 ## Games
 Each game has an id (ScummVM's), its settings in `config/games/<id>/` and its output in `build/<id>/`. Recipes build `monkey` unless you pick another: `just game=<id> ntp`, or set `MIGS_GAME=<id>`. How it works, adding a game, and what a second game may still need: `docs/games/README.md`.
 
