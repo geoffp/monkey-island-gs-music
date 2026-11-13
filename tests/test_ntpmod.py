@@ -228,6 +228,7 @@ def test_priced_merges_keep_a_merge_only_when_it_costs_little(monkeypatch):
     class S:
         def __init__(self, name):
             self.name, self.data, self.rate, self.seconds = name, None, 1.0, 1.0
+            self.steady, self.raw_ok, self.max_loop = False, (), 512
 
     monkeypatch.setattr(nm, "build_melodic", lambda m, *a, **k: (S(m["name"]), ""))
     monkeypatch.setattr(nm, "build_drum", lambda d, *a, **k: (S(d["name"]), {c: (0, 1.0) for c in d["covers"]}, ""))

@@ -87,7 +87,8 @@ def _priced_merges(spec: dict, opts: dict, songs: list[tuple[list[Note], dict]],
     """`spec` (unmerged) with the merges worth making for these songs (`merges = "priced"`):
     a program (rhythm key) the song plays shares a merged sound's sample when playing its
     notes from that sample scores at most `merge_max_cost_db` (docsim2, dB) worse than its own
-    sample does, both built as they would ship. Synth brass on the trombone was heard as harsh,
+    sample does, both built as they would ship at their best (a steady sound at its longest raw
+    loop). Synth brass on the trombone was heard as harsh,
     the toms sharing one sample as no loss (docs/similarity-measures.md)."""
     limit = cfg.get("merge_max_cost_db", 1.0)
     hold = spec.get("hold_seconds", 2.0)
@@ -102,6 +103,15 @@ def _priced_merges(spec: dict, opts: dict, songs: list[tuple[list[Note], dict]],
                 w[n.key] = w.get(n.key, 0.0) + (n.off - n.t)
     scorer = docsim2_scorer(munt, cfg)
     cfg1 = {**cfg, "one_shots": False}
+    max_loop = cfg.get("max_loop_bytes", 16384)
+
+    def best_loop(m: dict, keys: tuple[int, int]) -> ModSample:
+        """The sample at its longest raw loop if it is steady: a sound's identity can be in its
+        movement (Violin 2's vibrato), which a 512 B loop removes from both candidates alike
+        (Violin 2 then scored as close to Strings as to itself)."""
+        s = build_melodic(m, cfg1, keys, munt, tables, hold)[0]
+        sizes = [z for z in s.raw_ok if z <= min(max_loop, s.max_loop)] if s.steady else []
+        return build_melodic({**m, "ntp_loop_bytes": max(sizes)}, cfg1, keys, munt, tables, hold)[0] if sizes else s
     melodic = [dict(m) for m in spec["melodic"]]
     drum = [dict(d) for d in spec["drum"]]
     gone: set[int] = set()
@@ -114,8 +124,8 @@ def _priced_merges(spec: dict, opts: dict, songs: list[tuple[list[Note], dict]],
             continue
         w = held[p]
         lo, hi = min(w), max(w)
-        s_e = build_melodic(e, cfg1, (min(lo, e["key"]), max(hi, e["key"])), munt, tables, hold)[0]
-        s_o = build_melodic(own, cfg1, (min(lo, own["key"]), max(hi, own["key"])), munt, tables, hold)[0]
+        s_e = best_loop(e, (min(lo, e["key"]), max(hi, e["key"])))
+        s_o = best_loop(own, (min(lo, own["key"]), max(hi, own["key"])))
         keys = docsim2.pick_keys(w)
         a, b = scorer.sample_db(s_e, p, keys), scorer.sample_db(s_o, p, keys)
         keep = a - b <= limit
