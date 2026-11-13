@@ -259,3 +259,43 @@ def pick_keys(weights: dict[int, float], n: int = 5) -> dict[int, float]:
     for k, wk in zip(ks, w):
         out[min(picks, key=lambda p: (abs(p - k), p))] += float(wk)
     return out
+
+
+class NoteError:
+    """docsim.NoteError's interface on this measure, for the pitch plan (`pitch_measure =
+    "docsim2"`): err(k, rate, n) is the score (dB) of key n played from the ideal sample of
+    key k at `rate` (Munt's render of k stored whole at that rate, 8 bits), over the whole
+    held note, against Munt's render of n. `render(key)` gives a render at `sr` from its
+    onset; results are cached on disk under `name` (ntpmod.doc_key)."""
+
+    def __init__(self, name, render: Callable[[int], np.ndarray], sr: int, cache: Path | None = None):
+        from . import docsim
+        self.name, self.render, self.sr, self._docsim = name, render, sr, docsim
+        self.cache = Cache(cache)
+        self._ref = functools.lru_cache(maxsize=None)(lambda n: loudness_pattern(to_doc_rate(self.render(n), self.sr)))
+        self._sample = functools.lru_cache(maxsize=64)(lambda k, r: docsim.stored(self.render(k), r))
+
+    def __call__(self, k: int, rate: float, n: int) -> float:
+        def compute() -> float:
+            r = round(rate)
+            s = self._sample(k, r)
+            seconds = len(self.render(k)) / self.sr
+            y = self._docsim.doc_play(s, r, n - k, seconds)
+            return db(distance(self._ref(n), loudness_pattern(y)))
+        return self.cache.get(f"pitch:{self.name}:{k}:{round(rate)}:{n}", compute)
+
+    def save(self) -> None:
+        self.cache.save()
+
+
+def drum_db(ref: np.ndarray, sr: int, sample: np.ndarray, rate: float, semis: float, seconds: float) -> float:
+    """docsim.drum_error_db's interface on this measure (segment means only): the DOC playing
+    `sample` (values -1..1, rounded to 8 bits here, stored at `rate`) `semis` above its key,
+    against `ref` (Munt's render of the played key, from its onset), over `seconds` + 20 ms."""
+    from . import docsim
+    n = int((seconds + 0.02) * DOC_RATE)
+    q = np.clip(np.round(sample / (float(np.max(np.abs(sample))) or 1.0) * 127), -127, 127)
+    got = docsim.doc_play(q, rate, semis, n / DOC_RATE)
+    got = np.pad(got, (0, max(0, n - len(got))))
+    want = to_doc_rate(ref[:int(n / DOC_RATE * sr) + 1], sr)[:n]
+    return db(distance(loudness_pattern(want), loudness_pattern(got), drum=True))

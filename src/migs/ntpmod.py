@@ -161,7 +161,10 @@ def _pitch_plans(spec: dict, usage_notes: list[tuple[int, Note]], cfg: dict, tab
         # A one-shot frees an oscillator per note (polyphony, which this measure doesn't see):
         # a sound that is one at its configured key stays one.
         shots = shot_rate(m["key"]) is not None
-        err = NoteError(doc_key(munt, m["program"]), render, munt.cache.parent / "docsim.json")
+        if cfg.get("pitch_measure", "docsim") == "docsim2":           # the whole note, as the ear hears it
+            err = docsim2.NoteError(doc_key(munt, m["program"]), render, SR, munt.cache.parent / "docsim2.json")
+        else:
+            err = NoteError(doc_key(munt, m["program"]), render, munt.cache.parent / "docsim.json")
         cands = pitchplan.candidates(min(w), max(w), lambda k: rates(k, shots),
                                      lambda k, r: base_note(k, r, whole=not shots))
         now_rates = [shot_rate(m["key"])] if shots else pitchplan.loop_rates(m["key"], loop, min_rate, cfg["max_rate"])

@@ -144,3 +144,40 @@ def test_pick_keys_keeps_the_weight_and_spreads_over_the_range():
     assert len(p) == 5 and sum(p.values()) == pytest.approx(40.0)
     assert min(p) < 46 and max(p) > 73
     assert d2.pick_keys({60: 2.0, 62: 1.0}, 5) == {60: 2.0, 62: 1.0}
+
+
+def _bright(key, seconds=2.0, sr=32000):
+    """A bright synthetic sound (harmonics to 11 kHz) at `sr`: played well below its sampled
+    key from a 16.7 kHz sample, it loses its top end."""
+    f0 = 440 * 2 ** ((key - 69) / 12)
+    t = np.arange(int(seconds * sr)) / sr
+    return 0.3 * sum(np.sin(2 * np.pi * f0 * h * t) / h for h in range(1, 80) if f0 * h < 11000)
+
+
+def test_pitch_error_grows_with_transposition_and_is_cached(tmp_path):
+    calls = []
+
+    def render(key):
+        calls.append(key)
+        return _bright(key)
+    err = d2.NoteError("bright", render, 32000, tmp_path / "c.json")
+    at_own, near, far = err(72, 16744.0, 72), err(72, 16744.0, 66), err(72, 16744.0, 60)
+    assert at_own < near < far and at_own + 3 < far
+    n_calls = len(calls)
+    assert err(72, 16744.0, 60) == far and len(calls) == n_calls
+    err.save()
+    again = d2.NoteError("bright", lambda k: 1 / 0, 32000, tmp_path / "c.json")
+    assert again(72, 16744.0, 60) == far
+
+
+def test_drum_score_prefers_the_higher_rate():
+    rng = np.random.default_rng(3)
+    sr = 32000
+    t = np.arange(int(0.4 * sr)) / sr
+    hit = rng.standard_normal(len(t)) * np.exp(-t / 0.05)
+    from scipy.signal import resample
+    lo = resample(hit, int(len(hit) * 6000 / sr))
+    hi = resample(hit, int(len(hit) * 22000 / sr))
+    s_lo = d2.drum_db(hit, sr, lo / np.max(np.abs(lo)), 6000.0, 0.0, 0.4)
+    s_hi = d2.drum_db(hit, sr, hi / np.max(np.abs(hi)), 22000.0, 0.0, 0.4)
+    assert s_hi < s_lo

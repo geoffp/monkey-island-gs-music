@@ -847,9 +847,15 @@ def drum_steps(d: dict, cfg: dict, munt: Munt, tables, hits: dict[int, float]
         if out and size <= out[-1][0]:
             break                                       # no bigger block helps (top rate, whole drum)
         ws = {c: hits.get(c, 0.0) for c in covers} if any(hits.get(c) for c in covers) else {c: 1.0 for c in covers}
-        err = sum(w * docsim.drum_error_db(_onset_cut(cached_render(munt, None, c, 0.5)), s.data, s.rate, off,
-                                           s.seconds)
-                  for c, (off, _) in covers.items() if (w := ws[c])) / sum(ws.values())
+        if cfg.get("pitch_measure", "docsim") == "docsim2":         # one scale for the value budget
+            from . import docsim2
+            err = sum(w * docsim2.drum_db(_onset_cut(cached_render(munt, None, c, 0.5)), SR, s.data, s.rate, off,
+                                          s.seconds)
+                      for c, (off, _) in covers.items() if (w := ws[c])) / sum(ws.values())
+        else:
+            err = sum(w * docsim.drum_error_db(_onset_cut(cached_render(munt, None, c, 0.5)), s.data, s.rate, off,
+                                               s.seconds)
+                      for c, (off, _) in covers.items() if (w := ws[c])) / sum(ws.values())
         out.append((size, err, s.seconds))
         block = 2 * size
     return out

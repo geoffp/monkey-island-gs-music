@@ -147,6 +147,13 @@ merges = false
 [modes.ds2-loops]
 base = "per-song"
 loop_budget = "docsim2"
+# ds2-pitch: ds2-loops, plus the pitch plan, zones and drum sizes priced with docsim2 over the
+# whole held note (docsim's first 0.6 s missed MI165's harsh sustain). Its scores are on
+# docsim2's scale (20 log10 of the loudness distance); the gain thresholds are unchanged.
+[modes.ds2-pitch]
+base = "per-song"
+loop_budget = "docsim2"
+pitch_measure = "docsim2"
 
 # Per-song overrides, e.g.:
 # [songs.160]
