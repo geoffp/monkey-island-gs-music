@@ -1,7 +1,15 @@
 # docsim 2.0: an auditory measure for the planner (proposed 2026-11-13)
 
-Background, measurements and sources: `docs/similarity-measures.md`. Prototype: `plans/docsim2_prototype.py`. Nothing here is built
-yet. Planner changes are trialled as side-by-side build modes on a branch, as usual.
+Background, measurements and sources: `docs/similarity-measures.md`. Prototype: `plans/docsim2_prototype.py`.
+
+**Status (2026-11-13): built on branch `docsim2`** as trials `ds2-loops`, `ds2-pitch`, `ds2-merges` plus the
+inharmonic build check (steps 1–5 below), results in `docs/ninjatrackerplus.md` ("docsim 2.0 trials").
+Waiting for listening. Open:
+- **Zones against loops.** In MI160, zone splits outbid the organ's 16 KB loops. If the loops matter more by
+  ear, raise `docsim2_mod_weight`, or let loops take back zones as well as drums.
+- **Pipe Organ Lo 43** is stuck at 12.5 kHz (f0 × 2^n with 512 B E′+ loops). Options: allow up to 26.3 kHz
+  for short loops, or a 1 KB loop.
+- **Weights** are provisional (mod 3, drums 0.5, merge 1 dB); more A/B verdicts should set them.
 
 ## The measure (`src/migs/docsim2.py`, new; `docsim.py` stays for the default builds)
 - Loudness pattern of a note at DOC_RATE: Hann STFT (1024 / hop 512) → Terhardt ear

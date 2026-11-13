@@ -505,6 +505,70 @@ Swell 1 is a separate problem. Its velocities are 5-31, so its MOD volumes are 1
 
 Tests: `test_short_notes_halve_the_rows_until_they_fit`, `test_mean_release_rows_play_the_release_averaged_over_the_row`.
 
+## docsim 2.0 trials (`ds2-loops`, `ds2-pitch`, `ds2-merges`, 2026-11-13)
+The measure: `src/migs/docsim2.py`, chosen in a bake-off against listening verdicts
+(`docs/similarity-measures.md`); plan `plans/docsim2.md`. Three cumulative per-song trials,
+disk folders `DS2.LOOPS`, `DS2.PITCH`, `DS2.MERGES`. Not yet listened to.
+
+- **`ds2-loops`** (`loop_budget = "docsim2"`): every raw loop size a steady sound allows is
+  built as it would ship (attack, loop, row contour) and scored against Munt (notes held 3 s,
+  up to 5 keys weighted by held note-seconds). Loops grow by measured gain per DOC page, not
+  by usage per byte (`ntpsamples.plan_loops_valued`), and may jump to any larger size.
+  Zones and drums are as in `inst-per-song`.
+  - MI160 keeps Elec Organ 64's 16 KB loop.
+  - MI163's Elec Organ 71 gets 8 KB back (512 B in `no-merges`: −2.8 → −11.4 dB).
+  - Elec Organ 49's 8 KB loop scores worse than 512 B and stays short.
+  - Brass loses its raw loops: Trombone in MI150/151/165, 16 KB scored worse than 512 B
+    (−18.8 vs −21.0 dB in MI165). Brass has little movement, so a raw loop mostly adds
+    crossfade drift.
+- **`ds2-pitch`** (+ `pitch_measure = "docsim2"`): the pitch plan, zones and drum sizes are
+  priced with docsim2 over the whole held note, on one scale with the loops.
+  - `exposure_cap_s = 3`: notes count up to the 3 s the measure hears.
+  - `docsim2_mod_weight = 3`: movement counts 3×. All five verdicts hold for 1–6; above 4,
+    Syn Brass4 falls below Fretless 2.
+  - `drum_value_weight = 0.5`: the starved toms of `no-merges` went unheard in the mix,
+    while a smaller melodic loss (Syn Brass4) was heard.
+  - A loop may take back drum upgrades worth less per page (none did in the full build).
+  - MI153: the pipe organ's low zone is sampled at key 56 instead of 60 (keys 52–65). The
+    inharmonic check's worst key, 52, goes from +16.3 to +12.2 dB over Munt.
+  - MI160: eight zone splits (0.014–0.072 per page) outbid the organ's 16 KB loops
+    (0.01 per page, 62 pages each), so its organ keeps 512 B loops here. **This is the open
+    question for listening:** finer zones and better drums (this trial), or the organ's
+    movement (`ds2-loops`)?
+- **`ds2-merges`** (+ `merges = "priced"`, `merge_max_cost_db = 1.0`): per song, a program or
+  rhythm key shares a merged sound's sample only when its notes score at most 1 dB worse
+  from it than from their own sample. Both candidates are built at their best: a steady
+  sound at its longest raw loop. At 512 B, Violin 2's vibrato was gone from both, and it
+  merged with Strings.
+  - Own samples:
+    - Syn Brass4 (+6.0 dB), Elec Bass1 (+8.8), Violin 2 (+9.0), Ice Rain (+4.6),
+      BottleBlow (+6.7 to +8.4);
+    - Trombone 1 in MI163/167/168 (+3.3 to +4.4);
+    - the low toms (+3.1), Low Bongo (+9.2), Low Agogo (+5.3).
+  - Merged: Fretless 2 (−0.7), Trombone 1 in MI165 (−1.3), Low Conga, the upper toms,
+    Acoustic Bass Drum.
+- **docsim2 for drums**: the whole hit's mean with 25 ms forward masking. This was fitted to
+  ISO 532-1 time-varying loudness on four drums, within 0.05. Without it, a 37 ms bongo was
+  one frame and scored 0, and tails' 8-bit noise counted 1.5–3× what the standard model says.
+- **All 16 songs, all variants** (drops / steals / `.NTP` total / raw loops / inharmonic
+  warnings):
+
+  | variant | drops | steals | `.NTP` | raw loops | warnings |
+  |---|---|---|---|---|---|
+  | `inst-per-song` | 1 | 315 | 1401 KB | 27 | 5 |
+  | `ds2-loops` | 1 | 313 | 1371 KB | 24 | 2 |
+  | `ds2-pitch` | 1 | 283 | 1361 KB | 23 | 3 |
+  | `ds2-merges` | 1 | 272 | 1361 KB | 20 | 2 |
+
+  `inst-per-song`, `inst-shared` and `no-merges` are byte-identical to before (48 MODs).
+- **Build check (all variants, log only; `inharmonic_check`, `inharmonic_limit_db = 6`):**
+  - What it does: each steady looped sample's lowest and highest played keys go through the
+    DOC model. Inharmonic energy more than 6 dB over Munt's is logged as `inharmonic …`.
+  - What it flags: on `inst-per-song` it flags exactly MI153's buzz keys (Pipe Organ 60 at
+    key 52 +16.3 dB; Pipe Organ Lo 43–51 +6.5 to +8.6).
+  - Still open: Pipe Organ Lo 43 stays at 12.5 kHz in every variant. A 512 B E′+ loop needs
+    a rate of f0 × 2^n, and the next one (25.1 kHz) is above `pitch_max_rate`.
+
 ## Build options: tradeoffs (2026-11-08)
 What each option buys and costs, as measured. Sizes are totals over all 16 songs. Pattern data is 256 B per track per 64-row pattern, so allocation options change it through the track count; sample options change the sample data. Where a cost hasn't been measured, the entry says so.
 
@@ -518,6 +582,10 @@ What each option buys and costs, as measured. Sizes are totals over all 16 songs
 **Sounds**
 - **`one_shots`** (default on). A decaying sound that fades into 8-bit noise within its attack + loop budget is stored whole: only Xylophone qualifies. *Gains:* exactly in tune (was −1.0 cents), no loop of quantisation noise, 1 oscillator, frees its track when the sample ends (MI162 drops 8 → 0). *Cost:* none measured; shared bank 240 → 238 pages.
 - **Loop-only Elec Organ** (trial `per-song-lo` / `shared-lo`; **rejected and removed 2026-11-09**, user: "I don't think they hold up"). *Gains:* 1 oscillator instead of 2: drops 11 → 1, audible steals 262 → 195, and with the track plan and one-shot routing 184 → 39 (shared). *Costs:* the attack is lost. Over the first 100 ms the tone is about 2 dB further from Munt, and the first 0.2–0.3 s is quieter: the 5.4 dB onset peak and the gain-1 handover are gone. **Listening: clearly audible and significantly quieter, much more so in shared.** *Size:* patterns +29…+30 KB (more 1-oscillator tracks), samples −16…−20 KB (no attack headers), `.NTP` +10…+13 KB; DOC −4 pages (shared 237 → 233). The converter rule it relied on (a loop starting at 0 takes 1 oscillator) stays modelled in `ntp_blocks` and track kinds.
+- **`loop_budget = "docsim2"`** (trials `ds2-*`, 2026-11-13). Raw loops by measured value per page instead of usage per byte ("docsim 2.0 trials"). *Gains:* loops where the measure hears movement (MI160 organ 16 KB, MI163 Elec Organ 71 8 KB); brass drops raw loops it scores worse with. *Size:* `.NTP` 1401 → 1371 KB. *Polyphony:* steals 315 → 313. *Build time:* each candidate size is built (≈ 0.1 s) and scored (≈ 3 ms per key); cached in `build/cache/docsim2.json`. Not yet listened to.
+- **`pitch_measure = "docsim2"`** (with `exposure_cap_s = 3`, `docsim2_mod_weight = 3`, `drum_value_weight = 0.5`; trials `ds2-pitch`, `ds2-merges`). Zones, keys, rates and drum sizes priced on docsim2 over the whole note. *Gains:* MI153's low pipe-organ zone moves to key 56 (buzz key 52: +16.3 → +12.2 dB over Munt); steals 313 → 283. *Costs:* MI160's organ loses its 16 KB loops to zone splits and drums. *Size:* 1361 KB. Not yet listened to.
+- **`merges = "priced"`** (`merge_max_cost_db = 1.0`; trial `ds2-merges`). Per-song merges by measured cost ("docsim 2.0 trials"). *Gains:* own samples where they differ (Syn Brass4, Elec Bass1, Violin 2, Ice Rain, BottleBlow), merges where they don't (Fretless 2, toms, Low Conga); steals 283 → 272. *Size:* unchanged (1361 KB). Not yet listened to.
+- **`inharmonic_check`** (default on, log only, 2026-11-13). Flags played keys whose DOC playback has > `inharmonic_limit_db` (6) dB more inharmonic energy than Munt. *Cost:* two notes per steady sample per song; no output change.
 - **`merges = false`** (trial `no-merges`, per-song, 2026-11-12). Every MT-32 program and rhythm key gets its own sample instead of sharing one through `mt32sounds.toml`'s `covers` ("Sound merges"). *Gains:* the songs' own timbres (MI165's synth brass: 2-4 kHz excess vs the MT-32 +3.1-3.9 -> +1.4-2.4 dB); steals 315 -> 299. *Costs:* the extra samples take DOC RAM from raw loops (MI159 Chorale, MI163 Elec Organ, MI165 Shakuhachi, MI167 French Horn lose theirs); `.NTP` +13 KB. Not possible in shared (31 slots full). *Listening:* not a win; the lost loops (MI160's organ) cost more than the timbres gained ("Sound merges").
 - **Song-sized one-shots** (rejected 2026-11-08): +100 KB of samples (+9 %) for no polyphony gain and little audible difference; see `docs/sample-construction.md`.
 - **`drum_floor_lsb = 1.5`** (default since 2026-11-08; 0 = the old −46 dB length). Drums end at the 8-bit floor, with junk near the floor after the decay cut too (above). *Gains:* the kick, snare, bongo and mute conga drop to smaller DOC blocks: shared bank 237 → 220 pages (shared-lo 233 → 216); `.NTP` shared 1480 → 1376 KB (−7 %), per-song 1142 → 1101 KB. Per-song free DOC RAM goes to loop growth: MI167, the one song at its page limit, gets its Strings 16384 B raw loop back (was halved to 8192). The shared bank's freed pages are unused so far. A shorter drum also frees its track sooner. *Polyphony:* unchanged (drops and steals identical in all four variants). *Cost:* the last few dB of each tail (below 8-bit resolution); not yet listened to.

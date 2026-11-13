@@ -13,6 +13,15 @@ Its auditory front end agrees with the ISO 532-1 Zwicker model (rank correlation
 packages are too slow for the planner and serve as judges. Implementation plan:
 `plans/docsim2.md`. Nothing is built yet.
 
+**Built (2026-11-13)** as `src/migs/docsim2.py`, with trial build variants `ds2-loops`,
+`ds2-pitch`, `ds2-merges` (results: `docs/ninjatrackerplus.md`, "docsim 2.0 trials").
+Changes from the bake-off prototype:
+- **Drums:** the whole hit's mean with 25 ms forward masking, fitted to ISO 532-1
+  time-varying loudness on Conga, Kick, Tom and Snare (within 0.05).
+- **Modulation weight:** 3 in the trials. The five verdicts hold for weights 1–6 (margins
+  recomputed from the bake-off's notes); above 4, Syn Brass4 falls below Fretless 2.
+- **Merges:** priced with each sample at its best loop.
+
 ## Ground truth: the user's listening verdicts
 Only these count as ground truth. Everything else in the tables is unjudged.
 
