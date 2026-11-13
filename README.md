@@ -31,7 +31,41 @@ Every song has to fit its instruments into the Ensoniq DOC's 64 KB of sound RAM:
 
 **The shared set (`INST.SHARED`)** runs the same steps once for all 16 songs together, with the earlier settings: the configured merges and the older measure. Whether a game port wants the shared set at all is still open. It only pays off with a custom NTP loader that keeps the instruments in sound RAM between songs.
 
-The settings are in `config/games/<game>/ntp.toml`. What each option gains and costs is in `docs/ninjatrackerplus.md` ("Build options: tradeoffs"), and the history of the current planner is in "docsim 2.0 trials" there.
+`just ntp` draws the result for each variant: `build/<game>/ntp/<variant>/docram.html` has one treemap per song, showing every block in DOC RAM, grouped by instrument and coloured by what it does. Hover a block for its sample, size and address. The settings are in `config/games/<game>/ntp.toml`. What each option gains and costs is in `docs/ninjatrackerplus.md` ("Build options: tradeoffs"), and the history of the current planner is in "docsim 2.0 trials" there.
+
+## From MIDI to tracker music
+NinjaTrackerPlus plays a ProTracker-style pattern grid. Each track is a column of rows, and each row's cell holds at most a note, an instrument and one effect, played out over a few ticks. There is no voice allocation: a track owns its oscillators for the whole song. So the arranger (`src/migs/ntpsong.py`) has to turn the MT-32 performance into that grid itself: when every note plays, on which track, and how loud. The details and measurements are in `docs/ninjatrackerplus.md`.
+
+**Timing**
+- **Each song gets its own grid.** The arranger fits the note-ons to the song's underlying grid unit (a 16th, or a triplet 8th). Rows fall on half that unit, and each row lasts 3 ticks.
+- **Micro-timing is kept.** A note that falls between rows is delayed into place by a tick or two with `EDx`, so the music keeps its performance feel. Mean timing error is 4.6–12 ms per song.
+  - A delayed note can't carry its velocity, so a note close to a row (within 20 ms) moves onto the row with its velocity in the cell. So does one whose start at the default volume would be more than 4 dB off. Neither ever lands on a neighbour from the same part, so flams and rolls survive.
+- **Tempo is dithered.** MOD tempos are whole numbers, so `Fxx` switches between the two nearest tempos whenever playback drifts more than 2 ms from the ideal grid. A song that changes tempo is followed row by row.
+- **Songs loop like the game.** A song that loops in the game repeats from its start: a one-row lead-in pattern, then a jump back after each pass. The pass's last row gets its own tempo, so every pass lasts the game's loop to within 2 ms. A song that plays once stops on its last row.
+
+**Notes and tracks**
+- **One note per key, as on the MT-32.** Striking a key that is still sounding ends the old note, as the MT-32's single-assign parts do.
+- **A looped note takes two oscillators** (attack, then loop), and a one-shot one. Of NinjaTrackerPlus's 31, the arranger chooses each song's split between two-oscillator melodic tracks and one-oscillator drum tracks. It picks the split that loses the least: 64 points per dropped note, plus the volume of every audible cut.
+- **Choosing a track for a note,** in order:
+  1. a free track of its type, preferring one that last played the same sample;
+  2. a new track, while oscillators remain;
+  3. for a drum, an idle melodic track;
+  4. a steal;
+  5. dropping the note, which is logged.
+- **Stealing is selective.** Only a note that is already releasing can be stolen. A silent release goes first. Then the arranger prefers a part with more than two notes sounding, so a chord loses one voice of many while bass lines, leads and duets keep their tails. Among those, it takes the quietest release, then the one nearest its end.
+- **Track order matters.** Melodic tracks come before drum tracks, because Ninjaforce's converter assigns oscillators first-fit, in even pairs. The build replays that assignment and fails if a song wouldn't fit.
+
+**Volume**
+- **Loudness is measured, not guessed.** A note's level is the sample's peak × the MT-32's velocity response × its key response × its CC7 (part volume) curve, all measured through Munt. Each song is scaled so its loudest moment is volume 64.
+- **Velocity goes where NinjaTrackerPlus will apply it:**
+  - in the note's own cell;
+  - for a delayed note on a silent drum track, in the cell before;
+  - otherwise, the sample's default volume (its median in that song), corrected on the next row.
+- **The envelope is redrawn row by row.** Each row's `Cxx` is the MT-32 loudness contour averaged over that row, after the attack, swells included. The contour is smoothed in decibels: over 250 ms for decaying sounds, and over at least 0.8 s for steady ones, whose finer movement is in the loop itself.
+  - A held note rises at most 1.5 dB a row, because the DOC applies a new volume instantly and a beating sound would otherwise pump. Falls follow the contour.
+- **Releases end cleanly.** A note-off becomes a ramp of up to 0.3 s, each row at the release's average loudness over it, so short staccato notes aren't held at full volume for a row.
+  - At silence, the track switches to a silent rest sample. Otherwise NinjaTrackerPlus would briefly bring the old loop back when the next delayed note arrives.
+  - A track that is still sounding is also silenced on the row before a delayed note.
 
 ## Games
 Each game has an id (ScummVM's), its settings in `config/games/<id>/` and its output in `build/<id>/`. Recipes build `monkey` unless you pick another: `just game=<id> ntp`, or set `MIGS_GAME=<id>`. How it works, adding a game, and what a second game may still need: `docs/games/README.md`.
@@ -75,7 +109,7 @@ build/             everything generated, not in git (`just clean`, `just clean-a
   extracted/patches/         per-song channel -> instrument notes
   extracted/wav/{mt32,gm}/   Munt / FluidSynth renders of the songs
   seq/{stock,mt32,tune}/     MIDI Synth sequences, banks and wave files
-  ntp/<variant>/             MODs, .NTP files, desktop previews (wav/), build logs
+  ntp/<variant>/             MODs, .NTP files, desktop previews (wav/), build logs, DOC RAM map (docram.html)
   disks/                     hard-disk images (MI.NTP.PO; experimental MI.SYNTHLAB.PO) and the GSSquared machine
                              configs (*.gs2) that boot them
   dist/                      each disk as <VOLUME>.zip (the image) and <VOLUME>.SHK (ShrinkIt archive of its files)
