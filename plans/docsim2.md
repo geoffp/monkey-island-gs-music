@@ -4,12 +4,17 @@ Background, measurements and sources: `docs/similarity-measures.md`. Prototype: 
 
 **Status (2026-11-13): built on branch `docsim2`** as trials `ds2-loops`, `ds2-pitch`, `ds2-merges` plus the
 inharmonic build check (steps 1–5 below), results in `docs/ninjatrackerplus.md` ("docsim 2.0 trials").
-Waiting for listening. Open:
-- **Zones against loops.** In MI160, zone splits outbid the organ's 16 KB loops. If the loops matter more by
-  ear, raise `docsim2_mod_weight`, or let loops take back zones as well as drums.
+Listened to once and revised ("Revision after listening": the `live` term, exposure graded by how much
+else is playing, loops valued past the attack and over long sustains, loops taking back zones). Waiting for a
+second listen. Open:
+- **Merges pay for pages only after the fact.** A blocked loop can take an own sample back (none did in
+  the full build). Own samples still take their pages before the budget runs. MI165's Shakuhachi gets
+  512 B loops in `ds2-merges` (its held notes are worth less per page than Syn Brass4's 8 KB loops):
+  unjudged.
 - **Pipe Organ Lo 43** is stuck at 12.5 kHz (f0 × 2^n with 512 B E′+ loops). Options: allow up to 26.3 kHz
   for short loops, or a 1 KB loop.
-- **Weights** are provisional (mod 3, drums 0.5, merge 1 dB); more A/B verdicts should set them.
+- **Weights** are set by one or two verdicts each (live 0.2; alone 2; loop cap 20 s; zones 0.5; drums 0.5;
+  merge 1 dB). More A/B verdicts should set them, especially zones against loops.
 
 ## The measure (`src/migs/docsim2.py`, new; `docsim.py` stays for the default builds)
 - Loudness pattern of a note at DOC_RATE: Hann STFT (1024 / hop 512) → Terhardt ear

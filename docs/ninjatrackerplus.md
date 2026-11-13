@@ -508,7 +508,9 @@ Tests: `test_short_notes_halve_the_rows_until_they_fit`, `test_mean_release_rows
 ## docsim 2.0 trials (`ds2-loops`, `ds2-pitch`, `ds2-merges`, 2026-11-13)
 The measure: `src/migs/docsim2.py`, chosen in a bake-off against listening verdicts
 (`docs/similarity-measures.md`); plan `plans/docsim2.md`. Three cumulative per-song trials,
-disk folders `DS2.LOOPS`, `DS2.PITCH`, `DS2.MERGES`. Not yet listened to.
+disk folders `DS2.LOOPS`, `DS2.PITCH`, `DS2.MERGES`. First listened to 2026-11-13; revised
+the same day (below, "Revision after listening"). The list that follows describes the first
+version.
 
 - **`ds2-loops`** (`loop_budget = "docsim2"`): every raw loop size a steady sound allows is
   built as it would ship (attack, loop, row contour) and scored against Munt (notes held 3 s,
@@ -569,6 +571,123 @@ disk folders `DS2.LOOPS`, `DS2.PITCH`, `DS2.MERGES`. Not yet listened to.
   - Still open: Pipe Organ Lo 43 stays at 12.5 kHz in every variant. A 512 B E′+ loop needs
     a rate of f0 × 2^n, and the next one (25.1 kHz) is above `pitch_max_rate`.
 
+### Revision after listening (2026-11-13)
+**What the user heard in the first version** (all verdicts:
+`docs/similarity-measures.md`, "Ground truth"):
+- MI165 in `DS2.MERGES` was "dramatically more faithful", and the longer Shakuhachi loops in
+  `DS2.LOOPS` were a good trade.
+- MI159 in `DS2.LOOPS` kept the organ's tremolo, and `DS2.PITCH` was a further gain.
+- MI163 and MI167 sounded about the same in `DS2.PITCH`.
+- Losing MI160's 16 KB organ loop in `DS2.PITCH` was bad. The organ is a first impression,
+  with little else in the mix, which suggests a principle: a part heard with little else in
+  the mix needs its nuance more than its note time suggests.
+- MI153 got worse in every trial. Its opening drone (keys 70/74, about 19 beats) lost its
+  16 KB loop in `DS2.LOOPS` and sounded "flat, buzzy". (`DS2.PITCH` and `DS2.MERGES` were
+  byte-identical for MI153.)
+
+**The causes:**
+- **153 (the measure).** docsim2 called the two loops even (−17.4 vs −18.6 dB). The
+  512 B loop loses Munt's 2–8 Hz shimmer; the 16 KB loop keeps it but adds a ~1 Hz pulse,
+  and the linear per-band `mod` term priced the two alike. A 10 s window didn't change that.
+  The fix is the `live` term (`docsim2_live_weight = 0.2`, `docsim2_mod_weight = 1`): all 8
+  melodic verdicts now hold (`docs/similarity-measures.md`, "Revision after listening").
+- **160 (the budget).** docsim2 did hear the organ's loop (+5.3 dB), but at 0.006 dB per page
+  it was below every zone (≥ 0.015). Zones and drums took the pages first, and a loop could
+  take back only drums.
+
+**The changes** (all three trials):
+- **`alone_weight = 2`.** While k other parts sound, a note's time counts 1 + 2/(1 + k);
+  the part's own chord doesn't count (`ntpmod.Alone`). MI160's organ is never strictly
+  alone: a bass note is held under its opening 20 s chord, and Panpipes enter at 4 s.
+- **`loop_time_after_attack = true`.** A loop is valued only by note time after the attack.
+  Staccato is common: 77 of the 356 notes on MI160's Elec Organ 64 end before the loop, as do
+  27 of 51 Shakuhachi notes and 24 of 42 Fantasy notes. The build logs it as `loop notes …`.
+- **`loop_exposure_cap_s = 20`** (the user's suggestion). Loops count long sustains up to
+  20 s, while zones keep the 3 s the measure hears. A pitch error is heard at once, but a
+  short loop's sameness grows the longer a note is held. 10 s wasn't enough for MI160, whose
+  opening chord is 20.6 s.
+- **`loops_take_zones = true`** (`DS2.PITCH`, `DS2.MERGES`). A loop that doesn't fit may
+  take back zones bought for less per page, a sound's last zone first and never its own
+  sound's, then the set is rebuilt (`ntpmod._zones_for_loop`). It is kept only if the loop
+  then fits. In the full build it fired once: MI167's Strings 67 8 KB took back the third
+  zones of Trombone, Elec Organ and Acou Bass.
+- **Tried and dropped: loop bids in the zone budget.** They were priced on the one-zone sample,
+  where MI160's organ allows only 8 KB, so the pages they kept free went to another loop.
+
+**Results** (vs the first version):
+
+| variant | steals | `.NTP` | MI153 drone (Pipe Organ 74) | MI160 Elec Organ 64 |
+|---|---|---|---|---|
+| `ds2-loops` | 313 (313) | 1383 KB (1370) | 16 KB (was 512 B) | 16 KB (16 KB) |
+| `ds2-pitch` | 283 (283) | 1372 KB (1361) | 16 KB (512 B) | 16 KB (512 B) |
+| `ds2-merges` | 260 (272) | 1356 KB (1361) | 16 KB (512 B) | 512 B (512 B) |
+
+- MI153 also gets 16 KB on Pipe Organ 81 and 8 KB on 57 in `DS2.PITCH` and `DS2.MERGES`.
+- **Still open, in `ds2-merges`:**
+  - MI160's organ loop is blocked again, narrowly: 0.0140 per page against 0.015 for the
+    cheapest zone. The pages go to the own samples merge pricing grants (BottleBlow, Low
+    Bongo), and merge pricing doesn't yet count page cost.
+  - MI165's Shakuhachi loses its long loops to Syn Brass4's.
+  - Both wait for the user's merges feedback.
+- `inst-per-song`, `inst-shared` and `no-merges` are byte-identical (48 MODs).
+- The previous disk is kept as `build/monkey/disks/MI.NTP.prev.PO`.
+
+**Second round (same day).** The user asked that own samples pay for their pages, and that
+extra zones count for less against detailed loops:
+- **`zone_value_weight = 0.5`** (`ds2-pitch`, `ds2-merges`). An extra zone's dB counts at
+  half a loop's: the moved zones in MI163/MI167 went unheard, and MI160's organ loop was
+  wanted over them.
+- **Own samples as take-backs** (with `loops_take_zones`). A blocked loop may also send an own
+  sample that merge pricing kept back to its merge, when that sample is worth less per page.
+  Its value is the dB its notes gain over the merged sample × its share of the exposure ÷
+  its pages. The whole set is then rebuilt from the top (`sample_set(_force=…)`), and the
+  rebuild is kept only if the loop then fits. The loop's own sound is never re-merged.
+- **Full build.** No take-back of any kind fired: the zone weight alone freed the pages. MI160
+  gets Elec Organ 64's 16 KB loop in all three trials. Sounds with fewer samples (one fewer
+  zone): Acou Bass in most songs, Marimba, some Panpipes, Elec Organ in MI151/152/159/167.
+  Own samples are unchanged from the first version.
+
+| variant | steals | `.NTP` | inharmonic warnings |
+|---|---|---|---|
+| `ds2-loops` | 313 | 1383 KB | 5 |
+| `ds2-pitch` | 316 | 1346 KB | 3 |
+| `ds2-merges` | 307 | 1336 KB | 2 |
+
+  MI160 alone has about 300 steals, as in `inst-per-song` (300). The first version's 272 came
+  from level changes.
+
+**Third round: drums (same day).** In MI162 the user heard Low Floor Tom and High Floor Tom as
+exactly the same, and suspected all the toms are one sound at different pitches. Measured on
+Munt (scratch `toms.py`):
+- Keys 41/43, 45/47 and 48/50 render bit-identically.
+- 41 played +5.5 semitones matches 45 at correlation 0.97, and 45 played +5.9 matches 48 at 0.91.
+
+`merges = "priced"` handles this in three ways now:
+- **Identical renders share one sample** at no cost (SHA-1 of the Munt render). That includes
+  two keys whose own samples would otherwise both be kept.
+- **The same sound at another pitch merges whatever it costs** (`merge_same_sound`, on by
+  default; `audio.same_sound`: transposed correlation ≥ 0.9). This takes the user's ear as the
+  verdict over the 1 dB price.
+- **The shared sample is taken at the key that prices best** over the keys it covers
+  (`_best_drum_key`).
+
+Full build:
+- **Toms:** all six on one sample, taken at key 43 (was 45): −15.3 to −15.7 dB over their keys
+  (MI159/162/164/166).
+- **Low Bongo:** Bongo at −7.0 semitones. Sampled at 61, it scores −19.3 to −22.9 dB, as well
+  as its own sample did (MI159/160/162/164/166/168).
+- **Low Agogo:** Agogo at −5.2 semitones (MI163).
+- **Acoustic Bass Drum:** identical to Kick (MI150).
+- **Totals:** `ds2-merges` 1320 KB (was 1336), steals 307, 2 inharmonic warnings. The other
+  variants are unchanged.
+
+MI165 (no toms) is unchanged. The user preferred keeping its Shakuhachi's long loops, which
+lost to Syn Brass4's 8 KB loops. An A/B of the two uses of the same pages: the user narrowly preferred
+A (Syn Brass4's loops, as built), "sort of a toss-up". So the measure's ranking stands, with no
+extra weight for a lead's held notes.
+- A bug found on the way: a zero-length note made another part's count −1, so MI152's and
+  MI168's exposures went infinite and they lost every upgrade. It is fixed and has a test.
+
 ## Build options: tradeoffs (2026-11-08)
 What each option buys and costs, as measured. Sizes are totals over all 16 songs. Pattern data is 256 B per track per 64-row pattern, so allocation options change it through the track count; sample options change the sample data. Where a cost hasn't been measured, the entry says so.
 
@@ -582,9 +701,9 @@ What each option buys and costs, as measured. Sizes are totals over all 16 songs
 **Sounds**
 - **`one_shots`** (default on). A decaying sound that fades into 8-bit noise within its attack + loop budget is stored whole: only Xylophone qualifies. *Gains:* exactly in tune (was −1.0 cents), no loop of quantisation noise, 1 oscillator, frees its track when the sample ends (MI162 drops 8 → 0). *Cost:* none measured; shared bank 240 → 238 pages.
 - **Loop-only Elec Organ** (trial `per-song-lo` / `shared-lo`; **rejected and removed 2026-11-09**, user: "I don't think they hold up"). *Gains:* 1 oscillator instead of 2: drops 11 → 1, audible steals 262 → 195, and with the track plan and one-shot routing 184 → 39 (shared). *Costs:* the attack is lost. Over the first 100 ms the tone is about 2 dB further from Munt, and the first 0.2–0.3 s is quieter: the 5.4 dB onset peak and the gain-1 handover are gone. **Listening: clearly audible and significantly quieter, much more so in shared.** *Size:* patterns +29…+30 KB (more 1-oscillator tracks), samples −16…−20 KB (no attack headers), `.NTP` +10…+13 KB; DOC −4 pages (shared 237 → 233). The converter rule it relied on (a loop starting at 0 takes 1 oscillator) stays modelled in `ntp_blocks` and track kinds.
-- **`loop_budget = "docsim2"`** (trials `ds2-*`, 2026-11-13). Raw loops by measured value per page instead of usage per byte ("docsim 2.0 trials"). *Gains:* loops where the measure hears movement (MI160 organ 16 KB, MI163 Elec Organ 71 8 KB); brass drops raw loops it scores worse with. *Size:* `.NTP` 1401 → 1371 KB. *Polyphony:* steals 315 → 313. *Build time:* each candidate size is built (≈ 0.1 s) and scored (≈ 3 ms per key); cached in `build/cache/docsim2.json`. Not yet listened to.
-- **`pitch_measure = "docsim2"`** (with `exposure_cap_s = 3`, `docsim2_mod_weight = 3`, `drum_value_weight = 0.5`; trials `ds2-pitch`, `ds2-merges`). Zones, keys, rates and drum sizes priced on docsim2 over the whole note. *Gains:* MI153's low pipe-organ zone moves to key 56 (buzz key 52: +16.3 → +12.2 dB over Munt); steals 313 → 283. *Costs:* MI160's organ loses its 16 KB loops to zone splits and drums. *Size:* 1361 KB. Not yet listened to.
-- **`merges = "priced"`** (`merge_max_cost_db = 1.0`; trial `ds2-merges`). Per-song merges by measured cost ("docsim 2.0 trials"). *Gains:* own samples where they differ (Syn Brass4, Elec Bass1, Violin 2, Ice Rain, BottleBlow), merges where they don't (Fretless 2, toms, Low Conga); steals 283 → 272. *Size:* unchanged (1361 KB). Not yet listened to.
+- **`loop_budget = "docsim2"`** (trials `ds2-*`, 2026-11-13). Raw loops by measured value per page instead of usage per byte ("docsim 2.0 trials"). *Gains:* loops where the measure hears movement (MI160 organ 16 KB, MI163 Elec Organ 71 8 KB); brass drops raw loops it scores worse with. *Size:* `.NTP` 1401 → 1371 KB. *Polyphony:* steals 315 → 313. *Build time:* each candidate size is built (≈ 0.1 s) and scored (≈ 3 ms per key); cached in `build/cache/docsim2.json`. Heard 2026-11-13: MI159's organ tremolo and MI165's longer Shakuhachi loops good, MI153's drone flat at 512 B. Revised: the `live` term, `alone_weight`, `loop_time_after_attack`, `loop_exposure_cap_s = 20` ("Revision after listening"); 1383 KB, steals 313; MI153's drone keeps 16 KB.
+- **`pitch_measure = "docsim2"`** (with `exposure_cap_s = 3`, `docsim2_mod_weight = 3`, `drum_value_weight = 0.5`; trials `ds2-pitch`, `ds2-merges`). Zones, keys, rates and drum sizes priced on docsim2 over the whole note. *Gains:* MI153's low pipe-organ zone moves to key 56 (buzz key 52: +16.3 → +12.2 dB over Munt); steals 313 → 283. *Costs:* MI160's organ loses its 16 KB loops to zone splits and drums. *Size:* 1361 KB. Heard 2026-11-13: losing MI160's organ loop is bad; MI163/MI167 the same as `ds2-loops`; MI159 better. Revised (+ `loops_take_zones`): MI160 keeps its 16 KB loop; 1372 KB, steals 283.
+- **`merges = "priced"`** (`merge_max_cost_db = 1.0`; trial `ds2-merges`). Per-song merges by measured cost ("docsim 2.0 trials"). *Gains:* own samples where they differ (Syn Brass4, Elec Bass1, Violin 2, Ice Rain, BottleBlow), merges where they don't (Fretless 2, toms, Low Conga); steals 283 → 272. *Size:* unchanged (1361 KB). Heard 2026-11-13: MI165 "dramatically more faithful". Revised: steals 260, 1356 KB; *Costs:* own samples take pages without paying for them, so MI160's organ loop (just) and MI165's Shakuhachi loops lose out (open).
 - **`inharmonic_check`** (default on, log only, 2026-11-13). Flags played keys whose DOC playback has > `inharmonic_limit_db` (6) dB more inharmonic energy than Munt. *Cost:* two notes per steady sample per song; no output change.
 - **`merges = false`** (trial `no-merges`, per-song, 2026-11-12). Every MT-32 program and rhythm key gets its own sample instead of sharing one through `mt32sounds.toml`'s `covers` ("Sound merges"). *Gains:* the songs' own timbres (MI165's synth brass: 2-4 kHz excess vs the MT-32 +3.1-3.9 -> +1.4-2.4 dB); steals 315 -> 299. *Costs:* the extra samples take DOC RAM from raw loops (MI159 Chorale, MI163 Elec Organ, MI165 Shakuhachi, MI167 French Horn lose theirs); `.NTP` +13 KB. Not possible in shared (31 slots full). *Listening:* not a win; the lost loops (MI160's organ) cost more than the timbres gained ("Sound merges").
 - **Song-sized one-shots** (rejected 2026-11-08): +100 KB of samples (+9 %) for no polyphony gain and little audible difference; see `docs/sample-construction.md`.

@@ -144,10 +144,16 @@ merges = false
 # Trials (2026-11-13): docsim 2.0 (src/migs/docsim2.py; plans/docsim2.md), cumulative.
 # ds2-loops: raw loops grow by measured value per DOC page (every raw size a steady sound
 # allows is built as it would ship and scored against Munt, notes held 3 s), not by usage.
+# Revised 2026-11-13 after listening (docs/ninjatrackerplus.md, "docsim 2.0 trials"): the live
+# term, time alone in the mix counted extra, and loops valued only past the attack.
 [modes.ds2-loops]
 base = "per-song"
 loop_budget = "docsim2"
-docsim2_mod_weight = 3.0     # movement 3x: keeps the 5 verdicts and Syn Brass above Fretless
+docsim2_mod_weight = 1.0     # per-band movement; with live 0.2, all 8 listening verdicts hold (by >= 1.6 dB)
+docsim2_live_weight = 0.2    # how alive the whole sound is (depth as a ratio): MI153 organ 512 B loops sound flat
+alone_weight = 2.0           # time with k other parts counts 1 + 2/(1+k): little else in the mix (MI160, MI153)
+loop_time_after_attack = true   # a loop is valued by note time after the attack; staccato notes never reach it
+loop_exposure_cap_s = 20.0   # a loop counts long sustains in full (a short loop's sameness grows): MI160 opens on 20.6 s
 # ds2-pitch: ds2-loops, plus the pitch plan, zones and drum sizes priced with docsim2 over the
 # whole held note (docsim's first 0.6 s missed MI165's harsh sustain). Its scores are on
 # docsim2's scale (20 log10 of the loudness distance); the gain thresholds are unchanged.
@@ -158,8 +164,14 @@ base = "per-song"
 loop_budget = "docsim2"
 pitch_measure = "docsim2"
 exposure_cap_s = 3.0
-docsim2_mod_weight = 3.0     # movement 3x: keeps the 5 verdicts and Syn Brass above Fretless
+docsim2_mod_weight = 1.0     # per-band movement; with live 0.2, all 8 listening verdicts hold (by >= 1.6 dB)
+docsim2_live_weight = 0.2    # how alive the whole sound is (depth as a ratio): MI153 organ 512 B loops sound flat
+alone_weight = 2.0           # time with k other parts counts 1 + 2/(1+k): little else in the mix (MI160, MI153)
+loop_time_after_attack = true   # a loop is valued by note time after the attack; staccato notes never reach it
+loop_exposure_cap_s = 20.0   # a loop counts long sustains in full (a short loop's sameness grows): MI160 opens on 20.6 s
 drum_value_weight = 0.5      # a drum's dB at half a melodic one's: starved toms went unheard in the mix
+loops_take_zones = true      # a loop may take back zones and priced-merge own samples worth less per page
+zone_value_weight = 0.5      # an extra zone's dB at half a loop's: moved zones unheard (MI163/167), MI160 organ loop wanted
 # ds2-merges: ds2-pitch, plus merges priced per song: a program (rhythm key) shares a merged
 # sound's sample only when its notes score at most merge_max_cost_db (docsim2 dB) worse from it
 # than from their own sample. The bake-off put the line between Fretless 2 (0.08 of a train
@@ -169,8 +181,14 @@ base = "per-song"
 loop_budget = "docsim2"
 pitch_measure = "docsim2"
 exposure_cap_s = 3.0
-docsim2_mod_weight = 3.0     # movement 3x: keeps the 5 verdicts and Syn Brass above Fretless
+docsim2_mod_weight = 1.0     # per-band movement; with live 0.2, all 8 listening verdicts hold (by >= 1.6 dB)
+docsim2_live_weight = 0.2    # how alive the whole sound is (depth as a ratio): MI153 organ 512 B loops sound flat
+alone_weight = 2.0           # time with k other parts counts 1 + 2/(1+k): little else in the mix (MI160, MI153)
+loop_time_after_attack = true   # a loop is valued by note time after the attack; staccato notes never reach it
+loop_exposure_cap_s = 20.0   # a loop counts long sustains in full (a short loop's sameness grows): MI160 opens on 20.6 s
 drum_value_weight = 0.5      # a drum's dB at half a melodic one's: starved toms went unheard in the mix
+loops_take_zones = true      # a loop may take back zones and priced-merge own samples worth less per page
+zone_value_weight = 0.5      # an extra zone's dB at half a loop's: moved zones unheard (MI163/167), MI160 organ loop wanted
 merges = "priced"
 merge_max_cost_db = 1.0
 

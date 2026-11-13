@@ -517,7 +517,7 @@ def plan_loops(samples: list[ModSample], usage: dict[int, float], last_page: int
 
 def plan_loops_valued(samples: list[ModSample], usage: dict[int, float], last_page: int, max_loop: int,
                       score: Callable[[int, int], float], floor: float = 0.0, total: float | None = None,
-                      revertible: list[tuple[float, int, int, int, str]] = ()
+                      revertible: list[tuple[float, int, int, int, str]] = (), blocked: list | None = None
                       ) -> tuple[dict[int, int], list[str], dict[int, int]]:
     """plan_loops priced by measurement (`loop_budget = "docsim2"`): the steady sounds' loops
     grow to the raw sizes that most improve `score(i, size)` (dB, lower = closer to the
@@ -528,7 +528,8 @@ def plan_loops_valued(samples: list[ModSample], usage: dict[int, float], last_pa
     `revertible`: upgrades bought earlier on the same scale, as (value per page, sample index,
     block bytes before, after, name), drums from the value budget. A loop that doesn't fit may
     take them back, cheapest per page first and a drum's later steps before its earlier ones,
-    when each is worth less per page than the loop.
+    when each is worth less per page than the loop. `blocked` collects the loops that still
+    didn't fit, as (value per page, sample index, size, pages).
     Returns (loop size per melodic sample index, log lines, block bytes per reverted sample)."""
     sizes = {i: s.loop_len for i, s in enumerate(samples) if s.kind == "melodic" and s.loop_len}
     grow = {i for i, s in enumerate(samples) if s.kind == "melodic" and s.steady and usage.get(i, 0) > 0}
@@ -584,6 +585,8 @@ def plan_loops_valued(samples: list[ModSample], usage: dict[int, float], last_pa
         swap = (dict(over), []) if fits(trial, over) else take_back(v, trial)
         if swap is None:
             banned.add((i, z))
+            if blocked is not None:
+                blocked.append((v, i, z, pages))
             continue
         over, used = swap
         for r in used:

@@ -105,6 +105,30 @@ def _log_spectrum(x: np.ndarray, window_s: float = 0.06) -> np.ndarray:
     return np.log1p(np.interp(grid, np.fft.rfftfreq(8192, 1 / SR), mag))
 
 
+def same_sound(ref: np.ndarray, other: np.ndarray, sr: int, min_corr: float = 0.9,
+               seconds: float = 0.25) -> tuple[bool, float]:
+    """Whether `other` is `ref` played at another pitch (rhythm keys that play one PCM sample at
+    different pitches: the MT-32's toms), and the shift in semitones: `ref` resampled to each
+    shift within 3 semitones of pitch_offset's guess (0.1 steps), its best normalised
+    correlation with `other` over the first `seconds` from each onset. MT-32 toms 41 -> 45:
+    +5.5 semitones at 0.97, 45 -> 48: +5.9 at 0.91; a different drum stays far below."""
+    from scipy.signal import resample
+    a = np.asarray(ref[onset(ref):], dtype=np.float64)
+    b = np.asarray(other[onset(other):], dtype=np.float64)
+    n = int(seconds * sr)
+    z = b[:n]
+    guess = pitch_offset(ref, other)
+    best = (-1.0, 0.0)
+    for semis in np.arange(guess - 3.0, guess + 3.01, 0.1):
+        y = resample(a, max(2, int(len(a) / 2 ** (semis / 12))))[:n]
+        m = min(len(y), len(z))
+        if m < 8:
+            continue
+        c = float(np.dot(y[:m], z[:m]) / (np.linalg.norm(y[:m]) * np.linalg.norm(z[:m]) + 1e-12))
+        best = max(best, (c, float(semis)))
+    return best[0] >= min_corr, best[1]
+
+
 def pitch_offset(ref: np.ndarray, other: np.ndarray) -> int:
     """Semitone shift of `other` relative to `ref` (cross-correlation of their log-frequency
     spectra, so it works for unpitched sounds: rhythm keys that play one sample at

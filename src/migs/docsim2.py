@@ -15,8 +15,14 @@ The two loudness patterns are compared phase-free over the whole note:
   mod  how much each band's loudness moves (modulation depth in 0.5-2, 2-4, 4-8, 8-16 Hz
        over the sustain), compared per band and weighted by the band's loudness (after Dau,
        Kollmeier & Kohlrausch 1997): what a raw loop's chorus or rotary wobble is for.
-Melodic sounds score seg + w x mod (`docsim2_mod_weight`, 1 by default; the trials use 3:
-all five listening verdicts hold for 1-6, and above 4 Syn Brass falls below Fretless: docs/similarity-
+  live how alive the whole sound is: per modulation band, the depth averaged over the
+       auditory bands, compared as a ratio (|log10|, floor LIVE_FLOOR): losing nearly all of
+       a sound's movement (a 512 B loop of a shimmering organ) is heard as flat, and per band
+       the linear mod term scored it even with a 16 KB loop that adds a slow pulse.
+Melodic sounds score seg + w x mod + l x live (`docsim2_mod_weight`, 1 by default;
+`docsim2_live_weight`, 0 by default). The trials use w = 1, l = 0.2: all eight listening
+verdicts hold, by 1.6 dB or more, and they hold for any w in 0-3 with l in 0.1-1. Without
+live (w = 3, the first trials) MI153's opening organ loop came out even (docs/similarity-
 measures.md). Drums (one-shots) score the mean over the whole hit only (a
 decay is not movement, and a 37 ms bongo is one frame), with forward masking: each band's
 excitation decays no faster than a 25 ms time constant after a loud frame, so the 8-bit noise
@@ -50,6 +56,7 @@ F_LO, F_HI = 40.0, 12000.0
 SEGMENTS = ((0.03, 0.15), (0.15, 0.6), (0.6, 1.5), (1.5, None))
 MOD_BANDS = ((0.5, 2.0), (2.0, 4.0), (4.0, 8.0), (8.0, 16.0))
 MOD_FROM_S = 0.15                # modulation is measured in the sustain, after the attack
+LIVE_FLOOR = 0.01                # loudness-depth floor of the live term, near AM detection threshold
 VERSION = 2                      # bump when the measure changes (invalidates the disk cache)
 
 
@@ -149,6 +156,23 @@ def mod_distance(a: np.ndarray, b: np.ndarray, fs: float = DOC_RATE) -> float:
     return float(np.sum(w[:, None] * np.abs(dg - da)) / ((np.sum(w) * len(MOD_BANDS)) or 1.0))
 
 
+def live_distance(a: np.ndarray, b: np.ndarray, fs: float = DOC_RATE, floor: float = LIVE_FLOOR) -> float:
+    """How alive the whole sound is: per modulation band, the depth averaged over the auditory
+    bands (weighted by the reference's loudness), compared as a ratio, mean |log10| over the
+    modulation bands. Depth is heard as a ratio (modulation-depth discrimination is roughly
+    constant in dB: Wakefield & Viemeister 1990), so a loop that loses nearly all of a sound's
+    movement (MI153's Pipe Organ shimmer: 2-8 Hz depth 0.034 -> 0.004 at 512 B) costs far more
+    than one that adds a slow pulse to it (0.5-2 Hz 0.012 -> 0.050 at 16 KB). Per auditory band
+    (mod_distance) the two came out even; the user heard the short loop as flat and buzzy."""
+    t = min(a.shape[1], b.shape[1])
+    da, w = modulation(a[:, :t], fs)
+    dg, _ = modulation(b[:, :t], fs)
+    if not np.sum(w):
+        return 0.0
+    ga, gg = (w[:, None] * da).sum(0) / w.sum(), (w[:, None] * dg).sum(0) / w.sum()
+    return float(np.mean(np.abs(np.log10((gg + floor) / (ga + floor)))))
+
+
 def mean_distance(a: np.ndarray, b: np.ndarray) -> float:
     """sum|mean_b - mean_a| / sum mean_a over the whole of both patterns (drums)."""
     t = min(a.shape[1], b.shape[1])
@@ -157,12 +181,14 @@ def mean_distance(a: np.ndarray, b: np.ndarray) -> float:
 
 
 def distance(ref: np.ndarray, got: np.ndarray, drum: bool = False, fs: float = DOC_RATE,
-             mod_weight: float = 1.0) -> float:
-    """Melodic: seg + mod_weight x mod between two loudness patterns (reference first). Drum:
+             mod_weight: float = 1.0, live_weight: float = 0.0) -> float:
+    """Melodic: seg + mod_weight x mod + live_weight x live between two loudness patterns
+    (reference first). Drum:
     the whole hit's mean (make drum patterns with forward_s=DRUM_FORWARD_S)."""
     if drum:
         return mean_distance(ref, got)
-    return seg_distance(ref, got, fs) + mod_weight * mod_distance(ref, got, fs)
+    d = seg_distance(ref, got, fs) + mod_weight * mod_distance(ref, got, fs)
+    return d + live_weight * live_distance(ref, got, fs) if live_weight else d
 
 
 def db(d: float) -> float:
@@ -246,9 +272,9 @@ class Scorer:
 
     def __init__(self, render: Callable[[object, int], np.ndarray], sr: int, seconds: float = 3.0,
                  cache: Path | None = None, name: Callable[[object], object] = lambda p: p,
-                 mod_weight: float = 1.0):
+                 mod_weight: float = 1.0, live_weight: float = 0.0):
         self.render, self.sr, self.seconds, self.name = render, sr, seconds, name
-        self.mod_weight = mod_weight
+        self.mod_weight, self.live_weight = mod_weight, live_weight
         self.cache = Cache(cache)
         self._ref = functools.lru_cache(maxsize=256)(self._ref_pattern)
 
@@ -261,12 +287,17 @@ class Scorer:
         program than the sample's own prices a merge); `semis` defaults to key - s.key0 (a
         drum's offset is passed)."""
         sh = key - s.key0 if semis is None else semis
-        k = f"{sample_tag(s)}:{self.name(tag)}:{key}:{round(sh, 3)}:{int(drum)}:{self.seconds}:w{self.mod_weight:g}"
+        k = f"{sample_tag(s)}:{self.name(tag)}:{key}:{round(sh, 3)}:{int(drum)}:{self.seconds}:w{self.mod_weight:g}{self._live}"
 
         def compute() -> float:
             got = loudness_pattern(play_sample(s, sh, self.seconds))
-            return db(distance(self._ref(tag, key), got, drum, mod_weight=self.mod_weight))
+            return db(distance(self._ref(tag, key), got, drum, mod_weight=self.mod_weight,
+                               live_weight=self.live_weight))
         return self.cache.get(k, compute)
+
+    @property
+    def _live(self) -> str:
+        return f"l{self.live_weight:g}" if self.live_weight else ""
 
     def sample_db(self, s, tag, keys: dict[int, float], drum: bool = False) -> float:
         """Weighted mean score over `keys` (key -> weight, e.g. held note-seconds)."""
@@ -297,10 +328,10 @@ class NoteError:
     onset; results are cached on disk under `name` (ntpmod.doc_key)."""
 
     def __init__(self, name, render: Callable[[int], np.ndarray], sr: int, cache: Path | None = None,
-                 mod_weight: float = 1.0):
+                 mod_weight: float = 1.0, live_weight: float = 0.0):
         from . import docsim
         self.name, self.render, self.sr, self._docsim = name, render, sr, docsim
-        self.mod_weight = mod_weight
+        self.mod_weight, self.live_weight = mod_weight, live_weight
         self.cache = Cache(cache)
         self._ref = functools.lru_cache(maxsize=None)(lambda n: loudness_pattern(to_doc_rate(self.render(n), self.sr)))
         self._sample = functools.lru_cache(maxsize=64)(lambda k, r: docsim.stored(self.render(k), r))
@@ -311,8 +342,10 @@ class NoteError:
             s = self._sample(k, r)
             seconds = len(self.render(k)) / self.sr
             y = self._docsim.doc_play(s, r, n - k, seconds)
-            return db(distance(self._ref(n), loudness_pattern(y), mod_weight=self.mod_weight))
-        return self.cache.get(f"pitch:{self.name}:{k}:{round(rate)}:{n}:w{self.mod_weight:g}", compute)
+            return db(distance(self._ref(n), loudness_pattern(y), mod_weight=self.mod_weight,
+                               live_weight=self.live_weight))
+        live = f"l{self.live_weight:g}" if self.live_weight else ""
+        return self.cache.get(f"pitch:{self.name}:{k}:{round(rate)}:{n}:w{self.mod_weight:g}{live}", compute)
 
     def save(self) -> None:
         self.cache.save()

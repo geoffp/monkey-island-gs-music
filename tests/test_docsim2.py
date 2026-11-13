@@ -214,3 +214,33 @@ def test_inharmonic_energy_finds_partials_between_the_harmonics():
     c, s, b = (d2.inharmonic_db(y, FS, f0) for y in (clean, sub, buzz))
     assert c < -40 and s < -40
     assert b > c + 20
+
+
+def test_the_live_term_hears_a_static_copy_as_worse_than_an_extra_pulse():
+    """MI153's Pipe Organ: Munt shimmers (2-8 Hz); a 512 B loop is static, a 16 KB loop keeps
+    the shimmer and adds a slow pulse. Depth is heard as a ratio, so the static copy is the
+    worse one, whatever the per-band linear term says."""
+    t = np.arange(int(3.0 * FS)) / FS
+    base = tone(seconds=3.0)
+    slow = 1 + 0.03 * np.sin(2 * np.pi * 1.2 * t)                 # Munt moves a little at 0.5-2 Hz too
+    ref = pattern(base * slow * (1 + 0.15 * np.sin(2 * np.pi * 5 * t)))
+    static = pattern(base)
+    pulsed = pattern(base * (1 + 0.15 * np.sin(2 * np.pi * 5 * t + 1.0)) * (1 + 0.1 * np.sin(2 * np.pi * 1.2 * t)))
+    assert d2.live_distance(ref, static) > 2 * d2.live_distance(ref, pulsed)
+    assert d2.live_distance(ref, ref) == 0
+
+
+def test_live_weight_zero_is_the_old_measure():
+    a, b = pattern(tone(am=0.3)), pattern(tone(tilt=0.7))
+    assert d2.distance(a, b, mod_weight=3.0) == d2.distance(a, b, mod_weight=3.0, live_weight=0.0)
+    assert d2.distance(a, b, live_weight=0.2) > d2.distance(a, b)
+
+
+def test_the_scorer_keys_its_cache_by_the_live_weight(tmp_path):
+    f0 = 440 * 2 ** ((55 - 69) / 12)
+    ref = tone(f0, seconds=3.0, am=0.3) * 0.3
+    s = _looped(f0=f0, rate=16000.0)
+    s.key0 = 55
+    a = d2.Scorer(lambda tag, key: ref, FS, 3.0, tmp_path / "c.json")
+    b = d2.Scorer(lambda tag, key: ref, FS, 3.0, tmp_path / "c.json", live_weight=0.5)
+    assert b.note_db(s, 1, 55) > a.note_db(s, 1, 55)

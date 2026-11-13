@@ -86,6 +86,23 @@ def _budget(steps, plans=None, exposure=None, floor=0.01, last_page=255):
     return nm._value_budget(plans or {}, [mel], spec, cfg, last_page, exposure or {}, steps)
 
 
+def test_value_budget_records_the_zones_it_buys():
+    import numpy as np
+    import pytest
+    from migs import ntpsamples as smp
+    from migs.pitchplan import Plan, Zone
+    mel = smp.ModSample("A", np.zeros(1016 + 512), loop_start=1016, loop_len=512)
+    spec = {"melodic": [{"name": "A", "ntp_attack_bytes": 1016}]}
+    cfg = {"attack_bytes": 2040, "loop_bytes": 512, "upgrade_min_db_per_page": 0.01}
+    one = Plan((Zone(40, 60, 50, 20000.0, -5.0),), -5.0)
+    two = Plan((Zone(40, 50, 45, 20000.0, -8.0), Zone(51, 60, 55, 20000.0, -8.0)), -8.0)
+    zones: list = []
+    count, _, _ = nm._value_budget({"A": ([one, two], 10.0, -5.0, False)}, [mel], spec, cfg, 255, {"A": 1.0}, {},
+                                   [], zones)
+    assert count == {"A": 2}
+    assert zones == [(pytest.approx(3.0 / 6), "A", 2, 6)]        # 3 dB, all the exposure, 6 pages
+
+
 def test_value_budget_takes_the_best_db_per_page_and_may_jump_blocks():
     """Tom gains 0.2 dB at 16 pages and 3.8 more at 32: one step at a time it would stall."""
     steps = {"Tom": [(2048, -13.2, 0.35), (4096, -13.4, 0.7), (8192, -17.2, 0.74)],
@@ -232,7 +249,8 @@ def test_priced_merges_keep_a_merge_only_when_it_costs_little(monkeypatch):
 
     monkeypatch.setattr(nm, "build_melodic", lambda m, *a, **k: (S(m["name"]), ""))
     monkeypatch.setattr(nm, "build_drum", lambda d, *a, **k: (S(d["name"]), {c: (0, 1.0) for c in d["covers"]}, ""))
-    monkeypatch.setattr(nm, "cached_render", lambda *a, **k: np.zeros(100))
+    monkeypatch.setattr(nm, "cached_render", lambda munt, prog, key, *a, **k: np.full(100, float(key)))
+    monkeypatch.setattr(nm.audio, "same_sound", lambda x, y, sr: (False, 0.0))
     # score of (sample, program/key): own samples -20; the merged sound's: by how alike they are
     melodic_cost = {("Trombone", 90): -19.5, ("Trombone", 27): -15.0}
     drum_cost = {("Tom", 43): -24.8, ("Tom", 41): -10.0}
@@ -265,3 +283,148 @@ def test_priced_merges_keep_a_merge_only_when_it_costs_little(monkeypatch):
     assert [d["name"] for d in out["drum"]] == ["Tom", "Low Floor Tom"]
     assert out["drum"][0]["covers"] == [45, 43]
     assert any("Syn Brass4" in l and "own sample" in l for l in lines)
+
+
+def test_alone_counts_time_with_little_else_in_the_mix_extra():
+    """Time counts 1 + weight / (1 + k) while k other parts sound; a part's own chord doesn't
+    count (MI153's organ drone, MI160's opening organ over one held bass note)."""
+    import pytest
+    from migs.ntpmod import Alone
+    from migs.ntpsong import Note
+    organ = [Note(0.0, 4.0, 60, 100, 1), Note(0.0, 4.0, 64, 100, 1)]
+    bass = [Note(2.0, 3.0, 36, 100, 2)]
+    pad = [Note(2.5, 3.0, 70, 100, 3)]
+    a = Alone([(organ + bass + pad, {})], weight=2.0)
+    # alone 0-2 and 3-4 (x3), with the bass 2-2.5 (x2), with bass and pad 2.5-3 (x5/3)
+    assert a.exposure(organ[0]) == pytest.approx(3 * 3.0 + 2 * 0.5 + 5 / 3 * 0.5)
+    assert a.exposure(organ[0], 0.0, 1.0) == pytest.approx(3.0)       # capped at 1 s: all of it alone
+    assert a.exposure(organ[0], 2.5, 3.0) == pytest.approx(5 / 3 * 0.5)
+    assert a.exposure(bass[0]) == pytest.approx(2 * 0.5 + 5 / 3 * 0.5)   # under the organ, then organ + pad
+    assert Alone([(organ + bass, {})]).exposure(organ[0]) == pytest.approx(4.0)   # weight 0: plain note time
+
+
+def test_alone_ignores_zero_length_notes():
+    """A note whose off equals its on (they occur) must not make another part's count go
+    negative: MI152 and MI168 got infinite exposures and lost every upgrade."""
+    import math
+    from migs.ntpmod import Alone
+    from migs.ntpsong import Note
+    organ = Note(0.0, 4.0, 60, 100, 1)
+    blip, bass = Note(1.0, 1.0, 36, 100, 2), Note(1.0, 2.0, 38, 100, 3)
+    e = Alone([([organ, blip, bass], {})], weight=2.0).exposure(organ)
+    assert math.isfinite(e) and abs(e - (3 * 3.0 + 2 * 1.0)) < 1e-9
+    assert Alone([([organ, blip, bass], {})], weight=2.0).exposure(blip) == 0.0
+
+
+def test_a_loop_starts_after_its_attack_sooner_on_higher_keys():
+    import pytest
+    from migs.ntpmod import _loop_from
+    from migs.ntpsamples import ModSample
+    s = ModSample(name="x", data=bytes(2000), loop_start=1000, loop_len=512, key0=60, rate=10000.0)
+    assert _loop_from(s, 60) == pytest.approx(0.1)
+    assert _loop_from(s, 72) == pytest.approx(0.05)
+    assert _loop_from(ModSample(name="y", data=bytes(512), loop_len=512, rate=10000.0), 60) == 0.0
+
+
+def test_a_blocked_loop_takes_back_cheaper_zones_last_first_never_its_own():
+    from migs.ntpmod import _zones_for_loop
+    plans = {"Elec Organ": None, "Panpipes": None, "Marimba": None}
+    count = {"Elec Organ": 3, "Panpipes": 3, "Marimba": 2}
+    trade = {"zones": [(0.070, "Elec Organ", 2, 10), (0.075, "Panpipes", 2, 10), (0.035, "Marimba", 2, 10),
+                       (0.028, "Elec Organ", 3, 10), (0.022, "Panpipes", 3, 10)]}
+    blocked = [(0.040, "Elec Organ 64", 16384, 18), (0.001, "Fantasy", 8192, 30)]
+    want, left, lines, merge = _zones_for_loop(blocked, trade, count, plans)
+    assert want[1:3] == ("Elec Organ 64", 16384)
+    # cheapest first (Panpipes 3rd 0.022, then Marimba 0.035); the organ's own zones stay
+    assert left == {"Elec Organ": 3, "Panpipes": 2, "Marimba": 1} and len(lines) == 2 and not merge
+    assert _zones_for_loop([(0.040, "Elec Organ 64", 16384, 62)], trade, count, plans) is None   # not enough
+    assert _zones_for_loop([], trade, count, plans) is None
+
+
+def test_a_blocked_loop_takes_back_an_own_sample_worth_less_per_page():
+    """MI160 in ds2-merges: BottleBlow's own sample (worth less per page than the organ's
+    16 KB loop) goes back to its merge; the loop's own sound is never re-merged."""
+    from migs.ntpmod import _zones_for_loop
+    plans = {"Elec Organ": None, "Panpipes": None}
+    count = {"Elec Organ": 2, "Panpipes": 2}
+    trade = {"zones": [(0.050, "Panpipes", 2, 10)]}
+    owns = [(0.004, "BottleBlow", 12), (0.020, "Low Bongo", 2), (0.001, "Elec Organ", 40)]
+    want, left, lines, merge = _zones_for_loop([(0.014, "Elec Organ 64", 16384, 12)], trade, count, plans, owns)
+    assert merge == {"BottleBlow"} and left == count
+    assert _zones_for_loop([(0.014, "Elec Organ 64", 16384, 20)], trade, count, plans, owns) is None
+
+
+def test_own_samples_are_priced_per_page_like_upgrades():
+    import pytest
+    import numpy as np
+    from migs import ntpsamples as smp
+    from migs.ntpmod import _own_sample_values
+    s = [smp.ModSample("BottleBlow 55", np.zeros(1016 + 512), loop_start=1016, loop_len=512),
+         smp.ModSample("Low Bongo", np.zeros(512), kind="drum")]
+    trade = {"exposure": {"BottleBlow": 10.0, "Low Bongo": 5.0}, "total": 100.0}
+    got = dict((n, (v, p)) for v, n, p in _own_sample_values(
+        [("BottleBlow", 6.0, "melodic"), ("Low Bongo", 9.0, "drum")], trade, s, {"drum_value_weight": 0.5}))
+    pages_bb = sum(s[0].ntp_blocks()) // 256
+    assert got["BottleBlow"] == (pytest.approx(6.0 * 0.1 / pages_bb), pages_bb)
+    assert got["Low Bongo"][0] == pytest.approx(0.5 * 9.0 * 0.05 / got["Low Bongo"][1])
+
+
+def _drum_merge(monkeypatch, renders, same, hits=(41, 43, 45)):
+    class S:
+        def __init__(self, name):
+            self.name, self.data, self.rate, self.seconds = name, name, 1.0, 1.0
+    monkeypatch.setattr(nm, "build_drum", lambda d, *a, **k: (S(d["name"]), {c: (0, 1.0) for c in d["covers"]}, ""))
+    monkeypatch.setattr(nm, "cached_render", lambda munt, prog, key, *a, **k: renders[key])
+    monkeypatch.setattr(nm.audio, "same_sound", same)
+    monkeypatch.setattr(nm.audio, "onset", lambda x: 0)
+    # the merged sample is far worse than an own one: only identity or the same sound merges
+    monkeypatch.setattr(nm.docsim2, "drum_db", lambda ref, sr, data, rate, semis, secs: 0.0 if data == "Tom" else -25.0)
+
+    class Scorer:
+        cache = type("C", (), {"save": lambda self: None})()
+    monkeypatch.setattr(nm, "docsim2_scorer", lambda munt, cfg: Scorer())
+    spec = {"melodic": [], "drum": [{"name": "Tom", "key": 45, "covers": [45]},
+                                    {"name": "High Floor Tom", "key": 43, "covers": [43]},
+                                    {"name": "Low Floor Tom", "key": 41, "covers": [41]}]}
+    opts = {"melodic": [], "drum": [("Tom", 41), ("Tom", 43)]}
+    notes = [sg.Note(0.0, 0.1, k, 100, sg.RHYTHM) for k in hits]
+    lines = []
+    out = nm._priced_merges(spec, opts, [(notes, {})], {"merge_max_cost_db": 1.0}, None, None, lines.append)
+    return out, lines
+
+
+def test_identical_drum_keys_share_one_sample(monkeypatch):
+    """MI162 gave Low Floor Tom and High Floor Tom an own sample each, though the MT-32 plays
+    them identically (41/43, 45/47, 48/50 render bit for bit the same)."""
+    import numpy as np
+    r = {41: np.arange(50.0), 43: np.arange(50.0), 45: np.ones(50)}
+    out, lines = _drum_merge(monkeypatch, r, lambda x, y, sr: (False, 0.0))
+    assert [d["name"] for d in out["drum"]] == ["Tom", "Low Floor Tom"]
+    assert out["drum"][1]["covers"] == [41, 43]                 # one own sample for both
+    assert any("identical render" in line for line in lines)
+
+
+def test_a_drum_that_is_the_same_sound_at_another_pitch_merges_whatever_it_costs(monkeypatch):
+    import numpy as np
+    r = {41: np.arange(50.0), 43: np.arange(50.0), 45: np.ones(50)}
+    out, lines = _drum_merge(monkeypatch, r, lambda x, y, sr: (True, -5.5))
+    assert [d["name"] for d in out["drum"]] == ["Tom"]
+    assert sorted(out["drum"][0]["covers"]) == [41, 43, 45]
+    assert any("the same sound -5.5 semitones" in line for line in lines)
+
+
+def test_same_sound_finds_one_drum_at_another_pitch():
+    """The MT-32's toms are one PCM sample at three pitches; a different drum is not."""
+    import numpy as np
+    from scipy.signal import resample
+    from migs import audio
+    sr = 32000
+    t = np.arange(int(0.4 * sr)) / sr
+    tom = np.sin(2 * np.pi * (90 * t + 40 * (1 - np.exp(-t / 0.05)))) * np.exp(-t / 0.12)
+    tom = np.concatenate([np.zeros(200), tom])
+    up = resample(tom, int(len(tom) / 2 ** (5.5 / 12)))           # 5.5 semitones higher
+    same, semis = audio.same_sound(tom, up, sr)
+    assert same and abs(semis - 5.5) < 0.25
+    rng = np.random.default_rng(1)
+    snare = np.concatenate([np.zeros(200), rng.standard_normal(len(t)) * np.exp(-t / 0.05)])
+    assert not audio.same_sound(tom, snare, sr)[0]

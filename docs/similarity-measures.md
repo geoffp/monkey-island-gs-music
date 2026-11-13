@@ -32,6 +32,16 @@ Only these count as ground truth. Everything else in the tables is unjudged.
 | Pipe Org 2 played from the Elec Organ sample (merge) | "a train wreck" |
 | Violin 2 played from the Str Sect 3 sample (merge) | quite different; merge hurts |
 | Toms sharing one sample (merge) | doesn't matter much |
+| MI153 opening drone (keys 70/74): `inst-per-song` 16 KB loop vs `ds2-loops` 512 B | the 512 B loop is "flat, buzzy" (2026-11-13) |
+| MI160 Elec Organ: `ds2-loops` 16 KB vs `ds2-pitch` 512 B (with more zones) | losing the long loop is bad: the organ is a first impression, with little else in the mix |
+| MI159 Elec Organ: `ds2-loops` 16 KB vs `inst-per-song` 512 B | the long loop keeps its tremolo |
+| MI165 Shakuhachi: `ds2-loops` 16 KB vs `inst-per-song` 512 B | the trade for longer loops is good |
+| MI165 in `ds2-merges` (Syn Brass4, Elec Bass1 own samples) | "dramatically more faithful" |
+| MI163, MI167: `ds2-pitch` vs `ds2-loops` (zones moved) | about the same |
+| MI162 Low Floor Tom vs High Floor Tom (own samples each) | exactly the same; all toms likely one sound at several pitches (revises the toms row above). Measured: 41/43, 45/47, 48/50 bit-identical; 41 → 45 +5.5 st (r 0.97), 45 → 48 +5.9 st (r 0.91) |
+| MI161 Violin 2 own sample, `ds2-merges` | sounds great |
+| MI165 `ds2-merges` with the Shakuhachi's long loops given to Syn Brass4 | quite good, but losing the Shakuhachi loop is "a bummer" |
+| MI165 A/B, same pages: A Syn Brass4 two 8 KB loops vs B Shakuhachi 76 16 KB | A, narrowly ("the brass loops matter more than I thought"; "sort of a toss-up"). The measure agrees: 0.0185 and 0.0116 vs 0.0076 dB/page |
 
 Five verdicts can rule a measure out but can't fit one. The weights below are therefore not
 fitted, and more A/B verdicts (especially on loops) are the next input.
@@ -233,6 +243,42 @@ played key, inharmonic excess over Munt > 6 dB", would flag this kind of problem
 its cause. A/B file: scratch `listen/MI153_organ_keys_munt_vs_doc.wav` (Munt, then DOC, for
 keys 52, 53, 54, 57, 60, 43, 45, 46, 48, 36, 38).
 
+## Revision after listening: the live term (2026-11-13)
+The first trials (mod weight 3) called MI153's opening drone a tie: 16 KB loop −17.4 dB,
+512 B −18.6 dB (3 s; −17.3 and −18.7 at 10 s), but the user heard the 512 B loop as flat and
+buzzy. Modulation depth, averaged over the auditory bands, of the steady part of a 10 s note
+(scratch `slowmod.py`):
+
+| note | version | 0.5–2 Hz | 2–8 Hz | 8–16 Hz |
+|---|---|---|---|---|
+| Pipe Organ 74 | Munt | 0.005 | 0.078 | 0.022 |
+| | 16 KB loop | 0.059 | 0.106 | 0.021 |
+| | 512 B loop | 0.001 | 0.004 | 0.002 |
+| Elec Organ 64 (MI160) | Munt | 0.118 | 0.169 | 0.108 |
+| | 16 KB loop | 0.153 | 0.159 | 0.112 |
+| | 512 B loop | 0.026 | 0.015 | 0.006 |
+
+The 512 B organ loop loses nearly all of Munt's 2–8 Hz shimmer. The 16 KB loop keeps it but
+adds a ~1 Hz pulse (its own repeat). The `mod` term compares depth linearly, per auditory
+band, so the missing shimmer and the added pulse cost about the same. Depth discrimination is
+roughly constant in dB (Wakefield & Viemeister 1990), so the new `live` term compares the band-averaged
+depth per modulation band as a ratio: mean |log10((g + f) / (r + f))|, with floor f = 0.01
+(near the AM detection threshold, in loudness units).
+
+All eight melodic verdicts above, scored at 3 s (scratch `verdicts.py` → `vanal.py`; margin =
+worse side's dB − better side's, a positive margin = right):
+
+| setting | right | margins (153, 160 pitch, 160 no-merges, 159, 165 Shakuhachi, Syn Brass4, Pipe Org 2, Violin 2) |
+|---|---|---|
+| mod 3 (first trials) | 7/8 | −0.1 +3.2 +3.2 +2.4 +1.6 +1.5 +9.4 +7.7 |
+| mod 1, live 0.2, floor 0.01 (**chosen**) | 8/8 | +1.9 +4.2 +4.2 +2.9 +2.4 +1.6 +9.8 +6.1 |
+| mod 0, live 0.1–1 | 8/8 | smallest margin 0.8–1.8 |
+| mod 3, live 0.1–0.2 | 8/8 | smallest margin 0.6–1.3 |
+
+The verdicts hold for every setting tried with live ≥ 0.1, with both floors (0.003, 0.01) and
+with modulation measured from 0.15 or 0.6 s, so the choice is not a fit to these cases.
+Mod 1 with live 0.2 keeps the widest smallest margin.
+
 ## Limitations
 - Munt is the reference, not a real MT-32. The DOC model is the build's (no analogue stage,
   no 6-bit Cxx volume steps).
@@ -260,6 +306,7 @@ are all large. It is ruled out as a judge for this.
 - Schroeder, M. R., Atal, B. S., Hall, J. L. (1979). Optimizing digital speech coders by exploiting masking properties of the human ear. *JASA* 66, 1647–1652.
 - Zwicker, E., Fastl, H. *Psychoacoustics: Facts and Models* (specific loudness, power 0.23); ISO 532-1:2017.
 - Dau, T., Kollmeier, B., Kohlrausch, A. (1997). Modeling auditory processing of amplitude modulation. I. *JASA* 102, 2892–2905.
+- Wakefield, G. H., Viemeister, N. F. (1990). Discrimination of modulation depth of sinusoidal amplitude modulation (SAM) noise. *JASA* 88, 1367–1373 (depth discrimination roughly constant in 20 log m: the `live` term's ratio).
 - ITU-R BS.1387 (PEAQ), https://www.itu.int/rec/R-REC-BS.1387
 - MoSQITo, https://github.com/Eomys/MoSQITo (PyPI `mosqito`, Apache-2.0)
 - visqol-python, https://pypi.org/project/visqol-python/ (port of https://github.com/google/visqol)
