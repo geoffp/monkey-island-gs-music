@@ -466,6 +466,32 @@ def _valued_loops(samples: list[ModSample], song_spec: dict, ranges: dict, usage
     return sizes, {samples[i].name: b for i, b in reverted.items()}
 
 
+def inharmonic_warnings(samples: list[ModSample], programs: dict, usage_notes: list[tuple[int, Note]], munt: Munt,
+                        hold: float, limit_db: float = 6.0) -> list[str]:
+    """Build check (log only): for each steady looped sample, its lowest and highest played
+    keys through the DOC model against Munt's notes; a key whose inharmonic energy (between
+    the harmonics: images, carried beating) is more than `limit_db` above Munt's is reported."""
+    keys: dict[int, tuple[int, set[int]]] = {}
+    for prog, n in usage_notes:
+        si = sample_for(programs, prog, n.key)
+        if si is not None:
+            keys.setdefault(si, (prog, set()))[1].add(n.key)
+    out = []
+    for si, (prog, ks) in sorted(keys.items()):
+        s = samples[si]
+        if s.kind != "melodic" or not s.loop_len or not s.steady:
+            continue
+        for k in sorted({min(ks), max(ks)}):
+            x = cached_render(munt, prog, k, hold)
+            ref = x[audio.onset(x):]
+            got = docsim2.play_sample(s, k - s.key0, hold)
+            excess = docsim2.inharmonic_db(got, docram.DOC_RATE, key_hz(k)) - docsim2.inharmonic_db(ref, SR, key_hz(k))
+            if excess > limit_db:
+                out.append(f"  inharmonic {s.name:<16} key {k:3d}: {excess:+5.1f} dB over Munt "
+                           f"({k - s.key0:+d} semitones from its key, {s.rate:.0f} Hz)")
+    return out
+
+
 def drop_least_used(spec: dict, songs: list[tuple[list[Note], dict]], room: int, log=lambda *a: None) -> dict:
     """`spec` with its least-played sounds (fewest notes; ties: the later entry) left out until
     at most `room` remain: a MOD holds 31 samples, one of them the rest. Their notes go
@@ -596,6 +622,10 @@ def sample_set(spec: dict, cfg: dict, songs: list[tuple[list[Note], dict]], last
         song_spec = {**song_spec, "melodic": [{**m, "ntp_loop_bytes": by_name.get(m["name"], cfg["loop_bytes"])}
                                               for m in song_spec["melodic"]]}
         samples, programs, drums = build(song_spec)
+    if cfg.get("inharmonic_check", True):
+        for line in inharmonic_warnings(samples, programs, usage_notes, munt, song_spec.get("hold_seconds", 2.0),
+                                        cfg.get("inharmonic_limit_db", 6.0)):
+            log(line)
     return samples, programs, drums
 
 

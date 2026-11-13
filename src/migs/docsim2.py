@@ -330,3 +330,29 @@ def drum_db(ref: np.ndarray, sr: int, sample: np.ndarray, rate: float, semis: fl
     want = to_doc_rate(ref[:int(n / DOC_RATE * sr) + 1], sr)[:n]
     return db(distance(loudness_pattern(want, forward_s=DRUM_FORWARD_S),
                        loudness_pattern(got, forward_s=DRUM_FORWARD_S), drum=True))
+
+
+def a_weight(f: np.ndarray) -> np.ndarray:
+    """IEC 61672 A-weighting (amplitude)."""
+    f2 = np.asarray(f, dtype=np.float64) ** 2
+    return (12194.0 ** 2 * f2 ** 2) / ((f2 + 20.6 ** 2) * np.sqrt((f2 + 107.7 ** 2) * (f2 + 737.9 ** 2))
+                                      * (f2 + 12194.0 ** 2))
+
+
+def inharmonic_db(y: np.ndarray, fs: float, f0: float, t0: float = 0.3, t1: float = 1.8) -> float:
+    """Share of a held note's energy (A-weighted, 20 Hz - 5 kHz, t0..t1 s) that lies between
+    the note's harmonics and its sub-octave's, in dB: drop-sample images and a sample's
+    beating carried to keys where the MT-32 has none sound as a buzz (MI153's pipe organ:
+    docs/similarity-measures.md)."""
+    seg = np.asarray(y[int(t0 * fs):int(t1 * fs)], dtype=np.float64)
+    if len(seg) < 1024:
+        return float("nan")
+    nfft = 1 << int(np.ceil(np.log2(len(seg) * 4)))
+    P = np.abs(np.fft.rfft(seg * np.hanning(len(seg)), nfft)) ** 2
+    f = np.fft.rfftfreq(nfft, 1 / fs)
+    P *= a_weight(np.maximum(f, 1.0)) ** 2
+    band = (f > 20) & (f < 5000)
+    h = f / (f0 / 2)
+    near = np.abs(h - np.round(h)) * (f0 / 2) < np.maximum(6.0, 0.015 * f0)
+    tot = P[band].sum() or 1.0
+    return float(10 * np.log10(P[band & ~near].sum() / tot + 1e-12))

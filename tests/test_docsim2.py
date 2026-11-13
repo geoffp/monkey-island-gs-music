@@ -203,3 +203,14 @@ def test_drum_score_prefers_the_higher_rate():
     s_lo = d2.drum_db(hit, sr, lo / np.max(np.abs(lo)), 6000.0, 0.0, 0.4)
     s_hi = d2.drum_db(hit, sr, hi / np.max(np.abs(hi)), 22000.0, 0.0, 0.4)
     assert s_hi < s_lo
+
+
+def test_inharmonic_energy_finds_partials_between_the_harmonics():
+    f0 = 220.0
+    t = np.arange(int(2.0 * FS)) / FS
+    clean = sum(np.sin(2 * np.pi * f0 * h * t) / h for h in range(1, 10))
+    sub = clean + 0.3 * np.sin(2 * np.pi * f0 / 2 * t)                 # a sub-octave is harmonic here
+    buzz = clean + 0.1 * np.sin(2 * np.pi * f0 * 2.37 * t)             # an image between harmonics
+    c, s, b = (d2.inharmonic_db(y, FS, f0) for y in (clean, sub, buzz))
+    assert c < -40 and s < -40
+    assert b > c + 20
