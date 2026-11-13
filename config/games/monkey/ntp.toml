@@ -110,9 +110,30 @@ drum_floor_lsb = 1.5    # drums end at the 8-bit floor (drum_end: junk near the 
 ntp_attack_bytes = { "Elec Organ" = 1016, "Sax" = 1016, "Acou Bass" = 1016, "Vibes" = 1016 }
 
 # The two builds (justfile `ntp_modes`): build/<game>/ntp/<name>/ and /songs/<NAME> on the disks
-# (INST.PER.SONG, INST.SHARED). Each is its sample-set mode with nothing overridden.
+# (INST.PER.SONG, INST.SHARED). inst-shared is its sample-set mode with nothing overridden.
+# inst-per-song is docsim 2.0's planner (src/migs/docsim2.py; docs/ninjatrackerplus.md, "docsim 2.0
+# trials"), the trial `ds2-merges` until 2026-11-13, made the default after listening:
+# - loops, zones, sampled keys and drum sizes are all priced by docsim2 against Munt, per DOC page;
+# - a part's time counts more with little else in the mix; a loop counts only time past the
+#   attack, over sustains up to 20 s; an extra zone counts at half a loop's value;
+# - merges are decided per song: a program or rhythm key shares a merged sound's sample only when
+#   it scores at most 1 dB worse from it (identical rhythm keys, and one drum at another pitch,
+#   always share).
 [modes.inst-per-song]
 base = "per-song"
+loop_budget = "docsim2"
+pitch_measure = "docsim2"
+exposure_cap_s = 3.0         # zones and drums: each note counted up to the 3 s docsim2 hears
+docsim2_mod_weight = 1.0     # per-band movement; with live 0.2, all 8 listening verdicts hold (by >= 1.6 dB)
+docsim2_live_weight = 0.2    # how alive the whole sound is (depth as a ratio): MI153 organ 512 B loops sound flat
+alone_weight = 2.0           # time with k other parts counts 1 + 2/(1+k): little else in the mix (MI160, MI153)
+loop_time_after_attack = true   # a loop is valued by note time after the attack; staccato notes never reach it
+loop_exposure_cap_s = 20.0   # a loop counts long sustains in full (a short loop's sameness grows): MI160 opens on 20.6 s
+drum_value_weight = 0.5      # a drum's dB at half a melodic one's: starved toms went unheard in the mix
+loops_take_zones = true      # a loop may take back zones and priced-merge own samples worth less per page
+zone_value_weight = 0.5      # an extra zone's dB at half a loop's: moved zones unheard (MI163/167), MI160 organ loop wanted
+merges = "priced"            # per song (the bake-off put the line between Fretless 2, fine, and Syn Brass4, harsh)
+merge_max_cost_db = 1.0
 [modes.inst-shared]
 base = "shared"
 
@@ -132,65 +153,8 @@ base = "shared"
 # base = "per-song"
 # pitch_plan = false
 
-# Trial (2026-11-12): no merges. Every MT-32 program and rhythm key the songs play gets its own
-# sample, instead of the one mt32sounds.toml's `covers` share for the 16-slot MIDI Synth bank
-# (e.g. MI165's Syn Brass4 chords on Trombone 2's sample: 5-7 dB more at 2-4 kHz; its Elec
-# Bass1 on Acou Bass2's: 15-30 dB less at 1-4 kHz). Per-song only: the shared set's 31 MOD
-# slots are full.
-[modes.no-merges]
-base = "per-song"
-merges = false
-
-# Trials (2026-11-13): docsim 2.0 (src/migs/docsim2.py; plans/docsim2.md), cumulative.
-# ds2-loops: raw loops grow by measured value per DOC page (every raw size a steady sound
-# allows is built as it would ship and scored against Munt, notes held 3 s), not by usage.
-# Revised 2026-11-13 after listening (docs/ninjatrackerplus.md, "docsim 2.0 trials"): the live
-# term, time alone in the mix counted extra, and loops valued only past the attack.
-[modes.ds2-loops]
-base = "per-song"
-loop_budget = "docsim2"
-docsim2_mod_weight = 1.0     # per-band movement; with live 0.2, all 8 listening verdicts hold (by >= 1.6 dB)
-docsim2_live_weight = 0.2    # how alive the whole sound is (depth as a ratio): MI153 organ 512 B loops sound flat
-alone_weight = 2.0           # time with k other parts counts 1 + 2/(1+k): little else in the mix (MI160, MI153)
-loop_time_after_attack = true   # a loop is valued by note time after the attack; staccato notes never reach it
-loop_exposure_cap_s = 20.0   # a loop counts long sustains in full (a short loop's sameness grows): MI160 opens on 20.6 s
-# ds2-pitch: ds2-loops, plus the pitch plan, zones and drum sizes priced with docsim2 over the
-# whole held note (docsim's first 0.6 s missed MI165's harsh sustain). Its scores are on
-# docsim2's scale (20 log10 of the loudness distance); the gain thresholds are unchanged.
-# Exposure counts each note up to 3 s, the window docsim2 hears, and loops trade pages with
-# zones and drums on that one scale (a loop may take back a drum upgrade worth less per page).
-[modes.ds2-pitch]
-base = "per-song"
-loop_budget = "docsim2"
-pitch_measure = "docsim2"
-exposure_cap_s = 3.0
-docsim2_mod_weight = 1.0     # per-band movement; with live 0.2, all 8 listening verdicts hold (by >= 1.6 dB)
-docsim2_live_weight = 0.2    # how alive the whole sound is (depth as a ratio): MI153 organ 512 B loops sound flat
-alone_weight = 2.0           # time with k other parts counts 1 + 2/(1+k): little else in the mix (MI160, MI153)
-loop_time_after_attack = true   # a loop is valued by note time after the attack; staccato notes never reach it
-loop_exposure_cap_s = 20.0   # a loop counts long sustains in full (a short loop's sameness grows): MI160 opens on 20.6 s
-drum_value_weight = 0.5      # a drum's dB at half a melodic one's: starved toms went unheard in the mix
-loops_take_zones = true      # a loop may take back zones and priced-merge own samples worth less per page
-zone_value_weight = 0.5      # an extra zone's dB at half a loop's: moved zones unheard (MI163/167), MI160 organ loop wanted
-# ds2-merges: ds2-pitch, plus merges priced per song: a program (rhythm key) shares a merged
-# sound's sample only when its notes score at most merge_max_cost_db (docsim2 dB) worse from it
-# than from their own sample. The bake-off put the line between Fretless 2 (0.08 of a train
-# wreck: fine) and Syn Brass4 (0.20: heard as harsh), about 1 dB.
-[modes.ds2-merges]
-base = "per-song"
-loop_budget = "docsim2"
-pitch_measure = "docsim2"
-exposure_cap_s = 3.0
-docsim2_mod_weight = 1.0     # per-band movement; with live 0.2, all 8 listening verdicts hold (by >= 1.6 dB)
-docsim2_live_weight = 0.2    # how alive the whole sound is (depth as a ratio): MI153 organ 512 B loops sound flat
-alone_weight = 2.0           # time with k other parts counts 1 + 2/(1+k): little else in the mix (MI160, MI153)
-loop_time_after_attack = true   # a loop is valued by note time after the attack; staccato notes never reach it
-loop_exposure_cap_s = 20.0   # a loop counts long sustains in full (a short loop's sameness grows): MI160 opens on 20.6 s
-drum_value_weight = 0.5      # a drum's dB at half a melodic one's: starved toms went unheard in the mix
-loops_take_zones = true      # a loop may take back zones and priced-merge own samples worth less per page
-zone_value_weight = 0.5      # an extra zone's dB at half a loop's: moved zones unheard (MI163/167), MI160 organ loop wanted
-merges = "priced"
-merge_max_cost_db = 1.0
+# Past trials (no-merges 2026-11-12; ds2-loops, ds2-pitch 2026-11-13, the steps to inst-per-song):
+# docs/ninjatrackerplus.md, "Sound merges" and "docsim 2.0 trials".
 
 # Per-song overrides, e.g.:
 # [songs.160]

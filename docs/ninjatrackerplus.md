@@ -510,7 +510,11 @@ The measure: `src/migs/docsim2.py`, chosen in a bake-off against listening verdi
 (`docs/similarity-measures.md`); plan `plans/docsim2.md`. Three cumulative per-song trials,
 disk folders `DS2.LOOPS`, `DS2.PITCH`, `DS2.MERGES`. First listened to 2026-11-13; revised
 the same day (below, "Revision after listening"). The list that follows describes the first
-version.
+version. **Made the default 2026-11-13:** after the third round the user found everything
+"sounds awesome", so `ds2-merges`' settings became `[modes.inst-per-song]` in MI1's `ntp.toml`.
+The trial modes and their disk folders were removed, and the disk again holds `INST.PER.SONG`
+and `INST.SHARED`. `inst-shared` is unchanged; it keeps the configured merges, since its 31
+slots are full.
 
 - **`ds2-loops`** (`loop_budget = "docsim2"`): every raw loop size a steady sound allows is
   built as it would ship (attack, loop, row contour) and scored against Munt (notes held 3 s,
@@ -692,7 +696,7 @@ extra weight for a lead's held notes.
 What each option buys and costs, as measured. Sizes are totals over all 16 songs. Pattern data is 256 B per track per 64-row pattern, so allocation options change it through the track count; sample options change the sample data. Where a cost hasn't been measured, the entry says so.
 
 **Sample sets**
-- **`samples = "per-song"` vs `"shared"`.** *Per-song:* each `.NTP` carries only its own sounds, and free DOC RAM grows steady sounds into long raw loops (better sustains; per-song Elec Organ's 8192 B loop holds its rotary wobble). *Shared:* one bank for every song, byte-identical in each file, so a game can keep it resident; every sound gets a 512 B loop, and four attacks are shortened to fit (below). *Size:* per-song 1101 KB of `.NTP`, shared 1376 KB, because every shared file carries the whole ~54 KB bank; with a resident bank a game loads only header + patterns per song (shared patterns 516 KB). *Polyphony:* about the same (shared drops 2, audible steals 180; per-song 3, 280).
+- **`samples = "per-song"` vs `"shared"`.** *Per-song:* each `.NTP` carries only its own sounds, and free DOC RAM grows steady sounds into long raw loops (better sustains; per-song Elec Organ's 8192 B loop holds its rotary wobble). *Shared:* one bank for every song, byte-identical in each file, so a game could keep it resident (only with a custom NTP loader that keeps the instruments in DOC RAM between songs; whether that loading speed is worth building one is open, 2026-11-13); every sound gets a 512 B loop, and four attacks are shortened to fit (below). *Size:* per-song 1101 KB of `.NTP`, shared 1376 KB, because every shared file carries the whole ~54 KB bank; with a resident bank a game loads only header + patterns per song (shared patterns 516 KB). *Polyphony:* about the same (shared drops 2, audible steals 180; per-song 3, 280).
 - **`ntp_attack_bytes` (shared: Elec Organ, Sax, Acou Bass, Vibes at 1016 B).** Keeps the 16-page sound-effect reserve in the shared bank (−16 pages), at the least measured cost: log-spectral distance vs Munt over the first 0.6 s changes −0.28…+0.06 dB.
 - **`release_rows = "mean"`** (default since 2026-11-12). A release row plays the release's mean gain over the row, so fast releases (Elec Org 2, Accordion: -20 dB in 10 ms) no longer hold full volume for a row. *Gains:* closer balance to the MT-32 (M2101, energy vs the drums: Accordion +8.1 -> +5.0 dB) and fewer steals (MI160 387 -> 300). *Cost:* none in size. Heard as "both a fidelity improvement and a stealing improvement".
 - **`row_fit = "short-notes"`** (off; per song if needed). Rows halve until the song's short notes fit. *Gains:* short notes stay short, timing error falls (MI153 12.7 -> 8.4 ms), more steals saved (MI160 -> 220). *Cost:* MI1's `.NTP` +17 % (1,436 -> 1,688 KB; MI153 +67 %). Heard as "a tiny bit better, but it doesn't pay for the inflated file size".

@@ -2,7 +2,8 @@
 
 Background, measurements and sources: `docs/similarity-measures.md`. Prototype: `plans/docsim2_prototype.py`.
 
-**Status (2026-11-13): built on branch `docsim2`** as trials `ds2-loops`, `ds2-pitch`, `ds2-merges` plus the
+**Status (2026-11-13): the default for MI1's `inst-per-song`** (the `ds2-merges` trial's settings), merged
+to main. History: built on branch `docsim2` as trials `ds2-loops`, `ds2-pitch`, `ds2-merges` plus the
 inharmonic build check (steps 1–5 below), results in `docs/ninjatrackerplus.md` ("docsim 2.0 trials").
 Listened to once and revised ("Revision after listening": the `live` term, exposure graded by how much
 else is playing, loops valued past the attack and over long sustains, loops taking back zones). Waiting for a
@@ -11,6 +12,12 @@ second listen. Open:
   the full build). Own samples still take their pages before the budget runs. MI165's Shakuhachi gets
   512 B loops in `ds2-merges` (its held notes are worth less per page than Syn Brass4's 8 KB loops):
   unjudged.
+- **The shared set and the other games don't use docsim2.** `inst-shared` keeps the configured merges and
+  the old planner (its 31 slots are full, so per-song merges don't apply), and MI2 and Fate of Atlantis keep
+  their own `ntp.toml`. Whether a game port wants the shared set at all is open. It only pays off with a
+  custom NTP loader that keeps the instruments in DOC RAM between songs, for faster music loading, and
+  whether to build one hasn't been decided. Carrying docsim2's loop and zone pricing to `inst-shared` or to
+  the other games would be a trial.
 - **Pipe Organ Lo 43** is stuck at 12.5 kHz (f0 × 2^n with 512 B E′+ loops). Options: allow up to 26.3 kHz
   for short loops, or a 1 KB loop.
 - **Weights** are set by one or two verdicts each (live 0.2; alone 2; loop cap 20 s; zones 0.5; drums 0.5;

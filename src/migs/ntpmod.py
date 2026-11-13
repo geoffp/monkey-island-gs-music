@@ -9,7 +9,8 @@ set for each song (ntpsamples: Munt renders packed as NTP packs DOC RAM), the ar
 
 Sample sets: "per-song" gives each song only the sounds it plays and spends its free DOC RAM
 on longer loops; "shared" builds one set for every song, byte-identical in each file, so a
-game can keep it resident (like the MIDI Synth bank).
+game could keep it resident (like the MIDI Synth bank) if its player kept the instruments in
+DOC RAM between songs; whether a game wants that is open (plans/docsim2.md).
 """
 
 from __future__ import annotations
