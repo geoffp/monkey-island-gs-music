@@ -8,7 +8,9 @@ step is measured from 25 % to 90 % of its length: the level of each tone (a Hann
 at the strongest bin within ±3 % of its expected frequency), in dB relative to the pilot, so
 gain changes after the DOC cancel.
 
-Output: a table per section, and a CSV (step, section, DOC volume, levels) for the curve.
+Output: a table per section, a CSV (step, section, DOC volume, levels), and with --curve the
+curve file the NTP build reads (`doc_volume = "measured"`, migs.docvolume): section A's level of
+each MOD volume 1..64 in dB relative to volume 64.
 Section A's levels are also given relative to a linear DOC (level at volume 64 scaled by
 volume / 64): 0 dB everywhere means linear, as in the emulators.
 """
@@ -22,7 +24,7 @@ import math
 from pathlib import Path
 
 import numpy as np
-from scipy.io import wavfile
+import soundfile
 
 PAL_CLOCK = 7093789.2
 
@@ -32,15 +34,9 @@ def doc_volume(mod_volume: int) -> int:
 
 
 def load(path: Path) -> tuple[np.ndarray, int]:
-    rate, data = wavfile.read(path)
-    x = data.astype(np.float64)
-    if data.dtype.kind == "i":
-        x /= float(np.iinfo(data.dtype).max)
-    elif data.dtype.kind == "u":
-        x = (x - 128.0) / 128.0
-    if x.ndim > 1:
-        x = x.sum(axis=1)
-    return x, rate
+    """The recording as float samples, channels summed (WAV, FLAC, AIFF: whatever libsndfile reads)."""
+    x, rate = soundfile.read(path, dtype="float64", always_2d=True)
+    return x.sum(axis=1), rate
 
 
 def tone_level(seg: np.ndarray, rate: int, freq: float, search: float = 0.03) -> tuple[float, float]:
@@ -139,14 +135,29 @@ def report(res: dict, out_csv: Path | None) -> str:
     return "\n".join(lines)
 
 
+def curve_toml(res: dict, source: str) -> str:
+    """Section A as migs.docvolume reads it: level_db[i] = MOD volume i+1, dB relative to 64."""
+    a = {r["test"]: r["test_db"] for r in res["results"] if r["section"] == "A"}
+    vals = [round(a[m] - a[64], 1) + 0.0 for m in range(1, 65)]
+    lines = ["  " + ", ".join(f"{v:.1f}" for v in vals[i:i + 8]) + "," for i in range(0, 64, 8)]
+    return ("# The real DOC's volume curve, computed by doc-sweep-analyse from a recording of the DOC\n"
+            "# volume sweep (docs/es5503.md). level_db[i] = MOD volume i+1, dB relative to MOD volume 64.\n"
+            f"source = {json.dumps(source)}\n"
+            "level_db = [\n" + "\n".join(lines) + "\n]\n")
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("wav", type=Path, help="recording of the sweep (WAV)")
+    ap.add_argument("wav", type=Path, help="recording of the sweep (WAV, FLAC, ...)")
     ap.add_argument("steps", type=Path, help="the step list doc-sweep wrote (DOCSWEEP.json)")
     ap.add_argument("--csv", type=Path, help="write the measurements here")
+    ap.add_argument("--curve", type=Path, help="write the volume curve the NTP build reads here")
     a = ap.parse_args(argv)
     res = analyse(a.wav, json.loads(a.steps.read_text()))
     print(report(res, a.csv))
+    if a.curve:
+        a.curve.parent.mkdir(parents=True, exist_ok=True)
+        a.curve.write_text(curve_toml(res, a.wav.name))
     return 0
 
 

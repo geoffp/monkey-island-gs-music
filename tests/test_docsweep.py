@@ -78,3 +78,20 @@ def test_report_is_one_self_contained_page(tmp_path):
     page = docsweep_report.render(docsweep_report.load(csv_path))
     assert "{{" not in page and "<script src" not in page and "http://" not in page.replace("http://www.w3.org/2000/svg", "")
     assert page.count("<tr><td>") == 64 and "−0.0<" not in page
+
+
+def test_curve_file_is_what_docvolume_reads(tmp_path):
+    import tomllib
+    from migs import docvolume
+    _, meta = docsweep.mod_bytes()
+    rate = 22050
+    flac = tmp_path / "rec.flac"
+    import soundfile
+    soundfile.write(flac, _synth(meta, rate, lambda d: d / 255), rate)       # FLAC, as kept in measurements/
+    res = docsweep_analyse.analyse(flac, meta)
+    path = tmp_path / "curve.toml"
+    path.write_text(docsweep_analyse.curve_toml(res, flac.name))
+    levels = docvolume.load_curve(path)
+    assert levels[63] == 0.0 and abs(levels[31] - 20 * math.log10(127 / 255)) < 0.3
+    vmap = docvolume.volume_map(levels)                                  # a linear DOC maps to itself, within
+    assert vmap[0] == 0 and vmap[64] == 64 and all(abs(v - m) <= 1 for m, v in enumerate(vmap))   # NTP's rounding

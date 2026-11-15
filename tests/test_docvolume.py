@@ -3,6 +3,8 @@
 
 import math
 
+import pytest
+
 from migs import docvolume
 
 
@@ -22,6 +24,8 @@ def test_map_skips_the_non_monotonic_foot_and_keeps_full_and_silent():
 
 
 def test_the_measured_curve_loads():
+    if not docvolume.CURVE.is_file():
+        pytest.skip("no computed curve (just doc-curve)")
     vmap = docvolume.measured_map()
     assert len(vmap) == 65 and vmap[0] == 0 and vmap[64] == 64
     assert 6 <= vmap[1] - 1 <= 8                           # the quiet end gains about 7
