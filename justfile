@@ -78,7 +78,7 @@ p8_tree       := 'p8t() { local cp2=$1 img=$2 d f k g fs; for d in $(find "$3" -
 # imports, the game's settings it reads (game.toml: names, MT-32 set-up; ntp.toml; mt32sounds.toml), the MT-32 MIDI
 # and its custom timbres (timbres.toml, v5 games),
 # the PHP period tables, the Munt binary and the lockfile. (Not the disk README or midisynth.toml.)
-ntp_inputs    := "py:src/migs/ntpmod.py " + gconf + "/game.toml " + gconf + "/ntp.toml opt:" + gconf + "/mt32sounds.toml opt:" + gconf + "/song_names.toml " + out + "/extracted/midi/mt32 opt:" + out + "/extracted/timbres.toml " + vendor + "/ntp/src " + smf2wav + " pyproject.toml uv.lock"
+ntp_inputs    := "py:src/migs/ntpmod.py config/doc-volume.toml " + gconf + "/game.toml " + gconf + "/ntp.toml opt:" + gconf + "/mt32sounds.toml opt:" + gconf + "/song_names.toml " + out + "/extracted/midi/mt32 opt:" + out + "/extracted/timbres.toml " + vendor + "/ntp/src " + smf2wav + " pyproject.toml uv.lock"
 # Build ProDOS image $1 (volume $2) from staging dir $3 at the smallest power-of-two size that
 # holds it (1, 2, ... 32 MB, the ProDOS limit): `eval $4` (run in $3) fills it; an attempt counts
 # when every staged entry is on the image (bash ignores errexit inside conditions, so the count
@@ -244,11 +244,22 @@ fetch-system6:
       n=${e%%:*}; {{fresh}} get "{{s6_url}}/$n.po" "{{s6}}/$n.po" "${e#*:}"
     done
 
-# Reference PDFs: MIDI Synth ERS and synthLAB manual (Brutal Deluxe scans)
-# (reading only, nothing builds from them: a failed download warns instead of failing setup)
+# Reading only, nothing builds from them: a failed download warns instead of failing setup.
+# DOC references are listed in docs/es5503-sources.txt (index: docs/es5503.md).
+# Fetch reference docs: MIDI Synth ERS, synthLAB manual, DOC (ES5503) references -> vendor/docs/
 fetch-docs:
-    @{{fresh}} get "{{ers_url}}" "{{vendor}}/docs/apda_midisynth_synthlab_ocr.pdf" {{ers_sha}} || echo "warning: skipped the MIDI Synth ERS PDF (download failed); the build doesn't need it"
-    @{{fresh}} get "{{manual_url}}" "{{vendor}}/docs/synthlab_usersmanual.pdf" {{manual_sha}} "{{wb}}/20260514232548id_/{{manual_url}}" || echo "warning: skipped the synthLAB manual PDF (download failed); the build doesn't need it"
+    #!/usr/bin/env bash
+    set -uo pipefail
+    {{fresh}} get "{{ers_url}}" "{{vendor}}/docs/apda_midisynth_synthlab_ocr.pdf" {{ers_sha}} || echo "warning: skipped the MIDI Synth ERS PDF (download failed); the build doesn't need it"
+    {{fresh}} get "{{manual_url}}" "{{vendor}}/docs/synthlab_usersmanual.pdf" {{manual_sha}} "{{wb}}/20260514232548id_/{{manual_url}}" || echo "warning: skipped the synthLAB manual PDF (download failed); the build doesn't need it"
+    d="{{vendor}}/docs/es5503"
+    grep -v '^#' docs/es5503-sources.txt | while read -r p sha url fallbacks; do
+      [ -n "$p" ] || continue
+      {{fresh}} get "$url" "$d/$p" "$sha" $fallbacks </dev/null || echo "warning: skipped DOC reference $p (download failed); the build doesn't need it"
+    done
+    # KEGS: just its DOC and mixer sources and licence out of the release zip
+    z="$d/kegs/kegs.1.38.zip"
+    [ ! -f "$z" ] || [ -f "$d/kegs/src/doc.c" ] || unzip -q -o -j "$z" kegs.1.38/src/doc.c kegs.1.38/src/sound.c kegs.1.38/doc/COPYING.txt -d "$d/kegs/src"
 
 # GSSquared machine configs are generated into build/<game>/disks/<name>.gs2 by `gs2-config` (migs.gs2config),
 # keeping the id/battery RAM GSSquared saves on quit. Battery RAM is patched so the IIgs
@@ -296,6 +307,38 @@ testdisk songs modes=ntp_modes: extract fetch-ntp fetch-munt fetch-cp2
     {{fit_image}} "$img" {{prefix}}.TEST "$st" '{{p8_tree}} "$cp2" "$img" songs; "$cp2" add "$img" PRODOS* sensei.system* ntpplayer* dgr.radio.dgr*'
     rm -rf "$st"
     echo "test disk: {{out}}/disks/{{prefix}}.TEST.PO (just emu-test)"
+
+# DOC volume sweep (docs/es5503.md): a test song that steps a tone through every NTP volume, with a
+# pilot tone as reference, on a SenseiPlay disk build/docsweep/DOCSWEEP.PO. Play it on a IIgs, record
+# the line out, then: uv run doc-sweep-analyse REC.wav build/docsweep/DOCSWEEP.json --csv curve.csv
+# Not game-specific: no game data goes into it.
+docsweep: fetch-ntp fetch-cp2
+    #!/usr/bin/env bash
+    set -euo pipefail
+    {{lowprio}}
+    command -v php >/dev/null || { echo "php not found (see just doctor)"; exit 1; }
+    d=build/docsweep; cp2="$PWD/{{cp2}}"; mkdir -p "$d"
+    uv run doc-sweep "$d/DOCSWEEP.mod"
+    php "{{vendor}}/ntp/src/ntpconverter.php" "$d/DOCSWEEP.mod" STREAM_FORBIDDEN > "$d/DOCSWEEP.log" || { cat "$d/DOCSWEEP.log"; exit 1; }
+    if ffmpeg -hide_banner -demuxers 2>/dev/null | grep libopenmpt >/dev/null; then
+      ffmpeg -hide_banner -loglevel error -y -f libopenmpt -i "$d/DOCSWEEP.mod" -ac 2 -ar 44100 "$d/desktop.wav"
+    fi
+    st="$PWD/$d/stage"; img="$PWD/$d/DOCSWEEP.PO"; rm -rf "$st"; mkdir -p "$st/songs"
+    "$cp2" extract --preserve=naps --overwrite --exdir="$st" "{{vendor}}/ntp/senseiplay800.2mg" \
+      PRODOS sensei.system ntpplayer dgr.radio.dgr >/dev/null
+    cp "$d/DOCSWEEP.ntp" "$st/songs/DOCSWEEP.NTP#d50008"
+    # a fixed 4 MB: Floppy Emu doesn't take the 1 MB image fit_image would make (user, 2026-11-15)
+    rm -f "$img"; "$cp2" create-disk-image "$img" 4m prodos >/dev/null; "$cp2" rename "$img" : DOCSWEEP >/dev/null
+    (cd "$st" && {{p8_tree}} "$cp2" "$img" songs && "$cp2" add "$img" PRODOS* sensei.system* ntpplayer* dgr.radio.dgr* >/dev/null)
+    rm -rf "$st"
+    echo "sweep disk: $d/DOCSWEEP.PO (just emu-docsweep)"
+
+# Boot the DOC volume sweep disk in GSSquared
+emu-docsweep speed=emu_speed: fetch-gssquared docsweep
+    uv run gs2-config build/docsweep/docsweep.gs2 --name "DOC volume sweep (SenseiPlay)" --speed {{speed}} \
+      --card 7=bazfast3 --disk 7:1=DOCSWEEP.PO --startup-slot 7 --your-card 6 --your-card 7 --seed {{seed_bram}}
+    @[ -x "{{gs2}}" ] || { echo "no GSSquared for {{platform}}"; exit 1; }
+    "{{gs2}}" "$PWD/build/docsweep/docsweep.gs2"
 
 # Boot the test disk (`just testdisk`) like `just emu`
 emu-test speed=emu_speed: fetch-gssquared

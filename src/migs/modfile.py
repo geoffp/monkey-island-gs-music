@@ -16,15 +16,17 @@ from .ntpsamples import ModSample
 from .ntpsong import ROWS, Grid
 
 MAX_SAMPLES, ORDERS = 31, 128
+FX_SET_VOLUME = 0xC
 
 
-def _sample_header(s: ModSample | None) -> bytes:
+def _sample_header(s: ModSample | None, vmap: list[int] | None = None) -> bytes:
     if s is None:
         return bytes(22) + struct.pack(">HBBHH", 0, 0, 0, 0, 1)
     words = (len(s.mod_bytes()) + 1) // 2
     loop_start, loop_len = (s.loop_start // 2, s.loop_len // 2) if s.loop_len else (0, 1)
     return (s.name.encode("latin-1")[:22].ljust(22, b"\0")
-            + struct.pack(">HBBHH", words, s.finetune & 0x0F, s.default_volume, loop_start, loop_len))
+            + struct.pack(">HBBHH", words, s.finetune & 0x0F, vmap[s.default_volume] if vmap else s.default_volume,
+                         loop_start, loop_len))
 
 
 def _cell(note: int, inst: int, eff: int, par: int, periods: list[int]) -> bytes:
@@ -34,22 +36,30 @@ def _cell(note: int, inst: int, eff: int, par: int, periods: list[int]) -> bytes
     return struct.pack(">HH", (inst & 0xF0) << 8 | period, (inst & 0x0F) << 12 | eff << 8 | par)
 
 
-def mod_file(title: str, samples: list[ModSample], grid: Grid, patterns: int, tables) -> bytes:
+def mod_file(title: str, samples: list[ModSample], grid: Grid, patterns: int, tables,
+             volume_map: list[int] | None = None) -> bytes:
     """The MOD bytes: `patterns` patterns played once each in order, notes as finetune-0 periods
-    (`tables` from ntpsamples.period_tables; finetune lives in the sample headers)."""
+    (`tables` from ntpsamples.period_tables; finetune lives in the sample headers).
+
+    `volume_map` (65 entries, migs.docvolume) rewrites every volume on the way out, the samples'
+    default volumes and each Cxx (set volume): the build plans in linear volumes, and this turns
+    them into what the real DOC's curve needs."""
     if len(samples) > MAX_SAMPLES:
         raise ValueError(f"{len(samples)} samples > {MAX_SAMPLES}")
     tracks = len(grid.cells)
     out = bytearray(title.encode("latin-1")[:20].ljust(20, b"\0"))
     for i in range(MAX_SAMPLES):
-        out += _sample_header(samples[i] if i < len(samples) else None)
+        out += _sample_header(samples[i] if i < len(samples) else None, volume_map)
     out += bytes([patterns, 127]) + bytes(range(patterns)) + bytes(ORDERS - patterns)
     out += (f"{tracks}CHN" if tracks < 10 else f"{tracks:02d}CH").encode()
     periods = tables[0]
     empty = (0, 0, -1, 0)
     for row in range(patterns * ROWS):
         for tr in range(tracks):
-            out += _cell(*grid.cells[tr].get(row, empty), periods)
+            note, inst, eff, par = grid.cells[tr].get(row, empty)
+            if volume_map and eff == FX_SET_VOLUME:
+                par = volume_map[min(par, 64)]
+            out += _cell(note, inst, eff, par, periods)
     for s in samples:
         raw = s.mod_bytes()
         out += raw + (b"\0" if len(raw) % 2 else b"")

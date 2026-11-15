@@ -13,6 +13,9 @@ dependencies = [
 ]
 
 [project.scripts]
+doc-sweep = "migs.docsweep:main"
+doc-sweep-analyse = "migs.docsweep_analyse:main"
+doc-sweep-report = "migs.docsweep_report:main"
 disk-readme = "migs.diskreadme:main"
 extract-music = "migs.extract_music:main"
 mid2seq = "migs.mid2seq:main"

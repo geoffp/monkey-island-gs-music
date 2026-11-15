@@ -32,7 +32,7 @@ from pathlib import Path
 
 import numpy as np
 
-from . import audio, docram, docsim2, games, pitchplan, sounds
+from . import audio, docram, docsim2, docvolume, games, pitchplan, sounds
 from .docsim import NoteError, key_hz
 from .imuse import read_timbres
 from .modfile import mod_file
@@ -954,16 +954,25 @@ def check_fit(samples: list[ModSample], cfg: dict, last_page: int, log=lambda *a
 
 def resolve_mode(conf: dict, variant: str) -> tuple[str, dict]:
     """(sample-set mode, settings) for a build variant: per-song, shared, or a [modes.<name>]
-    trial with a `base` mode. Settings layer as defaults < [modes.<base>] < [modes.<variant>];
-    a trial's `ntp_attack_bytes` adds to its base's instead of replacing them."""
+    trial with a `base`: per-song, shared or another [modes.<name>] (a chain, e.g. inst-real-gs
+    on inst-per-song on per-song). Settings layer as defaults < the chain's modes, base first;
+    `ntp_attack_bytes` add up along the chain instead of replacing each other."""
     modes = conf.get("modes", {})
-    mode = variant if variant in SAMPLE_SETS else modes.get(variant, {}).get("base")
-    if mode not in SAMPLE_SETS:
-        raise SystemExit(f"samples must be per-song, shared or a [modes.<name>] with base = per-song/shared, "
-                         f"not {variant!r}")
-    cfg = {**conf["defaults"], **modes.get(mode, {}), **(modes.get(variant, {}) if variant != mode else {})}
-    if variant != mode and "ntp_attack_bytes" in modes.get(variant, {}):
-        cfg["ntp_attack_bytes"] = {**modes.get(mode, {}).get("ntp_attack_bytes", {}), **modes[variant]["ntp_attack_bytes"]}
+    chain, name = [], variant
+    while name not in SAMPLE_SETS:
+        if name in chain or name not in modes or "base" not in modes[name]:
+            raise SystemExit(f"samples must be per-song, shared or a [modes.<name>] whose `base` leads to "
+                             f"per-song/shared, not {variant!r}")
+        chain.append(name)
+        name = modes[name]["base"]
+    mode = name
+    cfg = {**conf["defaults"], **modes.get(mode, {})}
+    attack = dict(modes.get(mode, {}).get("ntp_attack_bytes", {}))
+    for name in reversed(chain):
+        cfg.update({k: v for k, v in modes[name].items() if k != "base"})
+        attack.update(modes[name].get("ntp_attack_bytes", {}))
+    if attack:
+        cfg["ntp_attack_bytes"] = attack
     return mode, cfg
 
 
@@ -1091,8 +1100,9 @@ def _build_song_quiet(job) -> tuple[object, str | None]:
     grid, patterns, rep = plan_tracks(song.path, samples, programs, drums, cfg, song_cfg, cc7)
     if ntp_oscillators([2 if k == "melodic" else 1 for k in rep.track_kinds]) is None:
         return None, f"{name}: NTP's converter can't assign oscillators to these tracks"
+    vmap = docvolume.measured_map() if cfg.get("doc_volume", "linear") == "measured" else None
     (out_dir / game.song_file(song.sid, "mod")).write_bytes(
-        mod_file(game.song_title(song.sid), samples, grid, patterns, tables))
+        mod_file(game.song_title(song.sid), samples, grid, patterns, tables, vmap))
     return rep, None
 
 
@@ -1144,6 +1154,8 @@ def main(argv: list[str] | None = None) -> int:
     # the songs decide which sounds; mt32sounds.toml (and ntp.toml's [[melodic]]) how
     timbres = read_timbres(game.build_dir / "extracted" / "timbres.toml")
     spec = ntp_spec(sounds.load(args.spec), conf, mode, variant)
+    if cfg.get("doc_volume", "linear") not in ("linear", "measured"):
+        raise SystemExit(f"doc_volume must be \"linear\" or \"measured\", not {cfg['doc_volume']!r}")
     merges = cfg.get("merges", True)
     if merges not in (True, False, "priced"):
         raise SystemExit(f"merges must be true, false or \"priced\", not {merges!r}")

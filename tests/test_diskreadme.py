@@ -23,7 +23,8 @@ def stage(tmp_path, variants=("INST.PER.SONG", "INST.SHARED"), ids=(150, *range(
 
 def test_monkey_islands_readme_comes_out_as_it_was_written_by_hand(tmp_path):
     """The template plus MI's 16 songs give the README that was in config before (commit a41ceb2),
-    plus the paragraph on looping songs added since (2026-11-11). The trials' folders (no-merges,
+    plus the paragraph on looping songs added since (2026-11-11) and the INST.REAL.GS folder
+    (2026-11-15). The trials' folders (no-merges,
     ds2-*) came and went 2026-11-12/13."""
     old = subprocess.run(["git", "show", "a41ceb2:config/games/monkey/disk/README.TXT"], cwd=ROOT,
                          capture_output=True, text=True)
@@ -34,7 +35,15 @@ def test_monkey_islands_readme_comes_out_as_it_was_written_by_hand(tmp_path):
     loops = ("Songs that loop in the game loop here too, from the start, for as\n"
              "long as they play; the others play once and stop.\n\n")
     shared = ("identical in every file. That is what a game needs:\n               load the instruments into sound RAM once, then load\n               only each song's notes. The sound RAM is split among\n               the instruments of all the songs, so samples are\n               shorter and coarser.\n", "identical in every file. A game could then load the\n               instruments into sound RAM once and only each song's\n               notes after that, but only with a player that keeps\n               them there between songs; whether that is worth it is\n               still open. The sound RAM is split among the\n               instruments of all the songs, so samples are shorter\n               and coarser.\n")            # 2026-11-13: whether a game wants the shared set is open
-    want = old.stdout.replace(*shared).replace("The file names (", loops + "The file names (")
+    real_gs = ("INST.REAL.GS   INST.PER.SONG with its volumes set for a real IIGS.\n"
+               "               The real sound chip plays quiet volumes far quieter\n"
+               "               than emulators do, so soft parts nearly vanish; these\n"
+               "               files raise them to the levels the MT-32 played them\n"
+               "               at. On a real IIGS, listen to these. In an emulator,\n"
+               "               the soft parts come out too loud.\n\n")   # trial, 2026-11-15
+    want = (old.stdout.replace(*shared).replace("The file names (", loops + "The file names (")
+            .replace("built two ways:", "built three ways:")
+            .replace("and coarser.\n\n", "and coarser.\n\n" + real_gs, 1))
     assert dr.render(TEMPLATE.read_text(), facts) == want
 
 
@@ -49,7 +58,7 @@ def test_a_short_folder_drops_the_placeholder_sentence(tmp_path):
     facts = dr.song_facts(stage(tmp_path, ids=(1, 2, 3)), "MI")
     text = dr.render(TEMPLATE.read_text(), facts)
     assert "GAP" not in text and "[[" not in text and "{" not in text
-    assert "/SONGS holds the same 3 songs built two ways:" in text
+    assert "/SONGS holds the same 3 songs built three ways:" in text
     assert text.rstrip().endswith("The file names (MI1 to MI3) are the game's sound numbers.")
     assert max(len(l) for l in text.splitlines()) <= dr.WIDTH
 

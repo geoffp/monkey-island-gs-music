@@ -428,3 +428,15 @@ def test_same_sound_finds_one_drum_at_another_pitch():
     rng = np.random.default_rng(1)
     snare = np.concatenate([np.zeros(200), rng.standard_normal(len(t)) * np.exp(-t / 0.05)])
     assert not audio.same_sound(tom, snare, sr)[0]
+
+
+def test_a_variant_can_build_on_another_variant():
+    from migs.ntpmod import resolve_mode
+    conf = {"defaults": {"a": 1, "doc_volume": "linear"},
+            "modes": {"per-song": {"b": 2, "ntp_attack_bytes": {"X": 1}},
+                      "trial": {"base": "per-song", "c": 3, "ntp_attack_bytes": {"Y": 2}},
+                      "trial-gs": {"base": "trial", "doc_volume": "measured"}}}
+    mode, cfg = resolve_mode(conf, "trial-gs")
+    assert mode == "per-song"
+    assert (cfg["a"], cfg["b"], cfg["c"], cfg["doc_volume"]) == (1, 2, 3, "measured")
+    assert cfg["ntp_attack_bytes"] == {"X": 1, "Y": 2} and "base" not in cfg

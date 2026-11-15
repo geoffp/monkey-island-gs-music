@@ -1,0 +1,40 @@
+# DOC (Ensoniq ES5503) reference files, fetched by `just fetch-docs` into vendor/docs/es5503/.
+# Not committed: most aren't ours to redistribute (Apple confidential ERS, datasheet scans,
+# unlicensed or GPL emulator/FPGA sources). What we learn from them goes in docs/es5503.md.
+# Format: PATH SHA256 URL [FALLBACK_URL]...  (GitHub sources pinned to a commit)
+datasheet/ensoniq_5503_digital_oscillator_chip.pdf 09a6a1a8a27a7c07b9088b07c0d4fab955556a15dd32be27765585832859106e https://6502.org/documents/datasheets/ensoniq/ensoniq_5503_digital_oscillator_chip.pdf https://web.archive.org/web/20260916121047id_/https://6502.org/documents/datasheets/ensoniq/ensoniq_5503_digital_oscillator_chip.pdf
+datasheet/apple_ensoniq_doc_ers_1986.pdf b4ee347feb58728bc7182d3e3b4677e8dd3649d725a49fa86ca7c4b50a2d5f3c https://www.brutaldeluxe.fr/documentation/cortland/v4_13_EnsoniqDOC.pdf
+apple/sound_logic_1987.pdf 7e22e6b161b96336ca97f3661d79701a6c56eaf092f940310ad8545530a7475a https://archive.org/download/Apple_IIGS-_Sound_Logic/Apple_IIGS-_Sound_Logic.pdf
+apple/hardware_reference.txt dbb3a4de1e236137e25b8bd9e5c171ad3701efd3d2fb8f2365f0eb25b07377c8 https://archive.org/download/Apple_IIgs_Hardware_Reference_HiRes/Apple_IIgs_Hardware_Reference_HiRes_djvu.txt
+apple/til_headphone_jack_not_stereo.txt fe8121e5233571a7f134aa7c0a4853cfc8d4058b2025d076c6bfcec5448f44c2 https://archive.org/download/IIgs-Headphone_Jack_Not_Stereo/IIgs-Headphone_Jack_Not_Stereo_djvu.txt
+apple/TN.IIGS.009.txt 51ce193fbb4ccb5a6312efabf3a8334e850439baa36fae6ec569e0eda373cdb4 https://apple2.gs/technotes/tn/iigs/TN.IIGS.009.txt
+apple/TN.IIGS.011.txt d76c682bc7fc26bf7c391d53502ce3f549f9f054030f4f62157c3e8930c7b823 https://apple2.gs/technotes/tn/iigs/TN.IIGS.011.txt
+apple/TN.IIGS.019.txt cb07d95d878bdcf58de2f68cc8e5c07f2ad6dc89af1bc3092af24dd74df8c750 https://apple2.gs/technotes/tn/iigs/TN.IIGS.019.txt
+apple/TN.IIGS.023.txt 63faf97bce6d7a7ad76760187db74fe3c5daf460f822994c5e3b3838bdb9a1da https://apple2.gs/technotes/tn/iigs/TN.IIGS.023.txt
+apple/TN.IIGS.037.txt 7088d8b677c1da9cf48edaabf99ca2d31e3d012845bc1f954af96fb2a322b806 https://apple2.gs/technotes/tn/iigs/TN.IIGS.037.txt
+books/iigs_peeled_ch6_sound.pdf 5d6d1e14463ce375b030aa4ac9f5deb7a2350f8901ab22e6226d4a8096014749 https://storage.googleapis.com/apple2gs-downloads/library/IIgs_Peeled_Chapter_6_Sound_and_Music.pdf
+books/kfest1993_gunn_sound.pdf 0b1a738abffe39f0d56ff8b54964819e3fc1c2421e16afc8ecb022b313f505a4 https://www.kansasfest.org/wp-content/uploads/1993-gunn-sound.pdf
+mame/es5503.cpp 700e6dcee976ee24fc8ebe31f662fba013a5cb539ed12f35ad9d57f5813f100f https://raw.githubusercontent.com/mamedev/mame/77999d3dd53e7aa1d80d0657feda8ca2279cbd3b/src/devices/sound/es5503.cpp
+mame/es5503.h effc211b8a668dab217eadf35b1ecd44cd6ab6fd7790304339d814f485ea20e2 https://raw.githubusercontent.com/mamedev/mame/77999d3dd53e7aa1d80d0657feda8ca2279cbd3b/src/devices/sound/es5503.h
+gssquared/ensoniq.cpp 30e88831846336e790debaa63468c56eaa519f0676ae9c3ee329b8825c883da2 https://raw.githubusercontent.com/jawaidbazyar2/gssquared/aff788b49479ebb6da8b07607922d26629923fd9/src/devices/es5503/ensoniq.cpp
+gssquared/ensoniq.hpp 34a043dfd1ab3e49471220ea864836f1bf0f1e9248312a3bd3564e44ee8231c4 https://raw.githubusercontent.com/jawaidbazyar2/gssquared/aff788b49479ebb6da8b07607922d26629923fd9/src/devices/es5503/ensoniq.hpp
+gssquared/soundglu.cpp 40b97bc14d3b3fd8f47906026ecb4927792ca659b7f28a891eb537f372237d20 https://raw.githubusercontent.com/jawaidbazyar2/gssquared/aff788b49479ebb6da8b07607922d26629923fd9/src/devices/es5503/soundglu.cpp
+gssquared/soundglu.hpp 6d9916ab30260d2b8bb7e46363c36ec5e50a0aea402fcb407910348650d20894 https://raw.githubusercontent.com/jawaidbazyar2/gssquared/aff788b49479ebb6da8b07607922d26629923fd9/src/devices/es5503/soundglu.hpp
+gssquared/Ensoniq5503.md 726adeab1469fc286f336f2ac1b76a7b1947f47a3b562fed2345704bd4be878b https://raw.githubusercontent.com/jawaidbazyar2/gssquared/aff788b49479ebb6da8b07607922d26629923fd9/Docs/Ensoniq5503.md
+clemens/clem_audio.c 703a956b1151e378142aace678894542f32f595497c31284b4c3c1358f6dea94 https://raw.githubusercontent.com/samkusin/clemens_iigs/8208d629b1de0e523213e4d7251c3005b4faa9a2/clem_audio.c
+clemens/LICENSE.txt 71d8104b709be34f1f3600f3643859a451c03aa8d4bb326afecfb55bffca13cb https://raw.githubusercontent.com/samkusin/clemens_iigs/8208d629b1de0e523213e4d7251c3005b4faa9a2/LICENSE.txt
+a2fpga/doc5503.sv 9dd5292ffc37aa9202c5ad4f2bb218dbb048f05f77937e03fb7fa012ce7580e1 https://raw.githubusercontent.com/a2fpga/a2fpga_core/b856434f34666d9b17093f82e7e58e84e31732dc/hdl/sound/doc5503.sv
+a2fpga/sound_glu.sv d80d3ed520febeb18bf6e073ad0199bd3a02c1367b5b1ed24cd5ef657dd8fae7 https://raw.githubusercontent.com/a2fpga/a2fpga_core/b856434f34666d9b17093f82e7e58e84e31732dc/hdl/sound/sound_glu.sv
+a2fpga/audio.md 2cf370e2e2ca1b375e06c4ed5e6811f6088a5eac2ec2ea997368841dc6aab6e3 https://raw.githubusercontent.com/a2fpga/a2fpga_core/b856434f34666d9b17093f82e7e58e84e31732dc/docs/audio.md
+a2fpga/LICENSE 2baf8c5bcf57173ef90d8fed0281c724e22bea13d8075041a6f1fcf5cdb661dc https://raw.githubusercontent.com/a2fpga/a2fpga_core/b856434f34666d9b17093f82e7e58e84e31732dc/LICENSE
+iigs_simulation/es5503.v 1c2e258bbfee6fbfb9e4c78e7eee478e9aa9a2de171e176a83811d91c0180c7d https://raw.githubusercontent.com/pcornier/iigs_simulation/61568fcb2f505301ffdd6807f6d5c829ec25ea4f/rtl/es5503.v
+iigs_simulation/soundglu.v f6805a5928ed6162452f03910d4d738991639397544d367928b20eff1937f458 https://raw.githubusercontent.com/pcornier/iigs_simulation/61568fcb2f505301ffdd6807f6d5c829ec25ea4f/rtl/soundglu.v
+iigs_simulation/sound.v 8194acb6bd7d4133a47426692ccce80d291b060387fc48b354ce19acd26a6444 https://raw.githubusercontent.com/pcornier/iigs_simulation/61568fcb2f505301ffdd6807f6d5c829ec25ea4f/rtl/sound.v
+mister/es5503.v 18119b3dc97f855b0c0740d77cb92be4f4b524fea18b530619ba5a1d4d913513 https://raw.githubusercontent.com/MiSTer-devel/Apple-IIgs_MiSTer/a9085153f2544fa61028f1babfed7f8c84f50301/rtl/es5503.v
+mister/soundglu.v f6805a5928ed6162452f03910d4d738991639397544d367928b20eff1937f458 https://raw.githubusercontent.com/MiSTer-devel/Apple-IIgs_MiSTer/a9085153f2544fa61028f1babfed7f8c84f50301/rtl/soundglu.v
+mister/LICENSE 3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986 https://raw.githubusercontent.com/MiSTer-devel/Apple-IIgs_MiSTer/a9085153f2544fa61028f1babfed7f8c84f50301/LICENSE
+apple/ksherlock_wiki_ensoniq_doc.md 8dcd8aa369a633e73e27c0072a7c8c640800a439abcc39024ef680237badcf81 https://git.applefritter.com/Apple-2-SW/ksherlock-iigs/wiki/raw/Ensoniq-DOC
+kegs/kegs.1.38.zip d54c04cef80cc2d0dbd605210130047c03c5c2a89edc13745b74d16aa97d97ff https://kegs.sourceforge.net/kegs.1.38.zip
+apple/hardware_reference.pdf 09905db8ae4f73d1f528a6e96176826f676587554d3bff56e0725d4fca693ff1 https://archive.org/download/Apple_IIgs_Hardware_Reference_HiRes/Apple_IIgs_Hardware_Reference_HiRes_text.pdf
+cards/audio_animator_manual.pdf 10817c9ae085dd39eb053d2bd4ab6d766b8d3ef12664f424bd57aaae48b3c290 https://whatisthe2gs.apple2.org.za/files/AudioAnimator/Manual/Audio_Animator-Manual.pdf
+books/csa2_faq_part19_sound.txt ae91a4cd63ab2bbc291f72db8293e63faaccd72d3229d7cc8887d98055d91835 http://www.faqs.org/faqs/apple2/faq/part19/

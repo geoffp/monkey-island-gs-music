@@ -6,6 +6,8 @@
 # toward its row (quantize = 1). Smaller rows = more pattern RAM and player CPU.
 
 [defaults]
+doc_volume = "linear"     # MOD volumes for a linear DOC (every emulator); "measured": remapped for the
+                          # real DOC's curve (config/doc-volume.toml, src/migs/docvolume.py)
 samples = "per-song"    # per-song: each .NTP carries only its own sounds, free DOC RAM -> longer
                         # loops (NTPprepare loads samples per song anyway). shared: one set for
                         # every song, like the MIDI Synth bank. Override: just ntpmod shared
@@ -136,6 +138,15 @@ merges = "priced"            # per song (the bake-off put the line between Fretl
 merge_max_cost_db = 1.0
 [modes.inst-shared]
 base = "shared"
+
+# inst-per-song for a real IIgs (trial, 2026-11-15). The real DOC's volume isn't linear: quiet
+# volumes come out 10-30 dB below linear and MOD 1-6 are all but silent, measured on the user's
+# IIgs (`just docsweep`; docs/es5503.md). User report: MI160's Panpipes, MI159's sustained
+# Chorale and MI162's melodies "almost inaudible" on the real machine. This remaps every volume
+# written (roughly m -> 7 + m * 57/64), so emulators play its quiet parts too loud.
+[modes.inst-real-gs]
+base = "inst-per-song"
+doc_volume = "measured"
 
 # Trial variants, built side by side for listening: a `base` sample-set mode plus overrides.
 # Add the name to `ntp_variants` in the game's game.toml. E.g. the original loops next to `shared`:

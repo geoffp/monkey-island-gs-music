@@ -54,3 +54,19 @@ def test_ninjaforce_converter_takes_our_mod(tmp_path):
     assert r.returncode == 0, r.stdout[-2000:] + r.stderr[-2000:]
     ntp = ntpfile.parse((tmp_path / "t.ntp").read_bytes())
     assert (ntp.tracks, ntp.patterns, len(ntp.instruments)) == (4, 1, 1)
+
+
+def test_volume_map_rewrites_default_volumes_and_set_volume_only():
+    s = smp.ModSample("Sine", np.sin(np.linspace(0, 6.28, 100)), loop_start=40, loop_len=60)
+    s.default_volume = 8
+    g = sg.Grid(4)
+    g.get(0, 0)[:] = [25, 1, 0xC, 8]         # C08: remapped
+    g.get(1, 0)[:] = [25, 1, 0xE, 0xD2]      # ED2: an effect parameter, not a volume: kept
+    g.get(2, 1)[:] = [0, 0, 0xC, 0]          # C00 stays silent
+    tables = {0: [428] * 72}
+    vmap = [0] + [min(64, v + 7) for v in range(1, 65)]
+    mod = modfile.mod_file("T", [s], g, 1, tables, vmap)
+    assert mod[20 + 25] == 15                                    # default volume 8 -> 15
+    cell = lambda tr, row: struct.unpack(">HH", mod[1084 + (row * 4 + tr) * 4:][:4])[1] & 0xFFF
+    assert (cell(0, 0), cell(1, 0), cell(2, 1)) == (0xC0F, 0xED2, 0xC00)
+    assert modfile.mod_file("T", [s], g, 1, tables)[20 + 25] == 8   # no map: as planned
