@@ -2,8 +2,8 @@
 """MOD volumes for the real DOC's volume curve (NTP build option `doc_volume = "measured"`).
 
 The NTP build sets each note's MOD volume (0–64) as if the DOC were linear, which every emulator
-is. The real chip isn't: measured on a IIgs (measurements/docsweep/, computed into
-build/docsweep/curve.toml by `just doc-curve`; docs/es5503.md), quiet
+is. The real chip isn't: measured on a IIgs (config/doc-volume.toml, from the recording in
+measurements/docsweep/; docs/es5503.md), quiet
 volumes come out 10–30 dB below linear and MOD 1–6 (DOC 3–23) are all but silent. `volume_map`
 gives, for each volume the build wants, the MOD volume whose measured level is closest to it
 (roughly m -> 7 + m * 57/64), so a real IIgs plays the levels the MT-32 did. MOD 0 stays 0.
@@ -15,13 +15,13 @@ import math
 import tomllib
 from pathlib import Path
 
-CURVE = Path("build/docsweep/curve.toml")   # `just doc-curve`, from measurements/docsweep/
+CURVE = Path("config/doc-volume.toml")   # written by `just doc-curve` from measurements/docsweep/
 
 
 def load_curve(path: Path = CURVE) -> list[float]:
     """Levels in dB of MOD volumes 1..64 (index 0 = volume 1), relative to volume 64."""
     if not path.is_file():
-        raise SystemExit(f"{path}: no DOC volume curve (just doc-curve makes it from measurements/docsweep/)")
+        raise SystemExit(f"{path}: no DOC volume curve (just doc-curve writes it from measurements/docsweep/)")
     levels = tomllib.loads(path.read_text())["level_db"]
     if len(levels) != 64:
         raise SystemExit(f"{path}: level_db needs 64 values (MOD volumes 1..64), not {len(levels)}")

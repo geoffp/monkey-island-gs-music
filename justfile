@@ -78,7 +78,7 @@ p8_tree       := 'p8t() { local cp2=$1 img=$2 d f k g fs; for d in $(find "$3" -
 # imports, the game's settings it reads (game.toml: names, MT-32 set-up; ntp.toml; mt32sounds.toml), the MT-32 MIDI
 # and its custom timbres (timbres.toml, v5 games),
 # the PHP period tables, the Munt binary and the lockfile. (Not the disk README or midisynth.toml.)
-ntp_inputs    := "py:src/migs/ntpmod.py build/docsweep/curve.toml " + gconf + "/game.toml " + gconf + "/ntp.toml opt:" + gconf + "/mt32sounds.toml opt:" + gconf + "/song_names.toml " + out + "/extracted/midi/mt32 opt:" + out + "/extracted/timbres.toml " + vendor + "/ntp/src " + smf2wav + " pyproject.toml uv.lock"
+ntp_inputs    := "py:src/migs/ntpmod.py config/doc-volume.toml " + gconf + "/game.toml " + gconf + "/ntp.toml opt:" + gconf + "/mt32sounds.toml opt:" + gconf + "/song_names.toml " + out + "/extracted/midi/mt32 opt:" + out + "/extracted/timbres.toml " + vendor + "/ntp/src " + smf2wav + " pyproject.toml uv.lock"
 # Build ProDOS image $1 (volume $2) from staging dir $3 at the smallest power-of-two size that
 # holds it (1, 2, ... 32 MB, the ProDOS limit): `eval $4` (run in $3) fills it; an attempt counts
 # when every staged entry is on the image (bash ignores errexit inside conditions, so the count
@@ -334,16 +334,18 @@ docsweep: fetch-ntp fetch-cp2
     rm -rf "$st"
     echo "sweep disk: $d/DOCSWEEP.PO (just emu-docsweep)"
 
-# The real DOC's volume curve, from the recording in measurements/docsweep/, for the NTP option
-# doc_volume = "measured" -> build/docsweep/curve.toml, plus its CSV and a shareable HTML report
+# The real DOC's volume curve from the recording in measurements/docsweep/: rewrites
+# config/doc-volume.toml (the NTP option doc_volume = "measured" reads it), plus the measurements
+# (build/docsweep/curve.csv) and a shareable HTML report (build/docsweep/doc-volume-curve.html).
+# Run it by hand after a new measurement; the build doesn't.
 doc-curve:
     #!/usr/bin/env bash
     set -euo pipefail
-    m=measurements/docsweep/2026-11-15-iigs-audio-animator; d=build/docsweep
-    {{fresh}} run $d/curve.inputs --out $d/curve.toml --out $d/doc-volume-curve.html $m.flac $m.steps.json \
-      py:src/migs/docsweep_analyse.py py:src/migs/docsweep_report.py -- sh -c \
-      "uv run doc-sweep-analyse $m.flac $m.steps.json --csv $d/curve.csv --curve $d/curve.toml > $d/curve.txt \
-       && uv run doc-sweep-report $d/curve.csv $d/doc-volume-curve.html > /dev/null"
+    m=measurements/docsweep/2026-11-15-iigs-audio-animator; d=build/docsweep; mkdir -p $d
+    uv run doc-sweep-analyse $m.flac $m.steps.json --csv $d/curve.csv --curve config/doc-volume.toml > $d/curve.txt
+    uv run doc-sweep-report $d/curve.csv $d/doc-volume-curve.html > /dev/null
+    git diff --stat -- config/doc-volume.toml || true
+    echo "config/doc-volume.toml, $d/curve.csv, $d/doc-volume-curve.html"
 
 # Boot the DOC volume sweep disk in GSSquared
 emu-docsweep speed=emu_speed: fetch-gssquared docsweep
@@ -464,7 +466,7 @@ midisynth-voices: seq
 
 # MT-32 MIDI -> ProTracker MODs within NinjaTrackerPlus limits (build/<game>/ntp/<mode>/MInnn.mod), for
 # each sample-set mode (default both), plus libopenmpt previews in .../ntp/<mode>/wav/. Config: the game's ntp.toml
-ntpmod modes=ntp_modes: extract fetch-ntp fetch-munt doc-curve
+ntpmod modes=ntp_modes: extract fetch-ntp fetch-munt
     #!/usr/bin/env bash
     set -euo pipefail
     {{lowprio}}

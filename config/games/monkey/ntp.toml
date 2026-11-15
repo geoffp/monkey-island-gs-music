@@ -7,7 +7,7 @@
 
 [defaults]
 doc_volume = "linear"     # MOD volumes for a linear DOC (every emulator); "measured": remapped for the
-                          # real DOC's curve (just doc-curve, from measurements/docsweep/; src/migs/docvolume.py)
+                          # real DOC's curve (config/doc-volume.toml, src/migs/docvolume.py)
 samples = "per-song"    # per-song: each .NTP carries only its own sounds, free DOC RAM -> longer
                         # loops (NTPprepare loads samples per song anyway). shared: one set for
                         # every song, like the MIDI Synth bank. Override: just ntpmod shared

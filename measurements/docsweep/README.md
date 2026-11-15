@@ -1,9 +1,9 @@
 # DOC volume sweep recordings
 
 Recordings of the DOC volume sweep (`just docsweep`; docs/es5503.md) made on real Apple IIgs
-hardware. They are the measurement: they can't be regenerated, so they are kept here, and the
-build computes from them (`just doc-curve` → `build/docsweep/curve.toml`, read by the NTP option
-`doc_volume = "measured"`). Each recording sits beside the step list it was played with
+hardware. They are the measurement: they can't be regenerated, so they are kept here. `just
+doc-curve` writes the curve the NTP option `doc_volume = "measured"` reads, `config/doc-volume.toml`,
+from the recording (run it by hand after a new measurement; the build reads only the config). Each recording sits beside the step list it was played with
 (`*.steps.json`, written by `doc-sweep` when the disk was built), so a later change to the test
 song can't misalign it.
 

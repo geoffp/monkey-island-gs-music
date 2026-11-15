@@ -1,0 +1,19 @@
+# The real Ensoniq DOC's volume curve, for the NTP build option doc_volume = "measured"
+# (src/migs/docvolume.py; docs/es5503.md, "Measured on the listening machine"). The DOC's
+# volume isn't linear; every emulator we use is.
+#
+# Written by `just doc-curve` (doc-sweep-analyse --curve) from the recording in
+# measurements/docsweep/ (see its README for how it was made). Rerun it after a new measurement.
+#
+# level_db[i] = level of MOD volume i+1 in dB relative to MOD volume 64 (MOD 0 is silent).
+source = "2026-11-15-iigs-audio-animator.flac"
+level_db = [
+  -47.6, -47.6, -47.7, -48.5, -52.3, -52.4, -38.9, -32.4,
+  -28.8, -25.8, -23.7, -21.8, -20.4, -18.9, -17.9, -16.8,
+  -15.9, -15.1, -14.4, -13.6, -12.9, -12.4, -11.8, -11.1,
+  -10.7, -10.2, -9.8, -9.2, -8.9, -8.5, -8.0, -7.7,
+  -7.4, -7.0, -6.6, -6.4, -6.1, -5.7, -5.5, -5.2,
+  -4.9, -4.6, -4.4, -4.2, -3.8, -3.6, -3.4, -3.1,
+  -2.8, -2.6, -2.4, -2.1, -1.9, -1.8, -1.6, -1.3,
+  -1.2, -1.0, -0.7, -0.6, -0.5, -0.3, 0.0, 0.0,
+]

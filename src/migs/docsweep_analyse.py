@@ -140,8 +140,14 @@ def curve_toml(res: dict, source: str) -> str:
     a = {r["test"]: r["test_db"] for r in res["results"] if r["section"] == "A"}
     vals = [round(a[m] - a[64], 1) + 0.0 for m in range(1, 65)]
     lines = ["  " + ", ".join(f"{v:.1f}" for v in vals[i:i + 8]) + "," for i in range(0, 64, 8)]
-    return ("# The real DOC's volume curve, computed by doc-sweep-analyse from a recording of the DOC\n"
-            "# volume sweep (docs/es5503.md). level_db[i] = MOD volume i+1, dB relative to MOD volume 64.\n"
+    return ("# The real Ensoniq DOC's volume curve, for the NTP build option doc_volume = \"measured\"\n"
+            "# (src/migs/docvolume.py; docs/es5503.md, \"Measured on the listening machine\"). The DOC's\n"
+            "# volume isn't linear; every emulator we use is.\n"
+            "#\n"
+            "# Written by `just doc-curve` (doc-sweep-analyse --curve) from the recording in\n"
+            "# measurements/docsweep/ (see its README for how it was made). Rerun it after a new measurement.\n"
+            "#\n"
+            "# level_db[i] = level of MOD volume i+1 in dB relative to MOD volume 64 (MOD 0 is silent).\n"
             f"source = {json.dumps(source)}\n"
             "level_db = [\n" + "\n".join(lines) + "\n]\n")
 
