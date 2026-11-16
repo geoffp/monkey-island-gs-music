@@ -8,6 +8,7 @@ point to. This file began as the 2026-11-07 overnight work list (`plans/TODO.md`
   (`docs/ninjatrackerplus.md`, "Attacks sized to their measured length").
 
 - [ ] **docsim 2.0** (auditory, phase-free measure for the planner; loop budget first, then priced merges): `plans/docsim2.md`, evidence in `docs/similarity-measures.md`.
+- [ ] **Aliasing / "crunch"** (user, 2026-11-15; tabled): docsim2 barely hears images and 8-bit steps; prototype alias term, drum and organ findings, MI164 hat unexplained: `plans/aliasing.md`.
 - [ ] **MI153 pipe-organ buzz** (user, 2026-11-13): not the loops. Keys 52–54 carry key 60's beating (+7–20 dB inharmonic over Munt), and Pipe Organ Lo 43/45 alias at 12.6/14.1 kHz (+6.5 dB). A zone near 54 and a higher low-organ rate; a build check "inharmonic excess over Munt per key". `docs/similarity-measures.md`.
 - [ ] **MI2 / Fate of Atlantis song names, and MI2 songs the iMUSE reader cuts short** (113 guard kiosk, 175): `plans/song-names-other-games.md`.
 - [ ] **Per-song raw-loop seams with deep modulation** (try looplab's seam search C + whole beat periods). Spectral flux shows a jump at the loop seam for Elec Organ (rotary wobble, ~1.8 Hz, 36% depth) and Shakuhachi, about 1 s in: the crossfade joins two different wobble phases. Candidates: choose the loop length/position so the seam falls at the same modulation phase (autocorrelation of the envelope), or a longer crossfade for those sounds.
