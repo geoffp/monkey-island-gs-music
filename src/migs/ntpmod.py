@@ -24,9 +24,10 @@ import math
 import os
 import sys
 import tomllib
+import time
 import traceback
 from collections.abc import Callable
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -1138,6 +1139,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--samples", help="build variant: per-song, shared, or a [modes.<name>] with a `base` "
                                       "(e.g. shared-avg); default ntp.toml's `samples`")
     args = ap.parse_args(argv)
+    sys.stdout.reconfigure(line_buffering=True)        # progress shows as it happens, even into a log file
+    t0 = time.monotonic()
     if missing := [str(p) for p in args.inputs if not p.is_file()]:
         raise SystemExit(f"ntpmod: no MIDI file {', '.join(missing)} (extract the songs first: just extract)")
     game = games.load(args.game)
@@ -1146,6 +1149,7 @@ def main(argv: list[str] | None = None) -> int:
     conf = tomllib.loads(args.config.read_text())
     variant = args.samples or conf["defaults"].get("samples", "per-song")
     mode, cfg = resolve_mode(conf, variant)
+    print(f"ntpmod: {game.id} {variant}: reading {len(args.inputs)} MIDI files", flush=True)
     songs = []
     for p in args.inputs:
         try:
@@ -1167,6 +1171,7 @@ def main(argv: list[str] | None = None) -> int:
                            rhythm_keys=rhythm_keys(game.mt32_init))
     if opts:
         spec = {**spec, "_merge_options": opts}
+    print(f"ntpmod: {len(songs)} songs read, sounds resolved ({time.monotonic() - t0:.0f} s)", flush=True)
     tables = period_tables(args.make_tables)
     munt = Munt(args.smf2wav, args.roms, args.cache, tuple(game.mt32_init),
                 tuple((p, tb.data) for p, tb in sorted(timbres.items())))
@@ -1196,8 +1201,17 @@ def main(argv: list[str] | None = None) -> int:
     # each, logs printed in song order
     cpus = getattr(os, "process_cpu_count", os.cpu_count)() or 2   # 3.13+: honours CPU affinity
     jobs = min(args.jobs or max(1, cpus // 2), len(work))
+    print(f"ntpmod: building {len(work)} songs, {jobs} at a time ({time.monotonic() - t0:.0f} s)", flush=True)
     with ProcessPoolExecutor(jobs) if jobs > 1 else contextlib.nullcontext() as pool:
-        results = pool.map(_build_song, work) if pool else map(_build_song, work)
+        if pool:
+            futures = [pool.submit(_build_song, w) for w in work]
+            for n, f in enumerate(as_completed(futures), 1):       # progress in finishing order,
+                sid, _, _, err = f.result()                        # the songs' logs below in song order
+                print(f"ntpmod: [{n}/{len(work)}] {game.prefix}{sid} {'FAILED' if err else 'built'} "
+                      f"({time.monotonic() - t0:.0f} s)", flush=True)
+            results = (f.result() for f in futures)
+        else:
+            results = map(_build_song, work)
         reports, failed = _gather(results)
     _print_reports(reports, game.prefix)
     for sid, why in failed:
