@@ -964,6 +964,12 @@ def loop_summary(samples: list[ModSample], cfg: dict) -> str:
                     for s in samples if s.kind == "melodic")
 
 
+def rate_summary(samples: list[ModSample]) -> str:
+    """name:sample rate (Hz) for every sample with a rate: loops, zones and drums (the silent
+    rest has none). Aliasing depends on it, and the rate isn't in the MOD."""
+    return " ".join(f"{s.name}:{s.rate:.0f}" for s in samples if s.rate and s.name != "rest")
+
+
 def loop_problems(samples: list[ModSample], cfg: dict) -> list[str]:
     """Loops that would add a tremolo or a loop-rate buzz (raw_loop_ok on the stored loop:
     averaged loops are exactly periodic and pass; raw ones must repeat slowly or be as clean)."""

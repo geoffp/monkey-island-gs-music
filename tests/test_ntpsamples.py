@@ -352,3 +352,12 @@ def test_a_loop_takes_back_drum_upgrades_worth_less_per_page():
     sizes, _, over = smp.plan_loops_valued([organ, kick, snare], {0: 0.01}, last, 16384,
                                            lambda i, z: scores[i][z], total=30.0, revertible=revert)
     assert sizes[0] == 512 and over == {}
+
+
+def test_rate_summary_lists_every_sample_rate_but_the_rest():
+    a = smp.ModSample("Organ 60", np.zeros(8), kind="melodic")
+    a.rate = 12544.4
+    k = smp.ModSample("Kick", np.zeros(8), kind="drum")
+    k.rate = 24803.0
+    r = smp.rest_sample()
+    assert smp.rate_summary([a, k, r]) == "Organ 60:12544 Kick:24803"

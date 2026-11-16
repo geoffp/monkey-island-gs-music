@@ -39,7 +39,7 @@ from .modfile import mod_file
 from .mt32 import GM_DRUM_NAMES, rhythm_keys
 from .munt import SR, Munt
 from .ntpsamples import (MAX_SAMPLES, ModSample, best_tuning, build_samples, cached_render, cc7_curve, forget_renders, floor_time,
-                         drum_steps, is_steady, loop_problems, loop_summary, ntp_block, ntp_doc_pages, period_tables,
+                         drum_steps, is_steady, loop_problems, loop_summary, ntp_block, ntp_doc_pages, period_tables, rate_summary,
                          build_drum, build_melodic, plan_loops, plan_loops_valued)
 from .ntpsong import RHYTHM, Note, convert_song, ntp_oscillators, plan_tracks, program_of, read_notes, sample_for
 
@@ -1097,6 +1097,7 @@ def _build_song_quiet(job) -> tuple[object, str | None]:
             return None, f"{name}: loops fail the tremolo/buzz check: " + "; ".join(bad)
         print(f"{name}: {len(samples)} samples, DOC {ntp_doc_pages(samples, last_page)}/256 pages "
               f"(reserve {reserve}); loops {loop_summary(samples, cfg)}")
+        print(f"{name}: rates (Hz) {rate_summary(samples)}")
     grid, patterns, rep = plan_tracks(song.path, samples, programs, drums, cfg, song_cfg, cc7)
     if ntp_oscillators([2 if k == "melodic" else 1 for k in rep.track_kinds]) is None:
         return None, f"{name}: NTP's converter can't assign oscillators to these tracks"
@@ -1182,6 +1183,7 @@ def main(argv: list[str] | None = None) -> int:
             raise SystemExit("shared loops fail the tremolo/buzz check: " + "; ".join(bad))
         print(f"shared samples ({len(shared[0])}, DOC {ntp_doc_pages(shared[0], last_page)}/256 pages, "
               f"reserve {reserve}): {loop_summary(shared[0], cfg)}")
+        print(f"shared rates (Hz): {rate_summary(shared[0])}")
         bank = _shared_levels(songs, shared, cfg, conf, cc7, args.out_dir, game)
     built = songs
     if args.only:
