@@ -174,6 +174,8 @@ A raw loop shorter than the sound's own wobble replays a slice of it at the loop
 - The handover went from the 16′+8′ sound to the 8′ alone: heard as the loop jumping an octave up.
 
 **Rule (`ntpsamples.loop_notes`, `sub_octave_min_share = 0.02`).** When the sustain's sub-octave share is at least 2% (and below 0.5, so inharmonic sounds are excluded), the loop's cycle is two note periods.
+
+**Timpani (found 2026-11-15, Atlantis sound 30).** Timpani's sustain is 99.99% sub-octave (key 48: one clean partial at 63.5 Hz, harmonics under -17 dB), so the `< 0.5` guard sent it down the one-period path: the loop was built at the note's 131 Hz from what is left above the partial, a buzz with no fundamental, and the sound never settled an octave down as in Munt. Unlike Taiko (share 0.997 too), Timpani follows the key: the sustain's autocorrelation pitch is within 8-203 cents of half the note's at keys 36-62 (Taiko's is 35-70 Hz at every key, -263 to -612 cents from half). `loop_notes` now also returns 2 when the share is at least 0.5 and that pitch is within `sub_octave_follow_cents` (250) of half. Of the sounds checked (Timpani, Taiko, Taiko Rim, Melodic Tom, Castanets, Marimba, Contrabass, Xylophone, Triangle, Harp) only Timpani changes. FOA030: its loop is now a 65 Hz partial like Munt's tail instead of 131 Hz with 392/523/916 Hz harmonics at -12 to -14 dB.
 - `_Source.period` is then the true period. `best_tuning` picks the same rates, since k simply counts true periods.
 - `loop_power` / `harmonic_cycle` take twice as many harmonics (`notes = 2`) to keep the same bandwidth.
 - `join_aligned` searches one true period, which also aligns the sub-octave's phase.

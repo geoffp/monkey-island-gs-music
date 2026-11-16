@@ -407,7 +407,8 @@ _disk:
 
 # Render an MT-32 MIDI file to WAV with Munt (needs ROMs)
 mt32-wav mid wav: fetch-munt
-    {{nice}} "{{smf2wav}}" -m "{{roms}}" -f -o "{{wav}}" "{{mid}}"
+    {{nice}} "{{smf2wav}}" -m "{{roms}}" -f -r 1 --output-sample-format=1 -o "{{wav}}.float" "{{mid}}"
+    {{nice}} uv run python -m migs.wavlimit "{{wav}}.float" "{{wav}}"; rm "{{wav}}.float"
 
 # Render a General MIDI file to WAV with FluidSynth
 gm-wav mid wav: fetch-soundfont
@@ -433,7 +434,9 @@ render: extract fetch-munt fetch-soundfont
     rm -f $m/wav/mt32/*.wav $m/wav/gm/*.wav      # names in song_names.toml rename the files
     for f in $m/midi/mt32/*.mid; do
       n=$(basename "$f" .mid)
-      "{{smf2wav}}" --quiet -m "{{roms}}" -f -o "$m/wav/mt32/$n.wav" "$f"
+      # float output (no clipping inside Munt), then only the too-loud songs are turned down
+      "{{smf2wav}}" --quiet -m "{{roms}}" -f -r 1 --output-sample-format=1 -o "$m/wav/mt32/$n.float.wav" "$f"
+      uv run python -m migs.wavlimit "$m/wav/mt32/$n.float.wav" "$m/wav/mt32/$n.wav"; rm "$m/wav/mt32/$n.float.wav"
       fluidsynth -ni -q -F "$m/wav/gm/$n.wav" "{{sf2}}" "$m/midi/gm/$n.mid" >/dev/null
     done
     ls $m/wav/*/ | head -50
