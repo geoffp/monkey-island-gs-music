@@ -732,7 +732,23 @@ def loop_notes(x: np.ndarray, a: int, off: int, period: float, sustain_s: float,
     if hi - lo < 16 * period:
         return 1
     share = loopbuild.sub_octave(x, lo, hi, period)
-    return 2 if cfg.get("sub_octave_min_share", 0.02) <= share < 0.5 else 1
+    if cfg.get("sub_octave_min_share", 0.02) <= share < 0.5:
+        return 2
+    # nearly all the power an octave down: a drum that follows the key (Timpani's sustain is one
+    # partial at about half the note's pitch, within 200 cents at every key) is two periods; one
+    # that doesn't (Taiko's sustain sits at 35-70 Hz whatever the key) is inharmonic
+    if share >= 0.5 and _sustain_cents_from_half(x, lo, hi, period) <= cfg.get("sub_octave_follow_cents", 250):
+        return 2
+    return 1
+
+
+def _sustain_cents_from_half(x: np.ndarray, lo: int, hi: int, period: float) -> float:
+    """How far (cents, absolute) the sustain's autocorrelation pitch is from half the note's."""
+    y = x[lo:hi] - np.mean(x[lo:hi])
+    ac = np.correlate(y, y, "full")[len(y) - 1:]
+    k0, k1 = int(period * 0.8), int(period * 2 * 2.5)
+    k = k0 + int(np.argmax(ac[k0:k1]))
+    return abs(1200 * math.log2(2 * period / k))
 
 
 def build_melodic(m: dict, cfg: dict, keys: tuple[int, int], munt: Munt, tables, hold: float
