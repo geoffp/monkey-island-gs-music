@@ -324,7 +324,7 @@ def drum_rate(seg: np.ndarray, nbytes: int, lo: float, hi: float) -> float:
 # ---------------------------------------------------------------------------
 # Levels, measured in Munt
 
-VEL_POINTS = (20, 40, 64, 80, 100, 127)
+VEL_POINTS = (1, 10, 20, 40, 64, 80, 100, 127)
 CC7_POINTS = (0, 10, 20, 32, 40, 52, 64, 77, 90, 100, 110, 120, 127)
 _PEAKS: dict[int, float] = {}
 
@@ -362,8 +362,10 @@ def velocity_response(render_at: Callable[[int], np.ndarray]) -> tuple[np.ndarra
     """Peak level vs velocity, relative to velocity 100, measured from renders (the MT-32's
     velocity sensitivity differs per timbre: closed hat x2.5 at 127, bass x1.4)."""
     ref = _peak(render_at(100)) or 1.0
-    return (np.array([0.0, *VEL_POINTS], float),
-            np.array([0.0, *(_peak(render_at(v)) / ref for v in VEL_POINTS)]))
+    # No (0, 0) anchor: velocity 1 is not silent on the MT-32 (Harp 1 plays it 15 dB under
+    # velocity 100), and Atlantis writes whole parts at velocity 1-6.
+    return (np.array(VEL_POINTS, float),
+            np.array([_peak(render_at(v)) / ref for v in VEL_POINTS]))
 
 
 def key_response(render_at: Callable[[int], np.ndarray], key0: int, lo: int, hi: int
