@@ -747,7 +747,9 @@ def loop_notes(x: np.ndarray, a: int, off: int, period: float, sustain_s: float,
 def _sustain_cents_from_half(x: np.ndarray, lo: int, hi: int, period: float) -> float:
     """How far (cents, absolute) the sustain's autocorrelation pitch is from half the note's."""
     y = x[lo:hi] - np.mean(x[lo:hi])
-    ac = np.correlate(y, y, "full")[len(y) - 1:]
+    n = len(y)
+    f = np.fft.rfft(y, 1 << (2 * n - 1).bit_length())      # FFT autocorrelation: np.correlate is O(n^2)
+    ac = np.fft.irfft(f * np.conj(f))[:n]
     k0, k1 = int(period * 0.8), int(period * 2 * 2.5)
     k = k0 + int(np.argmax(ac[k0:k1]))
     return abs(1200 * math.log2(2 * period / k))
