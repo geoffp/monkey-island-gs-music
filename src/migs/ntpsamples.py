@@ -643,18 +643,32 @@ def _tune_loop(m: dict, src: _Source, cfg: dict, tables, steady: bool, sustain_s
         if tuning is not None:
             return loop_bytes, tuning
         loop_bytes //= 2
-    try:
-        return loop_bytes, best_tuning(src.freq, tables, *rate_window(m, cfg, loop_bytes), loop_bytes, m["key"],
-                                       *src.keys, whole_cycles=eprime)
-    except ValueError:
+    return loop_bytes, _short_tuning(m, src, cfg, tables, eprime, loop_bytes)
+
+
+def _short_tuning(m: dict, src: _Source, cfg: dict, tables, eprime: bool, loop_bytes: int | None = None
+                  ) -> tuple[float, int, float, int, int]:
+    """best_tuning for the short loop. Tried in turn: the pitch plan's rate (+-3 %), the config's
+    whole window, then, for a sound so low that one cycle doesn't fit `loop_bytes` at the window's
+    lowest rate, the lowest rate that holds a whole cycle (Fate of Atlantis's Pipe Org 1 at key 19:
+    a 12.1 Hz sub-octave cycle needs 744 B at 9000 Hz, so 512 B is 6200 Hz)."""
+    loop_bytes = loop_bytes or cfg["loop_bytes"]
+    keys = (m["key"], *src.keys)
+    tries = [(cfg["min_rate"], cfg["max_rate"])]
+    if "ntp_rate" in m and loop_bytes <= cfg["loop_bytes"]:
         # The plan's rate assumed the sampled key's nominal pitch. A sound that measures well
         # off it can leave no whole-cycle tuning within +-3 % (Fate of Atlantis's Triangle,
         # program 121: 361 Hz at key 65, 58 cents sharp, so 512 B = 16.07-17.07 periods there).
-        # Then the config's whole window is used, as for an unplanned sound.
-        if "ntp_rate" not in m:
-            raise
-        return loop_bytes, best_tuning(src.freq, tables, cfg["min_rate"], cfg["max_rate"], loop_bytes, m["key"],
-                                       *src.keys, whole_cycles=eprime)
+        tries.insert(0, rate_window(m, cfg, loop_bytes))
+    floor = loop_bytes * src.freq * 0.99        # one whole cycle in the loop
+    if floor < cfg["min_rate"]:
+        tries.append((floor, cfg["min_rate"]))
+    for lo, hi in tries:
+        try:
+            return best_tuning(src.freq, tables, lo, hi, loop_bytes, *keys, whole_cycles=eprime)
+        except ValueError as e:
+            err = e
+    raise err
 
 
 def _raw_tuning(m: dict, src: _Source, cfg: dict, tables, z: int, att_bytes: int, sustain_s: float
@@ -668,8 +682,10 @@ def _raw_tuning(m: dict, src: _Source, cfg: dict, tables, z: int, att_bytes: int
     lo, hi = rate_window(m, cfg, z)
     # nor much below the short loop's rate: the measure prefers the short loop's higher rate
     # to a raw loop's movement (Sax 512 B at 18891 Hz -21.7 dB, 8192 B at 16338 Hz -20.3 dB)
-    short = best_tuning(src.freq, tables, *rate_window(m, cfg, cfg["loop_bytes"]), cfg["loop_bytes"], m["key"],
-                        *src.keys, whole_cycles=loop_construction(cfg) == "eprime")[2]
+    try:
+        short = _short_tuning(m, src, cfg, tables, loop_construction(cfg) == "eprime")[2]
+    except ValueError:                  # no short loop tunes at all: nothing to compare a raw loop with
+        return None
     lo = max(lo, short * (1 - cfg.get("raw_loop_max_rate_drop", 0.1)))
     tol = cfg.get("raw_loop_tune_cents", 1.0) or None
     tops = [hi] if tol is None else [hi, min(hi, z * cfg.get("raw_loop_slow_hz", 2.0))]
