@@ -630,7 +630,9 @@ def _valued_loops(samples: list[ModSample], song_spec: dict, ranges: dict, usage
     sizes, lines, reverted = plan_loops_valued(
         samples, exposure if (trade or after or alone.weight) else usage, last_page, cfg.get("max_loop_bytes", 16384), score,
         cfg.get("loop_min_db_per_page", 0.0), total=trade["total"] if trade else None, revertible=revertible,
-        blocked=stuck)
+        blocked=stuck,
+        sound={i: melodic[i]["program"] for i, s in enumerate(samples)
+               if s.kind == "melodic" and i < len(melodic)} if cfg.get("sync_loops") else None)
     scorer.cache.save()
     for line in lines:
         log(line)

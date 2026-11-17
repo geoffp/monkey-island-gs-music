@@ -37,6 +37,7 @@ loudness). docsim.py stays, unchanged, for the default builds.
 
 from __future__ import annotations
 
+import dataclasses
 import functools
 import hashlib
 import json
@@ -213,6 +214,125 @@ def vib_distance(ref_cents: float, got_cents: float, dead: float = VIB_DEAD_CENT
     cents, which as a ratio would have charged their long loops for noise) plus `floor`: a lost
     27 cents vibrato is 0.7, any two steady notes 0."""
     return float(abs(np.log10((max(got_cents - dead, 0.0) + floor) / (max(ref_cents - dead, 0.0) + floor))))
+
+
+MOVE_BAND = (0.7, 12.0)          # Hz: rates at which a sound's own movement repeats (LFO vibrato or tremolo, beating)
+MOVE_MIN_CENTS = 10.0            # a sound moves if its pitch swings this far (Sax 12, Chorale 18, Whistle 2 28;
+                                 # Panpipes and Trombone, 7, don't)
+MOVE_MIN_DB = 2.0                # level swing below this isn't heard as movement
+MOVE_MIN_SHARE = 0.6             # of the track's motion in MOVE_BAND at the one rate (and its 2nd harmonic)
+MOVE_RATE_TOL = 0.04             # the rate found in each half of the sustain agrees within this
+
+
+@dataclasses.dataclass(frozen=True)
+class Movement:
+    """A sound's own periodic movement, measured on the reference alone: its pitch swing
+    (vibrato) and its level swing (tremolo, two partials beating), each as (rate Hz, peak
+    depth, regular?: one rate holds the motion, the same through the note). `hz` is the rate a
+    loop should hold whole cycles of: the vibrato's if it is periodic (regular and deep enough),
+    else the level's, else 0 (still, or moving without a period: chorus)."""
+    fm_hz: float = 0.0
+    fm_cents: float = 0.0
+    fm_regular: bool = False
+    am_hz: float = 0.0
+    am_db: float = 0.0
+    am_regular: bool = False
+
+    @property
+    def fm_periodic(self) -> bool:
+        return self.fm_regular and self.fm_cents >= MOVE_MIN_CENTS
+
+    @property
+    def am_periodic(self) -> bool:
+        return self.am_regular and self.am_db >= MOVE_MIN_DB
+
+    @property
+    def hz(self) -> float:
+        return self.fm_hz if self.fm_periodic else self.am_hz if self.am_periodic else 0.0
+
+    def rate(self, kind: str) -> float:
+        """The rate of `kind` ("fm" or "am") movement if it is regular here, else 0."""
+        return (self.fm_hz if self.fm_regular else 0.0) if kind == "fm" else (self.am_hz if self.am_regular else 0.0)
+
+    def describe(self) -> str:
+        if not self.hz:
+            return "no periodic movement"
+        return (f"vibrato {self.fm_hz:.2f} Hz +-{self.fm_cents:.0f} cents" if self.fm_periodic
+                else f"level swing {self.am_hz:.2f} Hz +-{self.am_db:.1f} dB")
+
+
+def _line(track: np.ndarray, rate: float) -> tuple[float, float, float]:
+    """(rate Hz, peak depth, share) of the strongest line of `track` (sampled at `rate`) in
+    MOVE_BAND: depth is the line's amplitude, share the part of the band's power within the
+    line's main lobe and its 2nd harmonic's."""
+    y = track - np.mean(track)
+    y = y - np.polyval(np.polyfit(np.arange(len(y)), y, 1), np.arange(len(y)))     # a drift isn't movement
+    w = np.hanning(len(y))
+    n = 1 << 15
+    X = np.abs(np.fft.rfft(y * w, n))
+    f = np.fft.rfftfreq(n, 1 / rate)
+    band = (f >= MOVE_BAND[0]) & (f <= MOVE_BAND[1])
+    if not band.any() or not X[band].max() > 0:
+        return 0.0, 0.0, 0.0
+    i = int(np.argmax(np.where(band, X, 0.0)))
+    lobe = 2.0 * rate / len(y)                      # a Hann main lobe's half width (Hz)
+    near = (np.abs(f - f[i]) <= lobe) | (np.abs(f - 2 * f[i]) <= lobe)
+    wide = (f >= MOVE_BAND[0] / 2) & (f <= 2 * MOVE_BAND[1])
+    share = float(np.sum(X[near & wide] ** 2) / (np.sum(X[wide] ** 2) or 1.0))
+    return float(f[i]), float(2 * X[i] / np.sum(w)), share
+
+
+def movement(x: np.ndarray, fs: float, f0: float, t0: float = 0.5, t1: float | None = None) -> Movement:
+    """The periodic movement of a held note `x` (from its onset) between `t0` and `t1` s: the
+    partial near `f0` is followed (1024-sample frames at 32 kHz, hop an eighth), giving a pitch
+    track (cents) and a level track (dB, of that partial: an organ's beating moves its
+    partials, not always its overall level). Each track's strongest line in MOVE_BAND counts as
+    periodic movement when it is deep enough (MOVE_MIN_CENTS, MOVE_MIN_DB), holds most of the
+    track's motion (MOVE_MIN_SHARE) and has the same rate in both halves of the span
+    (MOVE_RATE_TOL). Whistle 2: 6.16 Hz +-28 cents at every key; Str Sect 3: 2.0 Hz +-8 dB."""
+    y = np.asarray(x, dtype=np.float64)[int(t0 * fs):int(t1 * fs) if t1 else None]
+    win = 1 << int(round(np.log2(fs * 0.032)))
+    hop = win // 8
+    if f0 * win / fs < 4 or len(y) < win * 8:           # under 4 periods a frame, or under 8 frames
+        return Movement()
+    w = np.hanning(win)
+    fr = np.fft.rfftfreq(win * 8, 1 / fs)
+    lo, hi = np.searchsorted(fr, f0 * 0.9), np.searchsorted(fr, f0 * 1.1)
+    pk, amp = [], []
+    for s0 in range(0, len(y) - win, hop):
+        X = np.abs(np.fft.rfft(y[s0:s0 + win] * w, win * 8))[lo:hi]
+        j = int(np.argmax(X))
+        d = 0.0
+        if 0 < j < len(X) - 1 and X[j - 1] > 0 and X[j + 1] > 0:    # parabola through the log peak: the bins
+            a, b, c = np.log(X[j - 1:j + 2])                       # alone are 26 cents apart at middle C
+            d = 0.5 * (a - c) / (a - 2 * b + c) if a - 2 * b + c else 0.0
+        pk.append(fr[lo + j] + d * (fr[1] - fr[0]))
+        amp.append(X[j])
+    pk, amp = np.array(pk), np.array(amp)
+    if not amp.max() > 0 or np.median(amp) < 0.05 * amp.max():
+        return Movement()
+    rate = fs / hop
+    tracks = (1200 * np.log2(np.maximum(pk, 1.0) / np.median(pk)),
+              20 * np.log10(np.maximum(amp, 1e-6 * amp.max()) / np.median(amp)))
+    out = []
+    for tr in tracks:
+        hz, depth, share = _line(tr, rate)
+        h = len(tr) // 2
+        halves = [_line(tr[:h], rate)[0], _line(tr[h:], rate)[0]]
+        same = hz > 0 and all(abs(v - hz) <= max(MOVE_RATE_TOL * hz, 0.6 * rate / h) for v in halves)
+        out += [hz, depth, bool(share >= MOVE_MIN_SHARE and same)]
+    return Movement(*out)
+
+
+def sound_kind(moves: list[Movement]) -> str:
+    """One verdict for a sound from its movement at several keys: "fm" (a vibrato), "am" (a
+    level swing) or "" (none): the kind that is regular at most of the keys with a median depth
+    over its threshold. Decided per sound, not per key: Sax's vibrato reads 11.3, 12.0 and 12.6
+    cents at three keys, and a threshold per key would give its zones different loops."""
+    for kind, depth, least in (("fm", lambda v: v.fm_cents, MOVE_MIN_CENTS), ("am", lambda v: v.am_db, MOVE_MIN_DB)):
+        if moves and sum(bool(v.rate(kind)) for v in moves) * 2 > len(moves) and np.median([depth(v) for v in moves]) >= least:
+            return kind
+    return ""
 
 
 def mean_distance(a: np.ndarray, b: np.ndarray) -> float:

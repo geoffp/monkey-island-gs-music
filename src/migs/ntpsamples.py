@@ -23,7 +23,7 @@ from pathlib import Path
 import numpy as np
 from scipy.signal import resample
 
-from . import audio, docram, docsim, loopbuild
+from . import audio, docram, docsim, docsim2, loopbuild
 from .audio import smooth
 from .munt import SR, Munt
 
@@ -79,6 +79,8 @@ class ModSample:
     max_loop: int = 512         # longest loop the recording allows (bytes, power of two)
     raw_ok: tuple = ()          # raw (long) loop sizes that pass raw_loop_ok (bytes)
     cycles: int = 0             # source periods in the loop (k)
+    move_hz: float = 0.0        # the sound's own periodic movement at key0 (vibrato, beating), 0 = none
+    move_ok: tuple = ()         # loop sizes holding whole cycles of it (sync_loops); then raw_ok is these
 
     def mod_bytes(self) -> bytes:
         return bytes(np.clip(np.round(self.data * 127), -128, 127).astype(np.int8).tobytes())
@@ -519,7 +521,8 @@ def plan_loops(samples: list[ModSample], usage: dict[int, float], last_page: int
 
 def plan_loops_valued(samples: list[ModSample], usage: dict[int, float], last_page: int, max_loop: int,
                       score: Callable[[int, int], float], floor: float = 0.0, total: float | None = None,
-                      revertible: list[tuple[float, int, int, int, str]] = (), blocked: list | None = None
+                      revertible: list[tuple[float, int, int, int, str]] = (), blocked: list | None = None,
+                      sound: dict[int, object] | None = None
                       ) -> tuple[dict[int, int], list[str], dict[int, int]]:
     """plan_loops priced by measurement (`loop_budget = "docsim2"`): the steady sounds' loops
     grow to the raw sizes that most improve `score(i, size)` (dB, lower = closer to the
@@ -532,6 +535,13 @@ def plan_loops_valued(samples: list[ModSample], usage: dict[int, float], last_pa
     take them back, cheapest per page first and a drum's later steps before its earlier ones,
     when each is worth less per page than the loop. `blocked` collects the loops that still
     didn't fit, as (value per page, sample index, size, pages).
+    `sound` (sample index -> its sound; `sync_loops`): a sound's zones that have loops keeping
+    its movement (ModSample.move_ok) get them together or not at all: their first purchase is
+    one for all of them (each zone's size of the best value per page, or if that set doesn't fit
+    each zone's smallest that gains), valued as the zones' summed value over their summed pages;
+    after it, each zone grows by itself. A whistle with vibrato in one zone and none in the
+    next is worse than either. A zone with no such loop (a note too low to follow, a cycle
+    longer than any loop) isn't in the set.
     Returns (loop size per melodic sample index, log lines, block bytes per reverted sample)."""
     sizes = {i: s.loop_len for i, s in enumerate(samples) if s.kind == "melodic" and s.loop_len}
     grow = {i for i, s in enumerate(samples) if s.kind == "melodic" and s.steady and usage.get(i, 0) > 0}
@@ -568,39 +578,104 @@ def plan_loops_valued(samples: list[ModSample], usage: dict[int, float], last_pa
             ov[nxt[1]] = nxt[2]
         return ov, used
 
-    banned: set[tuple[int, int]] = set()
+    # sounds bought as a set: every zone that plays is steady and has movement-keeping loops
+    sets: dict[object, list[int]] = {}
+    for i in sorted(sizes):
+        if sound and sound.get(i) is not None and usage.get(i, 0) > 0:
+            sets.setdefault(sound[i], []).append(i)
+    for k, v in list(sets.items()):
+        can = [i for i in v if i in grow and samples[i].move_ok]
+        for i in v if can else ():
+            if i not in can:                        # too low to follow, or a cycle longer than any loop
+                lines.append(f"  loop set   {samples[i].name:<16} has no loop that keeps the movement: it grows by itself")
+        sets[k] = can
+    sets = {k: v for k, v in sets.items() if v}
+    pending = {i: k for k, v in sets.items() for i in v}        # zones still waiting for their set
+
+    def single(i: int, cur: int) -> list[tuple[float, int, float, int]]:
+        out = []
+        for z in samples[i].raw_ok:
+            if z <= cur or z > min(max_loop, samples[i].max_loop):
+                continue
+            g = score(i, cur) - score(i, z)
+            pages = (ntp_block(z) - ntp_block(cur)) // 256
+            out.append((g * usage[i] / total / max(pages, 1), z, g, pages))
+        return out
+
+    first = dict(sizes)
+    unit = lambda i: ("set", sound[i]) if sound and sound.get(i) in sets and i in sets[sound[i]] else ("zone", i)
+    worth: dict[tuple, float] = {}                  # what each unit's purchases so far are worth (value x pages)
+
+    def give_way(v: float, items: tuple, pages: int) -> tuple | None:
+        """A set that doesn't fit may displace one sound's loops bought so far, if they are
+        worth less in all than the set and their pages let it fit (value per page alone
+        leaves a big set blocked and its pages to scraps): (unit, sizes with the swap)."""
+        me = unit(items[0][0])
+        for u in sorted((u for u in worth if u != me and worth[u] < v * pages), key=worth.get):
+            back = {i: first[i] for i in sizes if unit(i) == u}
+            trial = {**sizes, **back, **dict(items)}
+            if fits(trial, over):
+                return u, trial
+        return None
+
+    banned: set[tuple] = set()
     while True:
-        opts = []
+        opts = []                                   # (value per page, ((sample, size), ...), pages)
         for i in grow:
-            cur = sizes[i]
-            for z in samples[i].raw_ok:
-                if z <= cur or z > min(max_loop, samples[i].max_loop) or (i, z) in banned:
-                    continue
-                g = score(i, cur) - score(i, z)
-                pages = (ntp_block(z) - ntp_block(cur)) // 256
-                opts.append((g * usage[i] / total / max(pages, 1), i, z, g, pages))
-        opts = [o for o in opts if o[0] > floor]
+            if i not in pending:
+                opts += [(v, ((i, z),), pages) for v, z, _, pages in single(i, sizes[i])]
+        for k, members in sets.items():
+            if members[0] in pending:
+                # each zone's size of the best value per page; and, should that set not fit, each
+                # zone's smallest size that gains at all
+                for pick in (max, lambda o: min((b for b in o if b[2] > 0), key=lambda b: b[3], default=None)):
+                    best = [pick(o) if (o := single(i, sizes[i])) else None for i in members]
+                    if all(best):
+                        pages = sum(b[3] for b in best)
+                        v = sum(b[2] * usage[i] / total for i, b in zip(members, best)) / max(pages, 1)
+                        opts.append((v, tuple((i, b[1]) for i, b in zip(members, best)), pages))
+        opts = [o for o in opts if o[0] > floor and o[1] not in banned]
         if not opts:
             break
-        v, i, z, g, pages = max(opts)
-        trial = {**sizes, i: z}
+        v, items, pages = max(opts)
+        trial = {**sizes, **dict(items)}
         swap = (dict(over), []) if fits(trial, over) else take_back(v, trial)
+        if swap is None and len(items) > 1 and (way := give_way(v, items, pages)):
+            u, trial = way
+            gone = [i for i in sizes if unit(i) == u]
+            lines.append(f"  loop set   {samples[items[0][0]].name:<16} takes the pages of {samples[gone[0]].name}'s loops "
+                         f"(worth {worth[u]:.2f} in all < {v * pages:.2f})")
+            del worth[u]
+            banned = {b for b in banned if not any(i in gone for i, _ in b)}
+            if u[0] == "set":
+                pending.update({i: u[1] for i in gone})
+            swap = (dict(over), [])
         if swap is None:
-            banned.add((i, z))
-            if blocked is not None:
-                blocked.append((v, i, z, pages))
+            banned.add(items)
+            if len(items) > 1:
+                lines.append(f"  loop set {samples[items[0][0]].name:<16} blocked: " + ", ".join(
+                    f"{samples[i].name} {z} B" for i, z in items) + f", {pages} pages ({v:.4f}/page) don't fit")
+            elif blocked is not None:
+                blocked.append((v, *items[0], pages))
             continue
         over, used = swap
         for r in used:
             live.remove(r)
             lines.append(f"  loop takes back {r[4]:<14} {r[3] // 256:3d} -> {r[2] // 256:3d} pages "
                          f"({r[0]:.4f}/page < {v:.4f})")
-        lines.append(f"  loop value {samples[i].name:<16} {sizes[i]:5d} -> {z:5d} B: {score(i, sizes[i]):+5.1f} -> "
-                     f"{score(i, z):+5.1f} dB, {pages} pages ({v:.4f}/page)")
+        for i, z in items:
+            lines.append(f"  loop {'set  ' if len(items) > 1 else 'value'} {samples[i].name:<16} {sizes[i]:5d} -> {z:5d} B: "
+                         f"{score(i, sizes[i]):+5.1f} -> {score(i, z):+5.1f} dB, "
+                         f"{(ntp_block(z) - ntp_block(sizes[i])) // 256} pages ({v:.4f}/page)")
+            pending.pop(i, None)
+        worth[unit(items[0][0])] = worth.get(unit(items[0][0]), 0.0) + v * pages
         sizes = trial
     for i in sorted(grow):
         cands = [z for z in samples[i].raw_ok if z <= min(max_loop, samples[i].max_loop)]
         if cands:
+            if samples[i].move_hz:
+                lines.append(f"  loop moves {samples[i].name:<16} {samples[i].move_hz:.2f} Hz: sizes holding whole cycles "
+                             + " ".join(str(z) for z in samples[i].move_ok))
             lines.append(f"  loop sizes {samples[i].name:<16} " + "  ".join(
                 f"{z}:{score(i, z):+.1f}" for z in [samples[i].loop_len, *cands]) + f"  -> {sizes[i]}")
     return sizes, lines, over
@@ -616,6 +691,8 @@ class _Source:
     period: float           # samples: the loop's cycle, `notes` note periods
     keys: tuple[int, int]   # lowest and highest key it plays (incl. the sampled key)
     notes: int = 1          # note periods per cycle (2: a sub-octave partial, loop_notes)
+    move_hz: float = 0.0    # the sound's periodic movement at this key (Hz), when its loops follow it
+    sync: dict = field(default_factory=dict)    # loop bytes -> (tuning, sustain start s, period) or None
 
     @property
     def freq(self) -> float:
@@ -679,6 +756,9 @@ def _raw_tuning(m: dict, src: _Source, cfg: dict, tables, z: int, att_bytes: int
     slowly enough (`raw_loop_slow_hz`) to read as the sound's own movement, and never more
     than `raw_loop_max_rate_drop` below the short loop's rate. Panpipes 16384 B:
     14903 -> 20621 Hz, -24.8 -> -27.6 dB (docs/ninjatrackerplus.md "Raw-loop rate")."""
+    if src.move_hz:
+        sync = _sync_tuning(m, src, cfg, tables, z, att_bytes)
+        return sync[0] if sync else None
     lo, hi = rate_window(m, cfg, z)
     # nor much below the short loop's rate: the measure prefers the short loop's higher rate
     # to a raw loop's movement (Sax 512 B at 18891 Hz -21.7 dB, 8192 B at 16338 Hz -20.3 dB)
@@ -703,6 +783,116 @@ def _raw_tuning(m: dict, src: _Source, cfg: dict, tables, z: int, att_bytes: int
                                         cfg.get("attack_xfade_cycles", 4.0), raw=True)
         if raw_loop_ok(loop, k, r, cfg):
             return t
+    return None
+
+
+MOVE_KEYS = (48, 60, 72)        # where a sound's movement is judged (docsim2.sound_kind)
+MOVE_HOLD = 6.0                 # s: the render it is measured on (loopbuild.analyse's)
+
+
+@functools.lru_cache(maxsize=None)
+def sound_movement(munt: Munt, program) -> str:
+    """docsim2.sound_kind of an MT-32 sound: "fm", "am" or "" from its movement at MOVE_KEYS."""
+    return docsim2.sound_kind([key_movement(munt, program, k) for k in MOVE_KEYS])
+
+
+@functools.lru_cache(maxsize=None)
+def key_movement(munt: Munt, program, key: int) -> docsim2.Movement:
+    x = cached_render(munt, program, key, MOVE_HOLD)
+    return docsim2.movement(x[audio.onset(x):], SR, 440 * 2 ** ((key - 69) / 12), 0.5, MOVE_HOLD - 0.1)
+
+
+def sync_span(x: np.ndarray, at: float, want: float, period: float, tol: float = 0.04
+              ) -> list[tuple[float, float, int]]:
+    """Source spans from `at` after which the sound comes round again, near `want` samples (a
+    whole number of its movement's cycles): (correlation, length, periods) for each whole number
+    of note periods within `tol` of `want`, best first. The correlation is of the audio around
+    `at` with the audio around `at` + length (8 periods either side, the loop seam's
+    neighbourhood). The note's period is measured over the span itself: a period read at one
+    instant of a vibrato is up to 1.6 % off the mean, half a period over a 36-period loop, and
+    a seam crossfaded half a period out cancels (Whistle 2: a 16 dB dip every pass)."""
+    w = int(8 * period)
+    i0 = int(round(at))
+    lo, hi = int(want * (1 - tol)), int(want * (1 + tol)) + 1
+    if i0 - w < 0 or i0 + hi + w + 1 > len(x):
+        return []
+    a = x[i0 - w:i0 + w]
+    na = float(np.linalg.norm(a)) or 1.0
+    lags = np.arange(lo, hi + 1)
+    c = np.array([float(np.dot(a, x[i0 + g - w:i0 + g + w])) / (na * (float(np.linalg.norm(x[i0 + g - w:i0 + g + w])) or 1.0))
+                  for g in lags])
+    # the fundamental's phase through the span counts its periods: `period` is one instant's
+    seg = x[i0 - w:i0 + hi + w + 1]
+    X = np.fft.rfft(seg * np.hanning(len(seg)) ** 0.25)
+    f = np.fft.rfftfreq(len(seg))                           # cycles per sample
+    X[(f < 0.7 / period) | (f > 1.4 / period)] = 0
+    full = np.zeros(len(seg), dtype=complex)
+    full[:len(X)] = 2 * X
+    phase = np.unwrap(np.angle(np.fft.ifft(full)))
+    out = []
+    for j in range(1, len(c) - 1):
+        if c[j] >= c[j - 1] and c[j] > c[j + 1]:
+            den = c[j - 1] - 2 * c[j] + c[j + 1]
+            length = lags[j] + (0.5 * (c[j - 1] - c[j + 1]) / den if den else 0.0)
+            turns = (np.interp(w + length, np.arange(len(seg)), phase) - phase[w]) / (2 * np.pi)
+            if abs(turns - round(turns)) <= 0.2:            # else the fundamental can't be followed here
+                out.append((float(c[j]), float(length), int(round(turns))))
+    return sorted(out, reverse=True)
+
+
+def _sync_tuning(m: dict, src: _Source, cfg: dict, tables, z: int, att_bytes: int
+                 ) -> tuple[tuple[float, int, float, int, int], float, float] | None:
+    """(best_tuning result, sustain start s, period) for a z-byte loop holding a whole number of
+    the sound's movement cycles (`sync_loops`), or None. Fewest cycles first (the highest rate
+    in the config's window: rate = z x movement rate / cycles, so 2048 B holds one 6.16 Hz
+    vibrato cycle at 12.6 kHz). The span comes round well (sync_span: at least
+    `sync_loop_min_corr`, and within `sync_loop_corr_slack` of the best), tunes within
+    `sync_loop_tune_cents`, and of those is the nearest to the cycles' length; the built loop's
+    crossfade may add at most `raw_loop_max_tremolo_db` to the span's own level range."""
+    if z in src.sync:
+        return src.sync[z]
+    src.sync[z] = None
+    lo, hi = cfg["min_rate"], cfg["max_rate"]
+    for n in range(1, 33):
+        want = n * SR / src.move_hz
+        r0 = z * SR / want
+        if r0 > hi * 1.04:
+            continue
+        if r0 < lo / 1.04:
+            break
+        for from_s in dict.fromkeys((cfg.get("sync_loop_from_s", 0.6), cfg.get("sustain_s", 0.4))):
+            at = src.a + from_s * SR
+            if at + want * 1.05 + 0.05 * SR > src.off:
+                continue
+            # periods are counted on the note's own partial; a loop cycle of two note periods (a
+            # sub-octave partial) needs an even number of them
+            spans = [(c, length, kn // src.notes) for c, length, kn in sync_span(src.x, at, want, src.period / src.notes)
+                     if kn % src.notes == 0]
+            if not spans or spans[0][0] < cfg.get("sync_loop_min_corr", 0.9):
+                continue
+            best = None
+            for corr, length, k in spans:
+                if corr < spans[0][0] - cfg.get("sync_loop_corr_slack", 0.02) or k < 1:
+                    continue
+                freq, r = k * SR / length, z * SR / length
+                if not lo <= r <= hi:
+                    continue
+                try:
+                    t = best_tuning(freq, tables, z * freq / (k + 0.5), z * freq / (k - 0.5), z, m["key"], *src.keys)
+                except ValueError:
+                    continue
+                if t[1] == k and abs(t[0]) <= cfg.get("sync_loop_tune_cents", 3.0) and (
+                        best is None or abs(length - want) < abs(best[2] * best[0][1] - want)):
+                    best = (t, from_s, length / k)
+            if best is None:
+                continue
+            t, _, period = best
+            _, loop, _, _ = attack_and_loop(src.x, src.a, period, t[2], t[1], att_bytes, z, from_s,
+                                            cfg.get("attack_xfade_cycles", 4.0), raw=True)
+            body = audio.interp_at(src.x, at + np.arange(z) * (t[1] * period / z))
+            if loop_tremolo_db(loop, t[1]) <= loop_tremolo_db(body, t[1]) + cfg.get("raw_loop_max_tremolo_db", 1.0):
+                src.sync[z] = best
+                return best
     return None
 
 
@@ -733,13 +923,17 @@ def _row_envelope(src: _Source, att_end: float, e_loop: float, steady: bool, loo
 def _raw_loop_sizes(m: dict, src: _Source, cfg: dict, tables, att_bytes: int, sustain_s: float,
                     max_loop: int) -> tuple[int, ...]:
     """Raw loop sizes a steady sound may grow to: each is built and measured (raw_loop_ok)."""
-    ok = []
-    z = cfg["loop_bytes"] * 2
-    while z <= min(cfg.get("max_loop_bytes", 16384), max_loop):
-        if _raw_tuning(m, src, cfg, tables, z, att_bytes, sustain_s) is not None:
-            ok.append(z)
+    return tuple(z for z in _loop_sizes(cfg) if z <= max_loop
+                 and _raw_tuning(m, src, cfg, tables, z, att_bytes, sustain_s) is not None)
+
+
+def _loop_sizes(cfg: dict) -> list[int]:
+    """The raw loop sizes there are: powers of two above the short loop, up to max_loop_bytes."""
+    out, z = [], cfg["loop_bytes"] * 2
+    while z <= cfg.get("max_loop_bytes", 16384):
+        out.append(z)
         z *= 2
-    return tuple(ok)
+    return out
 
 
 def loop_notes(x: np.ndarray, a: int, off: int, period: float, sustain_s: float, cfg: dict) -> int:
@@ -787,18 +981,30 @@ def build_melodic(m: dict, cfg: dict, keys: tuple[int, int], munt: Munt, tables,
     src = _Source(x, a, a + int(hold * SR), audio.rms_envelope(x), period * notes,
                   (min(keys[0], m["key"]), max(keys[1], m["key"])), notes)
     steady = is_steady(src.env, a, src.off, sustain_s)
+    att_bytes = m.get("ntp_attack_bytes", cfg["attack_bytes"])
+    move_ok: tuple = ()
+    if steady and cfg.get("sync_loops"):
+        # loops that hold whole cycles of the sound's own movement, if the sound has one
+        kind = sound_movement(munt, m["program"])
+        src.move_hz = key_movement(munt, m["program"], m["key"]).rate(kind) if kind else 0.0
+        if src.move_hz:
+            move_ok = tuple(z for z in _loop_sizes(cfg) if _sync_tuning(m, src, cfg, tables, z, att_bytes))
+            if not move_ok:
+                src.move_hz = 0.0           # none comes round: the sound's loops are the ordinary raw ones
     # short loops: "eprime" (default) = E'+ (docs/sample-construction.md); "averaged" = the
     # original averaged cycle (attack_and_loop), fractional samples per cycle
     eprime = loop_construction(cfg) == "eprime"
     loop_bytes, (err, k, rate, n0, ft) = _tune_loop(m, src, cfg, tables, steady, sustain_s, eprime)
     # attack = source [a, a + attack_bytes/rate); loop = k periods from the sustain
-    att_bytes = m.get("ntp_attack_bytes", cfg["attack_bytes"])
+    period_l, from_s = src.period, sustain_s
+    if src.move_hz and src.sync.get(loop_bytes):
+        _, from_s, period_l = src.sync[loop_bytes]
     if eprime and loop_bytes <= cfg["loop_bytes"]:
         attack, loop, att_end, _ = eprime_attack_and_loop(
             m, x, a, src.period, rate, k, att_bytes, loop_bytes, hold,
             lambda p, kk, h: cached_render(munt, p, kk, h), src.notes)
     else:
-        attack, loop, att_end, _ = attack_and_loop(x, a, src.period, rate, k, att_bytes, loop_bytes, sustain_s,
+        attack, loop, att_end, _ = attack_and_loop(x, a, period_l, rate, k, att_bytes, loop_bytes, from_s,
                                                    cfg.get("attack_xfade_cycles", 4.0),
                                                    raw=loop_bytes > cfg["loop_bytes"])
     e_loop = float(np.sqrt(np.mean(loop ** 2))) or 1e-9
@@ -812,6 +1018,7 @@ def build_melodic(m: dict, cfg: dict, keys: tuple[int, int], munt: Munt, tables,
                   finetune=ft, base_note=n0, key0=m["key"], kind="melodic",
                   env_t=(t - a) / SR, env_g=g, rel_g=rel_g, tune_cents=err, level=peak)
     s.steady, s.rate, s.cycles = steady, rate, k
+    s.move_hz, s.move_ok = src.move_hz, move_ok
     # at the window's top rate (raw loops tune high; _raw_tuning checks each size's fit)
     top = max(rate, rate_window(m, cfg, 2 * cfg["loop_bytes"])[1])
     s.max_loop = 1 << int(math.log2(max(1.0, ((src.off - a) / SR - sustain_s - 0.05) * top)))
@@ -1011,6 +1218,8 @@ def loop_problems(samples: list[ModSample], cfg: dict) -> list[str]:
     averaged loops are exactly periodic and pass; raw ones must repeat slowly or be as clean)."""
     out = []
     for s in samples:
+        if s.loop_len in s.move_ok:         # holds whole cycles of the sound's own movement (_sync_tuning's gate)
+            continue
         if s.kind == "melodic" and s.loop_len and s.cycles:
             lp = s.data[s.loop_start:s.loop_start + s.loop_len]
             if not raw_loop_ok(lp, s.cycles, s.rate, cfg):

@@ -133,6 +133,14 @@ base = "shared"
 base = "inst-per-song"
 docsim2_vib_weight = 8.0
 
+# vib-per-song with loops that follow each sound's own movement (trial, 2026-11-16): a sound
+# with a periodic vibrato or level swing (docsim2.movement, judged per sound) gets raw loops
+# holding whole cycles of it (2048 B holds one cycle of Whistle 2's 6.16 Hz vibrato), and its
+# zones get them together or not at all (docs/ninjatrackerplus.md "Loops that follow movement").
+[modes.move-per-song]
+base = "vib-per-song"
+sync_loops = true
+
 # Trial variants, built side by side for listening: a `base` sample-set mode plus overrides.
 # Add the name to `ntp_modes` in the justfile. E.g. the original loops next to `shared`:
 # [modes.shared-avg]
