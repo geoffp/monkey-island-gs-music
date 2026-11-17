@@ -227,23 +227,59 @@ def render_doc(mod: Mod, tables, gains: np.ndarray, tail_s: float = 1.0, max_s: 
     return np.concatenate(out) if out else np.zeros((0, 2))
 
 
-def to_output(doc: np.ndarray, rate: int = 48000) -> np.ndarray:
-    """DOC-rate sides -> `rate`: zero-order hold, the output low-pass, then resampled."""
-    from scipy.signal import butter, resample_poly, sosfilt
-    held = np.repeat(doc, HOLD, axis=0)
+def to_output(doc: np.ndarray, rate: int = 48000, block: int = 1 << 15) -> np.ndarray:
+    """DOC-rate sides -> `rate`: zero-order hold, the output low-pass, then resampled: what
+    scipy's resample_poly(sosfilt(repeat(doc, HOLD))) gives, the same sums, a `block` of DOC
+    samples at a time. Whole, the held and filtered copies came to 1.1 GB for MI2's longest
+    song (4 minutes), with eight renders at once in a build (2026-11-17)."""
+    from scipy.signal import butter, firwin, sosfilt, upfirdn
     fs = DOC_RATE * HOLD
-    y = sosfilt(butter(2, FILTER_HZ, fs=fs, output="sos"), held, axis=0)
     g = math.gcd(int(fs), rate)
-    return resample_poly(y, rate // g, int(fs) // g, axis=0)
+    up, down = rate // g, int(fs) // g
+    n_in = doc.shape[0] * HOLD
+    n_out = -(-n_in * up // down)
+    ch = doc.shape[1]
+    out = np.zeros((n_out, ch))
+    if n_in == 0:
+        return out
+    sos = butter(2, FILTER_HZ, fs=fs, output="sos")
+    zi = np.zeros((sos.shape[0], 2, ch))
+    # resample_poly's filter and alignment (scipy.signal._signaltools.resample_poly, padtype
+    # "constant"): output j is upfirdn output j + pre, upfirdn's m = sum_n x[n] h[m*down - n*up]
+    half = 10 * max(up, down)
+    pad = down - half % down
+    h = np.concatenate([np.zeros(pad), firwin(2 * half + 1, 1.0 / max(up, down), window=("kaiser", 5.0)) * up])
+    pre = (half + pad) // down
+    taps = h.size
+    buf, b0 = np.zeros((0, ch)), 0          # filtered input from b0 (a multiple of down: same phases)
+    j = 0                                   # next output
+    for at in range(0, doc.shape[0], block):
+        y, zi = sosfilt(sos, np.repeat(doc[at:at + block], HOLD, axis=0), axis=0, zi=zi)
+        buf = np.concatenate([buf, y])
+        end = b0 + buf.shape[0]
+        last = end >= n_in
+        # outputs whose inputs are all here: m*down/up < end (or every input is)
+        j_hi = n_out if last else min(n_out, max(j, ((end - 1) * up) // down - pre + 1))
+        if j_hi > j:
+            x = buf if not last else np.concatenate([buf, np.zeros((taps // up + 2, ch))])
+            m0 = b0 * up // down
+            ys = upfirdn(h, x, up, down, axis=0)
+            out[j:j_hi] = ys[j + pre - m0:j_hi + pre - m0]
+            j = j_hi
+        # keep what the next output needs: n >= ((j + pre)*down - taps + 1)/up, from a multiple of down
+        need = max(0, -(-((j + pre) * down - taps + 1) // up))
+        cut = max(b0, need // down * down)
+        buf, b0 = buf[cut - b0:], cut
+    return out
 
 
-def write_wav(path: Path, y: np.ndarray, rate: int) -> None:
-    pcm = np.clip(np.round(y * 32767), -32768, 32767).astype("<i2")
+def write_wav(path: Path, y: np.ndarray, rate: int, block: int = 1 << 18) -> None:
     with wave.open(str(path), "wb") as w:
         w.setnchannels(y.shape[1])
         w.setsampwidth(2)
         w.setframerate(rate)
-        w.writeframes(pcm.tobytes())
+        for at in range(0, y.shape[0], block):         # a block at a time: three temporaries each
+            w.writeframes(np.clip(np.round(y[at:at + block] * 32767), -32768, 32767).astype("<i2").tobytes())
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -261,7 +297,8 @@ def main(argv: list[str] | None = None) -> int:
     gains = volume_gains(None if a.linear else a.curve)
     a.out.mkdir(parents=True, exist_ok=True)
     for f in a.mods:
-        y = to_output(render_doc(read_mod(f.read_bytes()), tables, gains), a.rate) * a.gain
+        y = to_output(render_doc(read_mod(f.read_bytes()), tables, gains), a.rate)
+        y *= a.gain
         peak = float(np.max(np.abs(y))) if y.size else 0.0
         if peak > 1.0:
             print(f"{f.name}: peak {peak:.2f} at gain {a.gain}: scaled down to fit", file=sys.stderr)
