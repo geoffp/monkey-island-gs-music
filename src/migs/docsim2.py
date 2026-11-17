@@ -57,6 +57,9 @@ SEGMENTS = ((0.03, 0.15), (0.15, 0.6), (0.6, 1.5), (1.5, None))
 MOD_BANDS = ((0.5, 2.0), (2.0, 4.0), (4.0, 8.0), (8.0, 16.0))
 MOD_FROM_S = 0.15                # modulation is measured in the sustain, after the attack
 LIVE_FLOOR = 0.01                # loudness-depth floor of the live term, near AM detection threshold
+VIB_BAND = (3.0, 9.0)             # Hz: vibrato's rates (the whistle's is about 5.5 Hz)
+VIB_FLOOR_CENTS = 6.0            # the tracker's own noise on a steady note (strings, organs: 5-9 cents)
+VIB_MIN_HZ = 100.0               # below this a 2048-sample frame holds too few periods to track
 VERSION = 2                      # bump when the measure changes (invalidates the disk cache)
 
 
@@ -173,6 +176,42 @@ def live_distance(a: np.ndarray, b: np.ndarray, fs: float = DOC_RATE, floor: flo
     return float(np.mean(np.abs(np.log10((gg + floor) / (ga + floor)))))
 
 
+def pitch_vibrato(y: np.ndarray, fs: float, f0: float, t0: float = MOD_FROM_S + 0.25) -> float:
+    """Amplitude (cents) of the pitch's swing at vibrato rates (VIB_BAND) over the sustain: the
+    strongest partial within 10 % of the note's pitch `f0` is followed frame by frame (2048
+    samples, hop 256, peak found on a 8x zero-padded FFT), its pitch in cents is band-passed to
+    VIB_BAND, and the result is that band's RMS x sqrt(2) (the peak of a sine). 0 when the note
+    is too low to track or has nothing near f0. The loudness measure can't hear this: a +-25
+    cent vibrato moves a 0.5-Bark band's loudness only a little, and the MT-32's Whistle 2
+    has it (Atlantis 48) while a 512 B loop of it has none."""
+    from scipy.signal import butter, sosfiltfilt
+    y = np.asarray(y, dtype=np.float64)[int(t0 * fs):]
+    win, hop = 2048, 256
+    if f0 < VIB_MIN_HZ or len(y) < win * 3:
+        return 0.0
+    w = np.hanning(win)
+    fr = np.fft.rfftfreq(win * 8, 1 / fs)
+    lo, hi = np.searchsorted(fr, f0 * 0.9), np.searchsorted(fr, f0 * 1.1)
+    peaks = []
+    for s0 in range(0, len(y) - win, hop):
+        X = np.abs(np.fft.rfft(y[s0:s0 + win] * w, win * 8))[lo:hi]
+        peaks.append(fr[lo + int(np.argmax(X))] if X.max() > 0 else 0.0)
+    peaks = np.array(peaks)
+    if np.count_nonzero(peaks) < len(peaks) // 2 or len(peaks) < 16:
+        return 0.0
+    cents = 1200 * np.log2(np.maximum(peaks, 1.0) / np.median(peaks[peaks > 0]))
+    rate = fs / hop
+    sos = butter(2, VIB_BAND, "bp", fs=rate, output="sos")
+    return float(np.std(sosfiltfilt(sos, cents)) * np.sqrt(2))
+
+
+def vib_distance(ref_cents: float, got_cents: float, floor: float = VIB_FLOOR_CENTS) -> float:
+    """|log10| of the two vibrato depths, each floored at the tracker's noise (depth is heard as
+    a ratio, as for `live`): a lost 27 cents vibrato is 0.7, a steady note against a steady
+    one 0."""
+    return float(abs(np.log10((got_cents + floor) / (ref_cents + floor))))
+
+
 def mean_distance(a: np.ndarray, b: np.ndarray) -> float:
     """sum|mean_b - mean_a| / sum mean_a over the whole of both patterns (drums)."""
     t = min(a.shape[1], b.shape[1])
@@ -272,32 +311,45 @@ class Scorer:
 
     def __init__(self, render: Callable[[object, int], np.ndarray], sr: int, seconds: float = 3.0,
                  cache: Path | None = None, name: Callable[[object], object] = lambda p: p,
-                 mod_weight: float = 1.0, live_weight: float = 0.0):
+                 mod_weight: float = 1.0, live_weight: float = 0.0, vib_weight: float = 0.0):
         self.render, self.sr, self.seconds, self.name = render, sr, seconds, name
-        self.mod_weight, self.live_weight = mod_weight, live_weight
+        self.mod_weight, self.live_weight, self.vib_weight = mod_weight, live_weight, vib_weight
         self.cache = Cache(cache)
         self._ref = functools.lru_cache(maxsize=256)(self._ref_pattern)
+        self._ref_vib = functools.lru_cache(maxsize=256)(self._ref_vibrato)
 
     def _ref_pattern(self, tag, key: int) -> np.ndarray:
         x = self.render(tag, key)[:int(self.seconds * self.sr)]
         return loudness_pattern(to_doc_rate(x, self.sr))
+
+    def _ref_vibrato(self, tag, key: int) -> float:
+        x = self.render(tag, key)[:int(self.seconds * self.sr)]
+        return pitch_vibrato(to_doc_rate(x, self.sr), DOC_RATE, 440 * 2 ** ((key - 69) / 12))
 
     def note_db(self, s, tag, key: int, drum: bool = False, semis: float | None = None) -> float:
         """Score (dB) of sample `s` playing `key` against program `tag`'s note `key` (another
         program than the sample's own prices a merge); `semis` defaults to key - s.key0 (a
         drum's offset is passed)."""
         sh = key - s.key0 if semis is None else semis
-        k = f"{sample_tag(s)}:{self.name(tag)}:{key}:{round(sh, 3)}:{int(drum)}:{self.seconds}:w{self.mod_weight:g}{self._live}"
+        k = f"{sample_tag(s)}:{self.name(tag)}:{key}:{round(sh, 3)}:{int(drum)}:{self.seconds}:w{self.mod_weight:g}{self._live}{self._vib}"
 
         def compute() -> float:
-            got = loudness_pattern(play_sample(s, sh, self.seconds))
-            return db(distance(self._ref(tag, key), got, drum, mod_weight=self.mod_weight,
-                               live_weight=self.live_weight))
+            y = play_sample(s, sh, self.seconds)
+            d = distance(self._ref(tag, key), loudness_pattern(y), drum, mod_weight=self.mod_weight,
+                         live_weight=self.live_weight)
+            if self.vib_weight and not drum:
+                d += self.vib_weight * vib_distance(self._ref_vib(tag, key),
+                                                    pitch_vibrato(y, DOC_RATE, 440 * 2 ** ((key - 69) / 12)))
+            return db(d)
         return self.cache.get(k, compute)
 
     @property
     def _live(self) -> str:
         return f"l{self.live_weight:g}" if self.live_weight else ""
+
+    @property
+    def _vib(self) -> str:
+        return f"v{self.vib_weight:g}" if self.vib_weight else ""
 
     def sample_db(self, s, tag, keys: dict[int, float], drum: bool = False) -> float:
         """Weighted mean score over `keys` (key -> weight, e.g. held note-seconds)."""

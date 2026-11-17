@@ -561,7 +561,8 @@ def docsim2_scorer(munt: Munt, cfg: dict, seconds: float = 3.0) -> docsim2.Score
         return x[audio.onset(x):]
     return docsim2.Scorer(render, SR, seconds, munt.cache.parent / "docsim2.json", name=lambda p: doc_key(munt, p),
                           mod_weight=cfg.get("docsim2_mod_weight", 1.0),
-                          live_weight=cfg.get("docsim2_live_weight", 0.0))
+                          live_weight=cfg.get("docsim2_live_weight", 0.0),
+                          vib_weight=cfg.get("docsim2_vib_weight", 0.0))
 
 
 def _loop_score(samples: list[ModSample], melodic: list[dict], ranges: dict, weights: dict[int, dict[int, float]],
