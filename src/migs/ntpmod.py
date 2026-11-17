@@ -733,7 +733,14 @@ def sample_set(spec: dict, cfg: dict, songs: list[tuple[list[Note], dict]], last
             usage_notes.append((program_of(n, chan_prog), n))
     song_spec = {**spec, "melodic": [m for m in spec["melodic"] if m["slot"] in used],
                  "drum": [d for d in spec["drum"] if keys & set(d["covers"])]}
-    build = lambda sp, c=cfg: build_samples(sp, c, ranges, munt, tables, log=lambda *a: None)
+    note_ranges = ranges
+
+    def ranges_of(sp: dict) -> dict:
+        """Each slot's keys in this spec: the notes' range, a planned zone's own keys. Taken from
+        the spec, not kept: a re-plan that is turned down (sets_take_zones, loops_take_zones)
+        must not leave its zones' keys behind for the final build."""
+        return {**note_ranges, **{m["slot"]: m["zone_keys"] for m in sp["melodic"] if "zone_keys" in m}}
+    build = lambda sp, c=cfg: build_samples(sp, c, ranges_of(sp), munt, tables, log=lambda *a: None)
     every = song_spec
     all_plans = _pitch_plans(song_spec, usage_notes, cfg, tables, munt) if cfg.get("pitch_plan") else {}
 
@@ -745,10 +752,7 @@ def sample_set(spec: dict, cfg: dict, songs: list[tuple[list[Note], dict]], last
                 melodic.append(m)
                 continue
             ps, _, _, shot = plans[m["name"]]
-            for z in _zone_entries(m, ps[count[m["name"]] - 1], shot):
-                if "zone_keys" in z:
-                    ranges[z["slot"]] = z["zone_keys"]        # tune each zone for its own keys
-                melodic.append(z)
+            melodic += _zone_entries(m, ps[count[m["name"]] - 1], shot)   # each tuned for its zone_keys
         return {**unplanned, "melodic": melodic}
 
     # Loops are planned with every melodic sound looped; one-shots are decided afterwards, so a
@@ -809,7 +813,7 @@ def sample_set(spec: dict, cfg: dict, songs: list[tuple[list[Note], dict]], last
             blocked: list = []
             b_sets: list = []
             now_bought: list = []
-            sizes, reverted = _valued_loops(samples, song_spec, ranges, usage, usage_notes, programs, cfg, last_page,
+            sizes, reverted = _valued_loops(samples, song_spec, ranges_of(song_spec), usage, usage_notes, programs, cfg, last_page,
                                             tables, munt, lines.append, trade, songs=songs, blocked=blocked,
                                             blocked_sets=b_sets, sets_bought=now_bought)
             have = {_sound_of(names[0], plans) for _, names in now_bought}     # sounds whose movement is in
@@ -840,7 +844,7 @@ def sample_set(spec: dict, cfg: dict, songs: list[tuple[list[Note], dict]], last
                         trial_spec = {**planned(gave), "drum": song_spec["drum"]}
                         t_samples, t_programs, t_drums = build(trial_spec, {**cfg, "one_shots": False})
                         t_bought: list = []
-                        _valued_loops(t_samples, trial_spec, ranges, held(t_programs), usage_notes, t_programs, cfg,
+                        _valued_loops(t_samples, trial_spec, ranges_of(trial_spec), held(t_programs), usage_notes, t_programs, cfg,
                                       last_page, tables, munt, lambda *a: None, trade, songs=songs, sets_bought=t_bought)
                         got = max((w for w, names in t_bought if _sound_of(names[0], plans) == own), default=0.0)
                         kept = {_sound_of(names[0], plans) for _, names in t_bought}
@@ -882,7 +886,7 @@ def sample_set(spec: dict, cfg: dict, songs: list[tuple[list[Note], dict]], last
             trial_spec = {**planned(gave), "drum": song_spec["drum"]}
             t_samples, t_programs, t_drums = build(trial_spec, {**cfg, "one_shots": False})
             t_lines: list[str] = []
-            t_sizes, t_rev = _valued_loops(t_samples, trial_spec, ranges, held(t_programs), usage_notes, t_programs,
+            t_sizes, t_rev = _valued_loops(t_samples, trial_spec, ranges_of(trial_spec), held(t_programs), usage_notes, t_programs,
                                            cfg, last_page, tables, munt, t_lines.append, trade, songs=songs)
             got = {t_samples[i].name: z for i, z in t_sizes.items()}
             if got.get(want[1], 0) < want[2]:           # the loop still didn't get its pages: keep the zones
