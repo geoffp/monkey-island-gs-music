@@ -581,14 +581,6 @@ def _loop_score(samples: list[ModSample], melodic: list[dict], ranges: dict, wei
     return score
 
 
-def _loop_groups(song_spec: dict, cfg: dict) -> dict[int, int] | None:
-    """`loops_by_sound`: sample index -> its sound (MT-32 program), so a sound's zones get their
-    loops together (ntpsamples.loop_units). None: each sample on its own, as always."""
-    if not cfg.get("loops_by_sound"):
-        return None
-    return {i: m["program"] for i, m in enumerate(song_spec["melodic"])}
-
-
 def _valued_loops(samples: list[ModSample], song_spec: dict, ranges: dict, usage: dict[int, float],
                   usage_notes: list[tuple[int, Note]], programs: dict, cfg: dict, last_page: int, tables, munt: Munt,
                   log, trade: dict | None = None, songs=(), blocked: list | None = None
@@ -638,7 +630,7 @@ def _valued_loops(samples: list[ModSample], song_spec: dict, ranges: dict, usage
     sizes, lines, reverted = plan_loops_valued(
         samples, exposure if (trade or after or alone.weight) else usage, last_page, cfg.get("max_loop_bytes", 16384), score,
         cfg.get("loop_min_db_per_page", 0.0), total=trade["total"] if trade else None, revertible=revertible,
-        blocked=stuck, group_of=_loop_groups(song_spec, cfg))
+        blocked=stuck)
     scorer.cache.save()
     for line in lines:
         log(line)
@@ -847,7 +839,7 @@ def sample_set(spec: dict, cfg: dict, songs: list[tuple[list[Note], dict]], last
             song_spec = {**song_spec, "drum": [{**d, "ntp_bytes": reverted[d["name"]]} if d["name"] in reverted else d
                                                for d in song_spec["drum"]]}
     else:
-        sizes = plan_loops(samples, usage, last_page, cfg.get("max_loop_bytes", 16384), _loop_groups(song_spec, cfg))
+        sizes = plan_loops(samples, usage, last_page, cfg.get("max_loop_bytes", 16384))
     if cfg.get("one_shots", True) or any(sizes[i] != samples[i].loop_len for i in sizes):
         by_name = {samples[i].name: sz for i, sz in sizes.items()}
         song_spec = {**song_spec, "melodic": [{**m, "ntp_loop_bytes": by_name.get(m["name"], cfg["loop_bytes"])}
