@@ -8,6 +8,10 @@
 # toward its row (quantize = 1). Smaller rows = more pattern RAM and player CPU.
 
 [defaults]
+doc_volume = "measured"   # MOD volumes remapped for the real DOC's volume curve (config/doc-volume.toml,
+                          # src/migs/docvolume.py): the default since 2026-11-16 (user). The real chip plays
+                          # quiet volumes 10-30 dB below linear, so soft parts all but vanished on a real
+                          # IIgs. Emulators are linear and play the soft parts too loud; "linear" suits them.
 samples = "per-song"    # per-song: each .NTP carries only its own sounds, free DOC RAM -> longer
                         # loops (NTPprepare loads samples per song anyway). shared: one set for
                         # every song, like the MIDI Synth bank. Override: just ntpmod shared

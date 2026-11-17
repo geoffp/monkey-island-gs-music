@@ -19,6 +19,12 @@ Island 1 disk has: this game plays too many different sounds for one
 set of 31 samples.) A song that plays more sounds than fit leaves
 out its least-played ones.
 
+These files' volumes are set for a real IIGS. The real sound chip
+plays quiet volumes far quieter than emulators do, so soft parts
+nearly vanish; the volumes here are raised to bring them back to the
+levels the MT-32 played them at. In an emulator, the soft parts come
+out too loud.
+
 Songs that loop in the game loop here too, for as long as they play;
 the others play once and stop. Where the game changes a song as you
 walk around (iMUSE), these play it as it starts, before any change.
