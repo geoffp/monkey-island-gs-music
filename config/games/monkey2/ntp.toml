@@ -155,3 +155,11 @@ base = "shared"
 # rows_per_unit = 1
 # unit_ticks = 120      # override the detected grid unit (the song's MIDI ticks: 480 per beat)
 # phase_ticks = 12.0
+
+# Trial (2026-11-17): a sound whose movement set doesn't fit may give up one of its own zones
+# for it (the user: "a full movement 2-zone might perceptually beat a no-movement 3-zone"). The
+# song is re-planned with that sound one zone short; kept if its set is then bought and worth
+# more than the zone was (both on the planner's scale: dB x share of exposure).
+[modes.zones-per-song]
+base = "inst-per-song"
+sets_take_zones = true

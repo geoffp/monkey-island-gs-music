@@ -584,14 +584,17 @@ def _loop_score(samples: list[ModSample], melodic: list[dict], ranges: dict, wei
 
 def _valued_loops(samples: list[ModSample], song_spec: dict, ranges: dict, usage: dict[int, float],
                   usage_notes: list[tuple[int, Note]], programs: dict, cfg: dict, last_page: int, tables, munt: Munt,
-                  log, trade: dict | None = None, songs=(), blocked: list | None = None
+                  log, trade: dict | None = None, songs=(), blocked: list | None = None,
+                  blocked_sets: list | None = None, sets_bought: list | None = None
                   ) -> tuple[dict[int, int], dict[str, int]]:
     """Loop sizes by measured value (ntpsamples.plan_loops_valued): every raw size a steady
     sound allows is built as it would ship and scored with docsim2 against Munt, on up to 5
     of its keys (weighted by held note-seconds). With `trade` (the value budget's exposures and
     drum upgrades, on docsim2's scale too: pitch_measure = "docsim2"), a loop is valued like a
     zone or drum (dB x share of the set's exposure, per page) and may take back drum upgrades
-    worth less per page. Returns (loop sizes, drum bytes after any take-back, by name)."""
+    worth less per page. `blocked_sets` and `sets_bought` (sets_take_zones) collect the movement
+    sets that didn't fit, as (value per page, sample names, pages), and those bought, as (worth,
+    sample names). Returns (loop sizes, drum bytes after any take-back, by name)."""
     hold = song_spec.get("hold_seconds", 2.0)
     melodic = song_spec["melodic"]                  # build_samples puts melodic samples first, in order
     weights: dict[int, dict[int, float]] = {}
@@ -628,18 +631,24 @@ def _valued_loops(samples: list[ModSample], song_spec: dict, ranges: dict, usage
                 st = trade["steps"][name]
                 revertible.append((v, index[name], st[frm][0], st[to][0], name))
     stuck: list = []
+    b_sets: list = []
+    bought: list = []
     sizes, lines, reverted = plan_loops_valued(
         samples, exposure if (trade or after or alone.weight) else usage, last_page, cfg.get("max_loop_bytes", 16384), score,
         cfg.get("loop_min_db_per_page", 0.0), total=trade["total"] if trade else None, revertible=revertible,
         blocked=stuck,
         sound={i: melodic[i]["program"] for i, s in enumerate(samples)
                if s.kind == "melodic" and i < len(melodic)} if cfg.get("sync_loops") else None,
-        singles_give_way=bool(cfg.get("long_shots")))
+        singles_give_way=bool(cfg.get("long_shots")), blocked_sets=b_sets, sets_bought=bought)
     scorer.cache.save()
     for line in lines:
         log(line)
     if blocked is not None:                         # (value per page, sample name, size, pages)
         blocked += [(v, samples[i].name, z, pages) for v, i, z, pages in stuck]
+    if blocked_sets is not None:
+        blocked_sets += [(v, tuple(samples[i].name for i, _ in items), pages) for v, items, pages in b_sets]
+    if sets_bought is not None:
+        sets_bought += [(w, tuple(samples[i].name for i in idx)) for w, idx in bought]
     return sizes, {samples[i].name: b for i, b in reverted.items()}
 
 
@@ -794,13 +803,60 @@ def sample_set(spec: dict, cfg: dict, songs: list[tuple[list[Note], dict]], last
     usage = held(programs)
     if cfg.get("loop_budget", "usage") == "docsim2":
         trade = budget_info if cfg.get("pitch_measure", "docsim") == "docsim2" else None   # one scale only
-        for _ in range(4):
+        tried: set[str] = set()                     # sounds that tried giving up a zone for their movement
+        for _ in range(8 if cfg.get("sets_take_zones") else 4):
             lines: list[str] = []
             blocked: list = []
+            b_sets: list = []
             sizes, reverted = _valued_loops(samples, song_spec, ranges, usage, usage_notes, programs, cfg, last_page,
-                                            tables, munt, lines.append, trade, songs=songs, blocked=blocked)
+                                            tables, munt, lines.append, trade, songs=songs, blocked=blocked,
+                                            blocked_sets=b_sets)
             owns = _own_sample_values(grants, trade, samples, cfg) if trade else []
             back = _zones_for_loop(blocked, trade, count, plans, owns) if trade and cfg.get("loops_take_zones") else None
+            if back is None and trade and cfg.get("sets_take_zones") and b_sets:
+                # a sound whose movement set didn't fit may give up its own last zone for it
+                # (a whistle with vibrato in 2 zones against a plain one in 3): re-planned
+                # with one zone fewer, kept if the set is then bought and worth more than the zone
+                took = None
+                for own, worth in _set_candidates(b_sets, plans, count, tried):
+                    tried.add(own)
+                    # the cheapest zones per page first (each sound's last zone; the set's own
+                    # sound's too), while what they are worth in all stays below the set's worth
+                    gave, lost, gone = dict(count), 0.0, []
+                    while True:
+                        pool = [(zv, zn, to, zp) for zv, zn, to, zp in trade["zones"] if gave.get(zn) == to and to > 1]
+                        nxt = min(pool, default=None)
+                        if nxt is None or lost + nxt[0] * nxt[3] >= worth:
+                            lines.append(f"  loop set {own:<16} keeps its zones: "
+                                         + ("no zone left to take back" if nxt is None else
+                                            f"the zones it would take ({lost + nxt[0] * nxt[3]:.2f}) are worth more "
+                                            f"than its set ({worth:.2f})") + (f", after {', '.join(gone)}" if gone else ""))
+                            break
+                        gave[nxt[1]] = nxt[2] - 1
+                        lost += nxt[0] * nxt[3]
+                        gone.append(f"{nxt[1]} {nxt[2]} -> {nxt[2] - 1}")
+                        trial_spec = {**planned(gave), "drum": song_spec["drum"]}
+                        t_samples, t_programs, t_drums = build(trial_spec, {**cfg, "one_shots": False})
+                        t_bought: list = []
+                        _valued_loops(t_samples, trial_spec, ranges, held(t_programs), usage_notes, t_programs, cfg,
+                                      last_page, tables, munt, lambda *a: None, trade, songs=songs, sets_bought=t_bought)
+                        got = max((w for w, names in t_bought if _sound_of(names[0], plans) == own), default=0.0)
+                        if got > lost:
+                            log(f"  loop set {own:<16} takes back zones {', '.join(gone)} ({lost:.2f} in all) "
+                                f"for its movement (set worth {got:.2f})")
+                            took = gave, trial_spec, t_samples, t_programs, t_drums
+                            break
+                    if took is not None:
+                        break
+                if took is not None:
+                    gave, song_spec, samples, programs, drums = took
+                    count = gave
+                    trade["zones"] = [zn for zn in trade["zones"] if zn[2] <= count[zn[1]]]
+                    usage = held(programs)
+                    for line in lines:
+                        if "keeps its zones" in line:
+                            log(line)
+                    continue
             if back is None:
                 if blocked:
                     v, name, z, pages = max(blocked)
@@ -861,6 +917,18 @@ def sample_set(spec: dict, cfg: dict, songs: list[tuple[list[Note], dict]], last
 def _planned_size(m: dict, z: int) -> dict:
     """A melodic spec with its planned loop size, or its long one-shot (SHOT | block bytes)."""
     return {**m, "ntp_shot_bytes": z & ~SHOT} if z & SHOT else {**m, "ntp_loop_bytes": z}
+
+
+def _set_candidates(b_sets: list, plans: dict, count: dict[str, int], tried: set[str]
+                    ) -> list[tuple[str, float]]:
+    """Sounds whose movement set didn't fit and that have a zone to give up (more than one,
+    not tried yet): (sound, the set's worth: value x pages, its best try), the most worth first."""
+    best: dict[str, float] = {}
+    for v, names, pages in b_sets:
+        own = _sound_of(names[0], plans)
+        if own in plans and count.get(own, 1) > 1 and own not in tried:
+            best[own] = max(best.get(own, 0.0), v * pages)
+    return sorted(best.items(), key=lambda kv: -kv[1])
 
 
 def _sound_of(sample: str, plans: dict) -> str:

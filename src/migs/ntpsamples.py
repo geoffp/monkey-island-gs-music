@@ -559,7 +559,8 @@ def plan_loops(samples: list[ModSample], usage: dict[int, float], last_page: int
 def plan_loops_valued(samples: list[ModSample], usage: dict[int, float], last_page: int, max_loop: int,
                       score: Callable[[int, int], float], floor: float = 0.0, total: float | None = None,
                       revertible: list[tuple[float, int, int, int, str]] = (), blocked: list | None = None,
-                      sound: dict[int, object] | None = None, singles_give_way: bool = False
+                      sound: dict[int, object] | None = None, singles_give_way: bool = False,
+                      blocked_sets: list | None = None, sets_bought: list | None = None
                       ) -> tuple[dict[int, int], list[str], dict[int, int]]:
     """plan_loops priced by measurement (`loop_budget = "docsim2"`): the steady sounds' loops
     grow to the raw sizes that most improve `score(i, size)` (dB, lower = closer to the
@@ -582,6 +583,9 @@ def plan_loops_valued(samples: list[ModSample], usage: dict[int, float], last_pa
     `singles_give_way` (`long_shots`): a single purchase that doesn't fit may displace another
     sound's loops as a set may (give_way): a big one-shot can be worth more than another
     sound's loops in all while no value per page lets it reach their pages.
+    `blocked_sets` collects the sets that didn't fit, as (value per page, ((sample, size), ...),
+    pages), and `sets_bought` the sets bought, as (their worth: value x pages, (sample, ...)), for
+    `sets_take_zones` (ntpmod: a sound may give up a zone for its movement).
     Returns (loop size per melodic sample index, log lines, block bytes per reverted sample)."""
     sizes = {i: s.loop_len for i, s in enumerate(samples) if s.kind == "melodic" and s.loop_len}
     grow = {i for i, s in enumerate(samples) if s.kind == "melodic" and (s.steady or s.raw_ok) and usage.get(i, 0) > 0}
@@ -705,6 +709,8 @@ def plan_loops_valued(samples: list[ModSample], usage: dict[int, float], last_pa
         if swap is None:
             banned.add(items)
             if len(items) > 1:
+                if blocked_sets is not None:
+                    blocked_sets.append((v, items, pages))
                 lines.append(f"  loop set {samples[items[0][0]].name:<16} blocked: " + ", ".join(
                     f"{samples[i].name} {size_label(z)} B" for i, z in items) + f", {pages} pages ({v:.4f}/page) don't fit")
             elif blocked is not None:
@@ -721,6 +727,8 @@ def plan_loops_valued(samples: list[ModSample], usage: dict[int, float], last_pa
                          f"{(cost(i, z) - cost(i, sizes[i])) // 256} pages ({v:.4f}/page)")
             pending.pop(i, None)
         worth[unit(items[0][0])] = worth.get(unit(items[0][0]), 0.0) + v * pages
+        if len(items) > 1 and sets_bought is not None:
+            sets_bought.append((v * pages, tuple(i for i, _ in items)))
         sizes = trial
     for i in sorted(grow):
         cands = [z for z in samples[i].raw_ok if allowed(i, z)]
