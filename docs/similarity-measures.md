@@ -279,6 +279,18 @@ The verdicts hold for every setting tried with live ≥ 0.1, with both floors (0
 with modulation measured from 0.15 or 0.6 s, so the choice is not a fit to these cases.
 Mod 1 with live 0.2 keeps the widest smallest margin.
 
+## Vibrato and movement (2026-11-16)
+The loudness pattern doesn't hear pitch vibrato: Fate of Atlantis 48's Whistle 2 (±28 cents at
+6.16 Hz) scored −6 dB with a 512 B loop that has none. Two additions, both in `docsim2.py`:
+- `pitch_vibrato` / `vib_distance` (`docsim2_vib_weight`, 0 by default): |log10| of the two
+  vibrato depths over a 12-cent dead zone, added to the note's distance. At weight 8 MI153's
+  loops are unchanged and the flat whistle loop scores +14 dB.
+- `movement` / `sound_kind`: a sound's periodic vibrato or level swing, measured on the
+  reference alone and judged once per sound. It isn't part of the score: the build uses it to
+  make loops of whole cycles and to buy them for all of a sound's zones together
+  (docs/ninjatrackerplus.md, "Loops that follow movement").
+No listening verdict covers either yet.
+
 ## Limitations
 - Munt is the reference, not a real MT-32. The DOC model is the build's (no analogue stage,
   no 6-bit Cxx volume steps).
