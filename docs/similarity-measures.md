@@ -289,7 +289,8 @@ The loudness pattern doesn't hear pitch vibrato: Fate of Atlantis 48's Whistle 2
   reference alone and judged once per sound. It isn't part of the score: the build uses it to
   make loops of whole cycles and to buy them for all of a sound's zones together
   (docs/ninjatrackerplus.md, "Loops that follow movement").
-No listening verdict covers either yet.
+Heard 2026-11-16 (user, the `move-per-song` builds of MI1 and four Atlantis songs): "They all
+actually sound great!" A verdict on the builds as a whole; no single loop was A/B'd.
 
 ## Limitations
 - Munt is the reference, not a real MT-32. The DOC model is the build's (no analogue stage,
