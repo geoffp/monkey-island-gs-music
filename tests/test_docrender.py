@@ -78,3 +78,17 @@ def test_output_keeps_the_images_a_desktop_player_smooths_away():
     f = np.fft.rfftfreq(len(y), 1 / 48000)
     image = X[(f > 20000) & (f < 20700)].sum() / X[(f > 5900) & (f < 6100)].sum()
     assert 1e-3 < image < 0.5
+
+
+def test_to_output_by_blocks_is_resample_poly_of_the_whole():
+    # the block-at-a-time output stage gives the samples the whole-song one did, at any length
+    import math
+    from scipy.signal import butter, resample_poly, sosfilt
+    fs = DOC_RATE * docrender.HOLD
+    g = math.gcd(fs, 48000)
+    for n in (1, 7, 1000, 2500):
+        doc = np.random.default_rng(n).standard_normal((n, 2))
+        whole = resample_poly(sosfilt(butter(2, docrender.FILTER_HZ, fs=fs, output="sos"),
+                                      np.repeat(doc, docrender.HOLD, axis=0), axis=0),
+                              48000 // g, fs // g, axis=0)
+        assert np.array_equal(docrender.to_output(doc, 48000, block=700), whole)
