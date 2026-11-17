@@ -143,6 +143,10 @@ docsim2_vib_weight = 8.0     # docsim2 hears pitch vibrato (depth ratio over a 1
 sync_loops = true            # a sound with a periodic vibrato or level swing gets raw loops of whole cycles of
                              # it, for all its zones together or none (heard 2026-11-16: "they all sound great";
                              # docs/ninjatrackerplus.md "Loops that follow movement")
+sets_take_zones = true       # a movement set that doesn't fit may take back the cheapest zones of any sound, while
+                             # they are worth less than it and every set already bought stays (trial zones-per-song,
+                             # 2026-11-17, MI165/MI168 trombones: "the movement really improves things", the zones
+                             # not missed)
 [modes.inst-shared]
 base = "shared"
 
@@ -162,8 +166,9 @@ base = "shared"
 # base = "per-song"
 # pitch_plan = false
 
-# Past trials (no-merges 2026-11-12; ds2-loops, ds2-pitch 2026-11-13, the steps to inst-per-song):
-# docs/ninjatrackerplus.md, "Sound merges" and "docsim 2.0 trials".
+# Past trials (no-merges 2026-11-12; ds2-loops, ds2-pitch 2026-11-13, the steps to inst-per-song;
+# zones-per-song 2026-11-17, now sets_take_zones): docs/ninjatrackerplus.md, "Sound merges",
+# "docsim 2.0 trials" and "Loops that follow movement".
 
 # Per-song overrides, e.g.:
 # [songs.160]
@@ -216,11 +221,3 @@ long_shot_range_db = 50.0    # a long one-shot holds the sound until it stays th
                              # stored flat and its decay played by row volumes (no 8-bit floor)
 docsim2_fine_weight = 1.0    # decaying sounds: compare 0.15 s blocks through the decay (a slide the 0.6-1.5 s
                              # segment averages away)
-
-# Trial (2026-11-17): a sound whose movement set doesn't fit may give up one of its own zones
-# for it (the user: "a full movement 2-zone might perceptually beat a no-movement 3-zone"). The
-# song is re-planned with that sound one zone short; kept if its set is then bought and worth
-# more than the zone was (both on the planner's scale: dB x share of exposure).
-[modes.zones-per-song]
-base = "inst-per-song"
-sets_take_zones = true
