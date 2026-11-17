@@ -702,6 +702,8 @@ def plan_loops_valued(samples: list[ModSample], usage: dict[int, float], last_pa
             lines.append(f"  loop {'set  ' if len(items) > 1 else 'value'} {samples[items[0][0]].name:<16} takes the pages of {samples[gone[0]].name}'s loops "
                          f"(worth {worth[u]:.2f} in all < {v * pages:.2f})")
             del worth[u]
+            if sets_bought is not None:                 # a displaced set is no longer bought
+                sets_bought[:] = [sb for sb in sets_bought if not any(i in gone for i in sb[1])]
             banned = {b for b in banned if not any(i in gone for i, _ in b)}
             if u[0] == "set":
                 pending.update({i: u[1] for i in gone})

@@ -808,9 +808,11 @@ def sample_set(spec: dict, cfg: dict, songs: list[tuple[list[Note], dict]], last
             lines: list[str] = []
             blocked: list = []
             b_sets: list = []
+            now_bought: list = []
             sizes, reverted = _valued_loops(samples, song_spec, ranges, usage, usage_notes, programs, cfg, last_page,
                                             tables, munt, lines.append, trade, songs=songs, blocked=blocked,
-                                            blocked_sets=b_sets)
+                                            blocked_sets=b_sets, sets_bought=now_bought)
+            have = {_sound_of(names[0], plans) for _, names in now_bought}     # sounds whose movement is in
             owns = _own_sample_values(grants, trade, samples, cfg) if trade else []
             back = _zones_for_loop(blocked, trade, count, plans, owns) if trade and cfg.get("loops_take_zones") else None
             if back is None and trade and cfg.get("sets_take_zones") and b_sets:
@@ -841,7 +843,10 @@ def sample_set(spec: dict, cfg: dict, songs: list[tuple[list[Note], dict]], last
                         _valued_loops(t_samples, trial_spec, ranges, held(t_programs), usage_notes, t_programs, cfg,
                                       last_page, tables, munt, lambda *a: None, trade, songs=songs, sets_bought=t_bought)
                         got = max((w for w, names in t_bought if _sound_of(names[0], plans) == own), default=0.0)
-                        if got > lost:
+                        kept = {_sound_of(names[0], plans) for _, names in t_bought}
+                        # and every sound that had its movement keeps it (MI165: Trombone 1's set
+                        # then pushed Syn Brass4's out, so Shakuhachi's zone went for nothing)
+                        if got > lost and have <= kept:
                             log(f"  loop set {own:<16} takes back zones {', '.join(gone)} ({lost:.2f} in all) "
                                 f"for its movement (set worth {got:.2f})")
                             took = gave, trial_spec, t_samples, t_programs, t_drums
