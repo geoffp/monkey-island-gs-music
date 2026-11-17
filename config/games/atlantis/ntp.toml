@@ -126,24 +126,12 @@ merge_max_cost_db = 1.0
 [modes.inst-shared]
 base = "shared"
 
-# inst-per-song with every sound's zones alike in whether they keep its own movement (trial,
-# 2026-11-16, user: Atlantis 48's opening whistle zone lacked the vibrato its sound has). When
-# one steady zone of a sound got a raw loop, the sound's other steady zones get one too
-# (ntpsamples.equalise_loops); if the group doesn't pack, it all goes back to short loops.
-# Build it with `just game=atlantis ntpmod loops-by-sound`.
-[modes.loops-by-sound]
-base = "inst-per-song"
-loops_by_sound = true
-
 # inst-per-song with docsim2 hearing pitch vibrato (trial, 2026-11-16, user: Atlantis 48's
 # whistle lost its vibrato): the score adds docsim2_vib_weight x |log10| of the two vibrato
-# depths (docsim2.pitch_vibrato, cents at 3-9 Hz). vib-by-sound adds loops_by_sound.
+# depths (docsim2.pitch_vibrato, cents at 3-9 Hz).
 [modes.vib-per-song]
 base = "inst-per-song"
 docsim2_vib_weight = 0.2
-[modes.vib-by-sound]
-base = "vib-per-song"
-loops_by_sound = true
 
 # Trial variants, built side by side for listening: a `base` sample-set mode plus overrides.
 # Add the name to `ntp_modes` in the justfile. E.g. the original loops next to `shared`:
