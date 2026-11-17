@@ -58,7 +58,8 @@ MOD_BANDS = ((0.5, 2.0), (2.0, 4.0), (4.0, 8.0), (8.0, 16.0))
 MOD_FROM_S = 0.15                # modulation is measured in the sustain, after the attack
 LIVE_FLOOR = 0.01                # loudness-depth floor of the live term, near AM detection threshold
 VIB_BAND = (3.0, 9.0)             # Hz: vibrato's rates (the whistle's is about 5.5 Hz)
-VIB_FLOOR_CENTS = 6.0            # the tracker's own noise on a steady note (strings, organs: 5-9 cents)
+VIB_DEAD_CENTS = 12.0            # the tracker reads up to ~10 cents (12 clears it) on a steady note (organs, strings): not vibrato
+VIB_FLOOR_CENTS = 5.0            # ratio floor above the dead zone
 VIB_MIN_HZ = 100.0               # below this a 2048-sample frame holds too few periods to track
 VERSION = 2                      # bump when the measure changes (invalidates the disk cache)
 
@@ -205,11 +206,13 @@ def pitch_vibrato(y: np.ndarray, fs: float, f0: float, t0: float = MOD_FROM_S + 
     return float(np.std(sosfiltfilt(sos, cents)) * np.sqrt(2))
 
 
-def vib_distance(ref_cents: float, got_cents: float, floor: float = VIB_FLOOR_CENTS) -> float:
-    """|log10| of the two vibrato depths, each floored at the tracker's noise (depth is heard as
-    a ratio, as for `live`): a lost 27 cents vibrato is 0.7, a steady note against a steady
-    one 0."""
-    return float(abs(np.log10((got_cents + floor) / (ref_cents + floor))))
+def vib_distance(ref_cents: float, got_cents: float, dead: float = VIB_DEAD_CENTS,
+                 floor: float = VIB_FLOOR_CENTS) -> float:
+    """|log10| of the two vibrato depths (depth is heard as a ratio, as for `live`), each as the
+    excess over `dead` (the tracker's own wobble on a steady note: organs and strings read 5-10
+    cents, which as a ratio would have charged their long loops for noise) plus `floor`: a lost
+    27 cents vibrato is 0.7, any two steady notes 0."""
+    return float(abs(np.log10((max(got_cents - dead, 0.0) + floor) / (max(ref_cents - dead, 0.0) + floor))))
 
 
 def mean_distance(a: np.ndarray, b: np.ndarray) -> float:
@@ -349,7 +352,7 @@ class Scorer:
 
     @property
     def _vib(self) -> str:
-        return f"v{self.vib_weight:g}" if self.vib_weight else ""
+        return f"v{self.vib_weight:g}c" if self.vib_weight else ""      # b: with the dead zone
 
     def sample_db(self, s, tag, keys: dict[int, float], drum: bool = False) -> float:
         """Weighted mean score over `keys` (key -> weight, e.g. held note-seconds)."""

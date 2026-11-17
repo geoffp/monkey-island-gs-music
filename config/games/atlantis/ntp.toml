@@ -131,7 +131,7 @@ base = "shared"
 # depths (docsim2.pitch_vibrato, cents at 3-9 Hz).
 [modes.vib-per-song]
 base = "inst-per-song"
-docsim2_vib_weight = 0.2
+docsim2_vib_weight = 8.0
 
 # Trial variants, built side by side for listening: a `base` sample-set mode plus overrides.
 # Add the name to `ntp_modes` in the justfile. E.g. the original loops next to `shared`:

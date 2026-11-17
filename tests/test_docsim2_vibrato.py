@@ -31,3 +31,4 @@ def test_low_notes_are_not_tracked():
 
 def test_lost_vibrato_costs_a_ratio():
     assert vib_distance(27.0, 0.0) > 0.6 and vib_distance(27.0, 24.0) < 0.1 and vib_distance(0.0, 0.0) == 0.0
+    assert vib_distance(9.0, 0.0) == 0.0 and vib_distance(0.0, 9.0) == 0.0      # tracker noise on steady notes
