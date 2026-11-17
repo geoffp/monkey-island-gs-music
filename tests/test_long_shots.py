@@ -96,3 +96,4 @@ def test_planner_one_shot_may_displace_a_sounds_loops():
     assert any("takes the pages of Org" in ln for ln in lines)
     sizes, _, _ = smp.plan_loops_valued([ice, org], usage, last, 16384, lambda i, z: score[(i, z)])
     assert sizes == {0: 512, 1: 8192}                           # by default the loop keeps its pages
+

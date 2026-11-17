@@ -720,13 +720,19 @@ class _Arranger:
 
     def _overwritable(self, row: int) -> int | None:
         """A track whose effect cell on `row` can take a control command: a free one, else a
-        sustain volume step (no note starts there), else None."""
+        sustain volume step (no note starts there), else a new control-only track if an
+        oscillator is left, else None. MI2's 122 (real-IIgs volumes, 2026-11-16) had a note
+        or a volume step at a note start on every track of its pass's last row."""
         tracks = range(len(self.grid.cells))
         free = next((t for t in tracks if self.grid.effect_free(t, row)), None)
         if free is not None:
             return free
-        return next((t for t in tracks if self.grid.cells[t][row][0] == 0
+        step = next((t for t in tracks if self.grid.cells[t][row][0] == 0
                      and self.grid.cells[t][row][2] == FX_VOLUME), None)
+        if step is None and self.osc_used + 1 <= self.budget:
+            step = self.new_track("drum")
+            self.rep.tracks_used, self.rep.oscillators = len(self.grid.cells), self.osc_used
+        return step
 
     def fit_pass(self, timing: _Timing, changes: list[tuple[int, int]], start_row: int, end_row: int,
                  loop_s: float) -> None:
