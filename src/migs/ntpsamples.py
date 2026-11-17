@@ -81,6 +81,7 @@ class ModSample:
     cycles: int = 0             # source periods in the loop (k)
     move_hz: float = 0.0        # the sound's own periodic movement at key0 (vibrato, beating), 0 = none
     move_ok: tuple = ()         # loop sizes holding whole cycles of it (sync_loops); then raw_ok is these
+    shot_env: bool = False      # a long one-shot stored flat: its decay comes from env_t/env_g (flattened)
 
     def mod_bytes(self) -> bytes:
         return bytes(np.clip(np.round(self.data * 127), -128, 127).astype(np.int8).tobytes())
@@ -93,6 +94,14 @@ class ModSample:
         if self.loop_len:
             return [ntp_block(self.loop_start), ntp_block(self.loop_len)]
         return [ntp_block(len(self.data))]
+
+
+SHOT = 1 << 24      # in a planned loop size: a one-shot of (size & ~SHOT) block bytes instead (`long_shots`)
+
+
+def size_label(z: int) -> str:
+    """A planned size as the log shows it: loop bytes, or 'shot <block bytes>'."""
+    return f"shot {z & ~SHOT}" if z & SHOT else str(z)
 
 
 def ntp_block(n: int) -> int:
@@ -472,6 +481,34 @@ def one_shot_tuning(t_floor: float, rate: float, budget_pages: int, tables, key0
     return r, min(block - STOPPER, int(math.ceil(t_floor * r))), i, ft
 
 
+LONG_SHOT_HOLD = 3.0     # s: long one-shots are cut from a note held this long (docsim2 hears 3 s)
+
+
+def long_shot_end(x: np.ndarray, a: int, range_db: float = 50.0) -> float:
+    """Seconds after the onset `a` until the sound's 10 ms RMS stays more than `range_db`
+    below its loudest: where a long one-shot may end. Its decay is played by row volumes
+    (`flattened`), so it isn't limited by the 8-bit floor as one_shot_tuning's are."""
+    env = audio.rms_envelope(x[a:])
+    above = np.nonzero(env > env.max() * 10 ** (-range_db / 20))[0] if len(env) else []
+    return (above[-1] + 1) / SR if len(above) else 0.0
+
+
+def flattened(seg: np.ndarray, flat_s: float = 0.25) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """(audio, env_t, env_g): a long one-shot's source with its decay divided out after
+    `flat_s`, and that decay (per 10 ms, from flat_s) for the per-row volumes to put back.
+    Stored flat, the tail stays near full scale in 8 bits instead of sinking into the floor
+    (Ice Rain reaches it at 1.7 s and sounds to 2.5 s). The decay is the 250 ms log-domain
+    contour, as for loops (_row_envelope): faster movement (Ice Rain's echo pulses) stays in
+    the audio. Before flat_s the audio is as recorded and the gain 1."""
+    env = audio.rms_envelope(seg)
+    c = np.exp(smooth(np.log(np.maximum(env, 1e-6)), int(0.25 * SR)))
+    f = min(int(flat_s * SR), len(seg) - 1)
+    g = np.minimum(1.0, c / max(c[f], 1e-9))
+    g[:f] = 1.0
+    t = np.arange(f, len(seg), int(0.01 * SR))
+    return seg / np.maximum(g, 1e-3), t / SR, g[t]
+
+
 def _faded(seg: np.ndarray, frac_div: int) -> np.ndarray:
     """seg with a linear fade-out over its last 1/frac_div."""
     fade = np.ones(len(seg))
@@ -522,7 +559,7 @@ def plan_loops(samples: list[ModSample], usage: dict[int, float], last_page: int
 def plan_loops_valued(samples: list[ModSample], usage: dict[int, float], last_page: int, max_loop: int,
                       score: Callable[[int, int], float], floor: float = 0.0, total: float | None = None,
                       revertible: list[tuple[float, int, int, int, str]] = (), blocked: list | None = None,
-                      sound: dict[int, object] | None = None
+                      sound: dict[int, object] | None = None, singles_give_way: bool = False
                       ) -> tuple[dict[int, int], list[str], dict[int, int]]:
     """plan_loops priced by measurement (`loop_budget = "docsim2"`): the steady sounds' loops
     grow to the raw sizes that most improve `score(i, size)` (dB, lower = closer to the
@@ -542,9 +579,12 @@ def plan_loops_valued(samples: list[ModSample], usage: dict[int, float], last_pa
     after it, each zone grows by itself. A whistle with vibrato in one zone and none in the
     next is worse than either. A zone with no such loop (a note too low to follow, a cycle
     longer than any loop) isn't in the set.
+    `singles_give_way` (`long_shots`): a single purchase that doesn't fit may displace another
+    sound's loops as a set may (give_way): a big one-shot can be worth more than another
+    sound's loops in all while no value per page lets it reach their pages.
     Returns (loop size per melodic sample index, log lines, block bytes per reverted sample)."""
     sizes = {i: s.loop_len for i, s in enumerate(samples) if s.kind == "melodic" and s.loop_len}
-    grow = {i for i, s in enumerate(samples) if s.kind == "melodic" and s.steady and usage.get(i, 0) > 0}
+    grow = {i for i, s in enumerate(samples) if s.kind == "melodic" and (s.steady or s.raw_ok) and usage.get(i, 0) > 0}
     total = total or sum(usage.get(i, 0.0) for i in grow) or 1.0
     lines: list[str] = []
     over: dict[int, int] = {}                       # reverted samples: their block bytes now
@@ -554,7 +594,9 @@ def plan_loops_valued(samples: list[ModSample], usage: dict[int, float], last_pa
         blocks = []
         for i, s in enumerate(samples):
             b = [ov[i]] if i in ov else s.ntp_blocks()
-            if i in sz:
+            if i in sz and sz[i] & SHOT:
+                b = [sz[i] & ~SHOT]
+            elif i in sz:
                 b = [sz[i]] if not s.loop_start else [b[0], sz[i]]
             blocks += b
         try:
@@ -592,13 +634,23 @@ def plan_loops_valued(samples: list[ModSample], usage: dict[int, float], last_pa
     sets = {k: v for k, v in sets.items() if v}
     pending = {i: k for k, v in sets.items() for i in v}        # zones still waiting for their set
 
+    def cost(i: int, z: int) -> int:
+        """Block bytes sample i takes with planned size z."""
+        if z & SHOT:
+            return z & ~SHOT
+        s = samples[i]
+        return ntp_block(z) + (ntp_block(s.loop_start) if s.loop_start else 0)
+
+    def allowed(i: int, z: int) -> bool:
+        return bool(z & SHOT) or z <= min(max_loop, samples[i].max_loop)
+
     def single(i: int, cur: int) -> list[tuple[float, int, float, int]]:
         out = []
         for z in samples[i].raw_ok:
-            if z <= cur or z > min(max_loop, samples[i].max_loop):
+            if z <= cur or not allowed(i, z):
                 continue
             g = score(i, cur) - score(i, z)
-            pages = (ntp_block(z) - ntp_block(cur)) // 256
+            pages = (cost(i, z) - cost(i, cur)) // 256
             out.append((g * usage[i] / total / max(pages, 1), z, g, pages))
         return out
 
@@ -640,10 +692,10 @@ def plan_loops_valued(samples: list[ModSample], usage: dict[int, float], last_pa
         v, items, pages = max(opts)
         trial = {**sizes, **dict(items)}
         swap = (dict(over), []) if fits(trial, over) else take_back(v, trial)
-        if swap is None and len(items) > 1 and (way := give_way(v, items, pages)):
+        if swap is None and (len(items) > 1 or singles_give_way) and (way := give_way(v, items, pages)):
             u, trial = way
             gone = [i for i in sizes if unit(i) == u]
-            lines.append(f"  loop set   {samples[items[0][0]].name:<16} takes the pages of {samples[gone[0]].name}'s loops "
+            lines.append(f"  loop {'set  ' if len(items) > 1 else 'value'} {samples[items[0][0]].name:<16} takes the pages of {samples[gone[0]].name}'s loops "
                          f"(worth {worth[u]:.2f} in all < {v * pages:.2f})")
             del worth[u]
             banned = {b for b in banned if not any(i in gone for i, _ in b)}
@@ -654,7 +706,7 @@ def plan_loops_valued(samples: list[ModSample], usage: dict[int, float], last_pa
             banned.add(items)
             if len(items) > 1:
                 lines.append(f"  loop set {samples[items[0][0]].name:<16} blocked: " + ", ".join(
-                    f"{samples[i].name} {z} B" for i, z in items) + f", {pages} pages ({v:.4f}/page) don't fit")
+                    f"{samples[i].name} {size_label(z)} B" for i, z in items) + f", {pages} pages ({v:.4f}/page) don't fit")
             elif blocked is not None:
                 blocked.append((v, *items[0], pages))
             continue
@@ -664,20 +716,20 @@ def plan_loops_valued(samples: list[ModSample], usage: dict[int, float], last_pa
             lines.append(f"  loop takes back {r[4]:<14} {r[3] // 256:3d} -> {r[2] // 256:3d} pages "
                          f"({r[0]:.4f}/page < {v:.4f})")
         for i, z in items:
-            lines.append(f"  loop {'set  ' if len(items) > 1 else 'value'} {samples[i].name:<16} {sizes[i]:5d} -> {z:5d} B: "
-                         f"{score(i, sizes[i]):+5.1f} -> {score(i, z):+5.1f} dB, "
-                         f"{(ntp_block(z) - ntp_block(sizes[i])) // 256} pages ({v:.4f}/page)")
+            lines.append(f"  loop {'set  ' if len(items) > 1 else 'value'} {samples[i].name:<16} {size_label(sizes[i]):>5} -> "
+                         f"{size_label(z):>5} B: {score(i, sizes[i]):+5.1f} -> {score(i, z):+5.1f} dB, "
+                         f"{(cost(i, z) - cost(i, sizes[i])) // 256} pages ({v:.4f}/page)")
             pending.pop(i, None)
         worth[unit(items[0][0])] = worth.get(unit(items[0][0]), 0.0) + v * pages
         sizes = trial
     for i in sorted(grow):
-        cands = [z for z in samples[i].raw_ok if z <= min(max_loop, samples[i].max_loop)]
+        cands = [z for z in samples[i].raw_ok if allowed(i, z)]
         if cands:
             if samples[i].move_hz:
                 lines.append(f"  loop moves {samples[i].name:<16} {samples[i].move_hz:.2f} Hz: sizes holding whole cycles "
                              + " ".join(str(z) for z in samples[i].move_ok))
             lines.append(f"  loop sizes {samples[i].name:<16} " + "  ".join(
-                f"{z}:{score(i, z):+.1f}" for z in [samples[i].loop_len, *cands]) + f"  -> {sizes[i]}")
+                f"{size_label(z)}:{score(i, z):+.1f}" for z in [samples[i].loop_len, *cands]) + f"  -> {size_label(sizes[i])}")
     return sizes, lines, over
 
 
@@ -1049,6 +1101,37 @@ def build_melodic(m: dict, cfg: dict, keys: tuple[int, int], munt: Munt, tables,
             s.rate, s.max_loop = r1, 0
             line = (f"  {m['name']:<12} one-shot {len(s.data):5d} B @ {r1:6.0f} Hz ({s.seconds * 1000:4.0f} ms to "
                     f"the 8-bit floor) note {n0:2d} ft {ft:+d}, keys {lo}-{hi}")
+    if not steady and cfg.get("long_shots"):
+        # Long one-shots, bought by the loop planner (`long_shots`): a decaying sound whose
+        # timbre changes through its decay (Ice Rain: a partial gliding from 3.6 to 2.5 kHz
+        # for 2.4 s, louder than the fundamental after 0.6 s) loses that to any loop. Offered
+        # as SHOT | block bytes in raw_ok, from the block above attack + loop up to the one
+        # that holds the whole sound at the looped rate.
+        x3 = cached_render(munt, m["program"], m["key"], max(hold, LONG_SHOT_HOLD))
+        a3 = audio.onset(x3)
+        t_end = long_shot_end(x3, a3, cfg.get("long_shot_range_db", 50.0))
+        now = sum(s.ntp_blocks())
+        top = min(cfg.get("long_shot_max_bytes", 32768), ntp_block(int(math.ceil(t_end * rate))))
+        if "ntp_shot_bytes" not in m:
+            s.raw_ok = tuple(SHOT | z for z in BLOCK_SIZES if now < z <= top)
+        else:
+            block, low = m["ntp_shot_bytes"], cfg.get("long_shot_min_rate", cfg["min_rate"])
+            # the highest table rate (at most the looped one) that holds the sound to its end,
+            # else the lowest allowed rate and the sound cut (faded) where the block ends
+            # (6 % over the lowest rate: a semitone, so the tables have a rate between the two)
+            t_len = min(t_end, (block - STOPPER) / (1.06 * low))
+            shot = one_shot_tuning(t_len, rate, block // 256, tables, m["key"], *src.keys, low, 1.0)
+            if shot is not None:
+                r1, nb, n0, ft = shot
+                seg, env_t, env_g = flattened(x3[a3:a3 + int(round(nb / r1 * SR))], cfg.get("long_shot_flat_s", 0.25))
+                data = resample(_faded(seg, 20), nb)
+                peak = float(np.max(np.abs(data))) or 1.0
+                s = ModSample(m["name"], data / peak, finetune=ft, base_note=n0, key0=m["key"], kind="melodic",
+                              env_t=env_t, env_g=env_g, rel_g=rel_g, seconds=nb / r1, tune_cents=0.0, level=peak)
+                s.rate, s.max_loop, s.shot_env = r1, 0, True
+                line = (f"  {m['name']:<12} long one-shot {len(s.data):5d} B @ {r1:6.0f} Hz ({s.seconds * 1000:4.0f} ms "
+                        f"of {t_end * 1000:.0f} ms), decay from row volumes down to {20 * math.log10(env_g[-1]):.0f} dB, "
+                        f"note {n0:2d} ft {ft:+d}, keys {lo}-{hi}")
     s.vel_v, s.vel_g = velocity_response(lambda v: cached_render(munt, m["program"], m["key"], 0.5, velocity=v))
     s.key_v, s.key_g = key_response(lambda kk: cached_render(munt, m["program"], kk, 0.5), m["key"], *src.keys)
     return s, line

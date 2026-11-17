@@ -606,8 +606,9 @@ class _Arranger:
                        hyst: float, max_rise_db: float = 0.0) -> int:
         """Envelope rows until note-off, then the release; returns the last row written. A
         melodic one-shot (no loop) is silent once its sample ends: it holds the track only until
-        then (or its note-off, if earlier), carries its own decay (no envelope rows), and needs
-        a release only when the note-off comes first.
+        then (or its note-off, if earlier), carries its own decay (no envelope rows; a flattened
+        long one-shot, `long_shots`, gets its decay as rows), and needs a release only when the
+        note-off comes first.
 
         `max_rise_db` (> 0) limits how far a sustain row rises above the previous one (at least
         one volume step): the DOC applies a volume at once, with no ramp, so a beating contour
@@ -626,8 +627,11 @@ class _Arranger:
         t_loop = s.env_t[0] * slower
         last, prev = r, None
         k = 10 ** (max_rise_db / 20) if max_rise_db > 0 else None
-        for rr in range(r + 1, r_off if oneshot_end is None else r + 1):
-            target = vf * env_at(s, (rr - r) * row_s, row_s, t_loop)
+        flat = s.shot_env and len(s.env_t) > 1          # a flattened long one-shot: its decay is the rows'
+        for rr in range(r + 1, r_off if oneshot_end is None or flat else r + 1):
+            # (in sample time for a flattened one-shot: a lower note stretches its decay too)
+            target = vf * (env_at(s, (rr - r) * row_s / slower, row_s / slower, s.env_t[0]) if flat
+                           else env_at(s, (rr - r) * row_s, row_s, t_loop))
             # hysteresis: a slowly moving target near x.5 made the volume flicker between
             # neighbours (4-5-4: ~2 dB steps at low volumes), heard as choppy sustains
             if prev is not None and abs(target - prev) < hyst:

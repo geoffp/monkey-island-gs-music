@@ -41,7 +41,7 @@ from .mt32 import GM_DRUM_NAMES, rhythm_keys
 from .munt import SR, Munt
 from .ntpsamples import (MAX_SAMPLES, ModSample, best_tuning, build_samples, cached_render, cc7_curve, forget_renders, floor_time,
                          drum_steps, is_steady, loop_problems, loop_summary, ntp_block, ntp_doc_pages, period_tables, rate_summary,
-                         build_drum, build_melodic, plan_loops, plan_loops_valued)
+                         build_drum, build_melodic, plan_loops, plan_loops_valued, SHOT, size_label)
 from .ntpsong import RHYTHM, Note, convert_song, ntp_oscillators, plan_tracks, program_of, read_notes, sample_for
 
 SAMPLE_SETS = ("per-song", "shared")
@@ -562,7 +562,8 @@ def docsim2_scorer(munt: Munt, cfg: dict, seconds: float = 3.0) -> docsim2.Score
     return docsim2.Scorer(render, SR, seconds, munt.cache.parent / "docsim2.json", name=lambda p: doc_key(munt, p),
                           mod_weight=cfg.get("docsim2_mod_weight", 1.0),
                           live_weight=cfg.get("docsim2_live_weight", 0.0),
-                          vib_weight=cfg.get("docsim2_vib_weight", 0.0))
+                          vib_weight=cfg.get("docsim2_vib_weight", 0.0),
+                          fine_weight=cfg.get("docsim2_fine_weight", 0.0))
 
 
 def _loop_score(samples: list[ModSample], melodic: list[dict], ranges: dict, weights: dict[int, dict[int, float]],
@@ -575,7 +576,7 @@ def _loop_score(samples: list[ModSample], melodic: list[dict], ranges: dict, wei
         m = melodic[i]
         if (i, z) not in built:
             built[(i, z)] = samples[i] if z == samples[i].loop_len else build_melodic(
-                {**m, "ntp_loop_bytes": z}, {**cfg, "one_shots": False},
+                {**m, "ntp_shot_bytes": z & ~SHOT} if z & SHOT else {**m, "ntp_loop_bytes": z}, {**cfg, "one_shots": False},
                 ranges.get(m["slot"], (m["key"], m["key"])), munt, tables, hold)[0]
         return scorer.sample_db(built[(i, z)], m["program"], docsim2.pick_keys(weights.get(i, {m["key"]: 1.0})))
     return score
@@ -632,7 +633,8 @@ def _valued_loops(samples: list[ModSample], song_spec: dict, ranges: dict, usage
         cfg.get("loop_min_db_per_page", 0.0), total=trade["total"] if trade else None, revertible=revertible,
         blocked=stuck,
         sound={i: melodic[i]["program"] for i, s in enumerate(samples)
-               if s.kind == "melodic" and i < len(melodic)} if cfg.get("sync_loops") else None)
+               if s.kind == "melodic" and i < len(melodic)} if cfg.get("sync_loops") else None,
+        singles_give_way=bool(cfg.get("long_shots")))
     scorer.cache.save()
     for line in lines:
         log(line)
@@ -802,7 +804,7 @@ def sample_set(spec: dict, cfg: dict, songs: list[tuple[list[Note], dict]], last
             if back is None:
                 if blocked:
                     v, name, z, pages = max(blocked)
-                    lines.append(f"  loop blocked {name:<16} {z:5d} B, {pages} pages ({v:.4f}/page): no cheaper "
+                    lines.append(f"  loop blocked {name:<16} {size_label(z):>5} B, {pages} pages ({v:.4f}/page): no cheaper "
                                  f"upgrades free its pages")
                 break
             want, gave, log_back, remerge = back
@@ -844,7 +846,7 @@ def sample_set(spec: dict, cfg: dict, songs: list[tuple[list[Note], dict]], last
         sizes = plan_loops(samples, usage, last_page, cfg.get("max_loop_bytes", 16384))
     if cfg.get("one_shots", True) or any(sizes[i] != samples[i].loop_len for i in sizes):
         by_name = {samples[i].name: sz for i, sz in sizes.items()}
-        song_spec = {**song_spec, "melodic": [{**m, "ntp_loop_bytes": by_name.get(m["name"], cfg["loop_bytes"])}
+        song_spec = {**song_spec, "melodic": [_planned_size(m, by_name.get(m["name"], cfg["loop_bytes"]))
                                               for m in song_spec["melodic"]]}
         samples, programs, drums = build(song_spec)
     if cfg.get("inharmonic_check", True):
@@ -854,6 +856,11 @@ def sample_set(spec: dict, cfg: dict, songs: list[tuple[list[Note], dict]], last
     for line in held_lines:
         out(line)
     return samples, programs, drums
+
+
+def _planned_size(m: dict, z: int) -> dict:
+    """A melodic spec with its planned loop size, or its long one-shot (SHOT | block bytes)."""
+    return {**m, "ntp_shot_bytes": z & ~SHOT} if z & SHOT else {**m, "ntp_loop_bytes": z}
 
 
 def _sound_of(sample: str, plans: dict) -> str:

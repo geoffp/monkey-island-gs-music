@@ -202,3 +202,17 @@ key = 37
 keys = [0, 39]
 ntp_attack_bytes = 1016
 modes = ["per-song"]      # no room in the shared set; keys 36-39 use Pipe Organ Lo there
+
+# Trial (2026-11-16): long one-shots for decaying sounds whose timbre changes as they decay
+# (MI162's Ice Rain: a partial gliding 3.6 -> 2.5 kHz, lost to any loop). The loop planner may
+# buy a one-shot of up to 32 KB in place of a decaying sound's attack + loop, priced by docsim2.
+[modes.shot-per-song]
+base = "inst-per-song"
+long_shots = true
+long_shot_max_bytes = 32768
+long_shot_min_rate = 6000    # a long one-shot may go below min_rate (Ice Rain whole in 16 KB at 6.8 kHz: -3.5 dB,
+                             # at 8.5 kHz cut at 1.9 s: -1.5); lower, it is cut where its block ends
+long_shot_range_db = 50.0    # a long one-shot holds the sound until it stays this far below its loudest; it is
+                             # stored flat and its decay played by row volumes (no 8-bit floor)
+docsim2_fine_weight = 1.0    # decaying sounds: compare 0.15 s blocks through the decay (a slide the 0.6-1.5 s
+                             # segment averages away)

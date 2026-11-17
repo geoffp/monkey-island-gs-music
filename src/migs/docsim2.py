@@ -61,6 +61,7 @@ LIVE_FLOOR = 0.01                # loudness-depth floor of the live term, near A
 VIB_BAND = (3.0, 9.0)             # Hz: vibrato's rates (the whistle's is about 5.5 Hz)
 VIB_DEAD_CENTS = 12.0            # the tracker reads up to ~10 cents (12 clears it) on a steady note (organs, strings): not vibrato
 VIB_FLOOR_CENTS = 5.0            # ratio floor above the dead zone
+TRACK_RANGE_DB = 40.0           # the pitch track follows frames within this of the loudest
 VIB_MIN_HZ = 100.0               # below this a 2048-sample frame holds too few periods to track
 VERSION = 2                      # bump when the measure changes (invalidates the disk cache)
 
@@ -194,11 +195,19 @@ def pitch_vibrato(y: np.ndarray, fs: float, f0: float, t0: float = MOD_FROM_S + 
     w = np.hanning(win)
     fr = np.fft.rfftfreq(win * 8, 1 / fs)
     lo, hi = np.searchsorted(fr, f0 * 0.9), np.searchsorted(fr, f0 * 1.1)
-    peaks = []
+    peaks, level = [], []
     for s0 in range(0, len(y) - win, hop):
         X = np.abs(np.fft.rfft(y[s0:s0 + win] * w, win * 8))[lo:hi]
         peaks.append(fr[lo + int(np.argmax(X))] if X.max() > 0 else 0.0)
-    peaks = np.array(peaks)
+        level.append(float(X.max()) if len(X) else 0.0)
+    peaks, level = np.array(peaks), np.array(level)
+    # The track stops at the last frame within TRACK_RANGE_DB of the loudest: a decayed or
+    # ended note (a one-shot past its end, `long_shots`; a sound that stops before its
+    # note-off) has no pitch left to follow, and its silence or 8-bit noise read as 40-1100
+    # cents of "vibrato" (MI162's Ice Rain one-shots, Atlantis's effect presets).
+    if len(level) and level.max() > 0:
+        live = np.nonzero(level >= level.max() * 10 ** (-TRACK_RANGE_DB / 20))[0]
+        peaks = peaks[:live[-1] + 1]
     if np.count_nonzero(peaks) < len(peaks) // 2 or len(peaks) < 16:
         return 0.0
     cents = 1200 * np.log2(np.maximum(peaks, 1.0) / np.median(peaks[peaks > 0]))
@@ -335,6 +344,33 @@ def sound_kind(moves: list[Movement]) -> str:
     return ""
 
 
+FINE_S = 0.15                    # block length of the fine term (s)
+FINE_FLOOR = 0.1                 # blocks whose loudness is below this x the loudest block's are left out (~40 dB)
+
+
+def fine_distance(a: np.ndarray, b: np.ndarray, fs: float = DOC_RATE) -> float:
+    """How the timbre changes through a decaying note: seg's relative difference of band
+    means, over FINE_S blocks from 0.15 s while the reference still sounds (its block
+    loudness at least FINE_FLOOR x its loudest), blocks weighted equally. seg's mid segment
+    (0.6-1.5 s) averages a slide away: MI162's Ice Rain has a partial gliding 3.6 -> 2.5 kHz
+    over 2.4 s, louder than the fundamental after 0.6 s, which a loop freezes; per block the
+    loop is 0.30-0.43 off and the whole sound 0.09-0.34, and seg rated them 0.34 and 0.26.
+    For decaying sounds only (`docsim2_fine_weight`): over a sustain, blocks shorter than a
+    slow wobble's cycle would charge a loop for being out of phase with it."""
+    t = min(a.shape[1], b.shape[1])
+    n = max(2, _frames(FINE_S, fs))
+    blocks = [(i, i + n) for i in range(_frames(0.15, fs), t - n + 1, n)]
+    if not blocks:
+        return 0.0
+    loud = np.array([a[:, i0:i1].mean(axis=1).sum() for i0, i1 in blocks])
+    out = []
+    for (i0, i1), s in zip(blocks, loud):
+        if s >= FINE_FLOOR * loud.max() and s > 0:
+            ma, mb = a[:, i0:i1].mean(axis=1), b[:, i0:i1].mean(axis=1)
+            out.append(float(np.sum(np.abs(mb - ma)) / s))
+    return float(np.mean(out)) if out else 0.0
+
+
 def mean_distance(a: np.ndarray, b: np.ndarray) -> float:
     """sum|mean_b - mean_a| / sum mean_a over the whole of both patterns (drums)."""
     t = min(a.shape[1], b.shape[1])
@@ -379,6 +415,11 @@ def play_sample(s, semis: float, seconds: float) -> np.ndarray:
     y = np.zeros(len(idx))
     ok = idx < len(q)
     y[ok] = q[idx[ok]] / 128.0
+    if getattr(s, "shot_env", False) and len(s.env_t) > 1:
+        # a flattened long one-shot: its decay from the row volumes, in sample time (a lower
+        # note plays the flattened audio slower, and its decay with it: ntpsong does the same)
+        tt = np.arange(len(y)) / DOC_RATE * 2 ** (semis / 12)
+        y *= np.where(tt < s.env_t[0], 1.0, np.interp(tt, s.env_t, s.env_g))
     return y
 
 
@@ -434,9 +475,11 @@ class Scorer:
 
     def __init__(self, render: Callable[[object, int], np.ndarray], sr: int, seconds: float = 3.0,
                  cache: Path | None = None, name: Callable[[object], object] = lambda p: p,
-                 mod_weight: float = 1.0, live_weight: float = 0.0, vib_weight: float = 0.0):
+                 mod_weight: float = 1.0, live_weight: float = 0.0, vib_weight: float = 0.0,
+                 fine_weight: float = 0.0):
         self.render, self.sr, self.seconds, self.name = render, sr, seconds, name
         self.mod_weight, self.live_weight, self.vib_weight = mod_weight, live_weight, vib_weight
+        self.fine_weight = fine_weight           # decaying sounds' samples only (fine_distance)
         self.cache = Cache(cache)
         self._ref = functools.lru_cache(maxsize=256)(self._ref_pattern)
         self._ref_vib = functools.lru_cache(maxsize=256)(self._ref_vibrato)
@@ -454,12 +497,16 @@ class Scorer:
         program than the sample's own prices a merge); `semis` defaults to key - s.key0 (a
         drum's offset is passed)."""
         sh = key - s.key0 if semis is None else semis
-        k = f"{sample_tag(s)}:{self.name(tag)}:{key}:{round(sh, 3)}:{int(drum)}:{self.seconds}:w{self.mod_weight:g}{self._live}{self._vib}"
+        fine = self.fine_weight if not drum and not getattr(s, "steady", False) else 0.0
+        k = (f"{sample_tag(s)}:{self.name(tag)}:{key}:{round(sh, 3)}:{int(drum)}:{self.seconds}:w{self.mod_weight:g}"
+             f"{self._live}{self._vib}" + (f"f{fine:g}" if fine else ""))
 
         def compute() -> float:
             y = play_sample(s, sh, self.seconds)
-            d = distance(self._ref(tag, key), loudness_pattern(y), drum, mod_weight=self.mod_weight,
-                         live_weight=self.live_weight)
+            ref, got = self._ref(tag, key), loudness_pattern(y)
+            d = distance(ref, got, drum, mod_weight=self.mod_weight, live_weight=self.live_weight)
+            if fine:
+                d += fine * fine_distance(ref, got)
             if self.vib_weight and not drum:
                 d += self.vib_weight * vib_distance(self._ref_vib(tag, key),
                                                     pitch_vibrato(y, DOC_RATE, 440 * 2 ** ((key - 69) / 12)))
@@ -472,7 +519,7 @@ class Scorer:
 
     @property
     def _vib(self) -> str:
-        return f"v{self.vib_weight:g}c" if self.vib_weight else ""      # b: with the dead zone
+        return f"v{self.vib_weight:g}e" if self.vib_weight else ""      # c: with the dead zone; e: tracks sounding frames only
 
     def sample_db(self, s, tag, keys: dict[int, float], drum: bool = False) -> float:
         """Weighted mean score over `keys` (key -> weight, e.g. held note-seconds)."""
