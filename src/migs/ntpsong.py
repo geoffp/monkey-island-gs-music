@@ -243,6 +243,7 @@ class Report:
     loop_tempo_kept: bool = False        # no free cell on pass row 1 for the start tempo
     loop_jump_over_volume: bool = False  # the Bxx took a sustain volume step's cell
     melodic_cap: int | None = None   # planned 2-oscillator track cap (plan_tracks); None: first come
+    played: dict = field(default_factory=dict)  # (sample, table note, key) -> melodic notes played (tuning_report)
     borrow: str = ""                 # drum-path borrowing order plan_tracks chose ("last" / "first")
 
 
@@ -973,6 +974,7 @@ def convert_song(path: Path, samples: list[ModSample], programs: dict, drums: di
             note_idx = s0.base_note + (n.key - s0.key0)
             if not 0 <= note_idx < NOTES:            # outside the table: fold by octaves
                 note_idx += 12 * ((0 - note_idx) // 12 + 1) if note_idx < 0 else -12 * ((note_idx - NOTES) // 12 + 1)
+            rep.played[si, note_idx, n.key] = rep.played.get((si, note_idx, n.key), 0) + 1
         s = samples[si]
         r, d = timing.place(n.t)
         if pass_end is not None and r > pass_end:

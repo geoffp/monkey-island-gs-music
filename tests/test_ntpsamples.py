@@ -1,3 +1,4 @@
+from pathlib import Path
 # SPDX-License-Identifier: GPL-3.0-or-later
 """NinjaTrackerPlus samples (ntpsamples): tuning, loops and their metrics, one-shots, drums,
 lengths, DOC block rules and loop planning."""
@@ -123,12 +124,41 @@ def test_vectorized_tuning_search_matches_the_scan():
                     if n + lo_k - key0 < 0 or n + hi_k - key0 >= 72:
                         continue
                     err = 1200 * math.log2((smp.PAL / per[n]) / rate)
-                    if best is None or abs(err) < abs(best[0]):
-                        best = (err, k, rate, n, ft)
-        return best
+                    # every key the sample plays, at its own period
+                    rms = math.sqrt(sum((1200 * math.log2(smp.PAL / per[n + key - key0] / rate) - 100 * (key - key0)) ** 2
+                                        for key in range(lo_k, hi_k + 1)) / (hi_k - lo_k + 1))
+                    if best is None or rms < best[0] - 1e-9:
+                        best = (rms, err, k, rate, n, ft)
+        return best[1:]
     for freq, L, key0, lo_k, hi_k in ((261.6, 512, 60, 48, 84), (65.4, 16384, 36, 30, 47), (1046.5, 2048, 84, 70, 96)):
         a, b = scan(freq, L, key0, lo_k, hi_k), smp.best_tuning(freq, tables, 9000, 22000, L, key0, lo_k, hi_k)
         assert a[1:] == b[1:] and abs(a[0] - b[0]) < 1e-9
+
+
+def _played_cents(tables, rate, base, ft, key0, keys):
+    """Cents off each key, played from a sample at `rate` tuned to `base` + `ft` for key0."""
+    return [1200 * np.log2(smp.PAL / tables[ft][base + k - key0] / rate) - 100 * (k - key0) for k in keys]
+
+
+@pytest.mark.skipif(not MAKE_TABLES.exists(), reason="run `just fetch-ntp`")
+def test_tuning_holds_over_the_keys_a_sample_plays():
+    # MI2 177's ReggaeBass: sampled at key 38, played to key 72. Exact at a base note high in
+    # the table (whole-number periods: up to 50 cents uneven there), its other notes were
+    # 25-35 cents flat; tuned over its keys they stay close
+    tables = smp.period_tables(MAKE_TABLES)
+    freq = 440 * 2 ** ((38 - 69) / 12)
+    err, k, rate, base, ft = smp.best_tuning(freq, tables, 9000, 22000, 512, 38, 29, 72, whole_cycles=True)
+    cents = np.abs(_played_cents(tables, rate, base, ft, 38, range(29, 61)))
+    assert np.median(cents) < 5 and cents.max() < 12           # below the table's top octave
+
+
+@pytest.mark.skipif(not MAKE_TABLES.exists(), reason="run `just fetch-ntp`")
+def test_one_shot_tuning_centres_its_keys():
+    tables = smp.period_tables(MAKE_TABLES)
+    shot = smp.one_shot_tuning(0.5, 22000, 64, tables, 60, 48, 72, 9000)
+    r, _, base, ft = shot
+    cents = _played_cents(tables, r, base, ft, 60, range(48, 73))
+    assert abs(np.mean(cents)) < 2 and np.median(np.abs(cents)) < 5 and np.max(np.abs(cents)) < 15
 
 
 
@@ -137,8 +167,11 @@ def test_long_loops_take_the_highest_rate_that_is_in_tune():
     window, the in-tune one with the fewest cycles is the highest rate."""
     tables = {ft: [int(1712 * 2 ** (-(n + ft / 8) / 12)) for n in range(72)] for ft in range(-8, 8)}
     closest = smp.best_tuning(523.25, tables, 9000, 22000, 16384, 72, 72, 81)
-    high = smp.best_tuning(523.25, tables, 9000, 22000, 16384, 72, 72, 81, high_within_cents=1.0)
-    assert abs(high[0]) <= 1.0 and high[2] > 20000 > closest[2]
+    # in tune over the keys it plays (RMS): whole-number periods leave none of them within 1 cent
+    high = smp.best_tuning(523.25, tables, 9000, 22000, 16384, 72, 72, 81, high_within_cents=5.0)
+    _, _, rate, base, ft = high
+    cents = _played_cents(tables, rate, base, ft, 72, range(72, 82))
+    assert np.sqrt(np.mean(np.square(cents))) <= 5.0 and high[2] > 20000 > closest[2]
     nothing = smp.best_tuning(523.25, tables, 9000, 22000, 16384, 72, 72, 81, high_within_cents=0.0)
     assert nothing == closest                                    # none that close: the closest
 
@@ -205,7 +238,8 @@ def test_one_shot_when_the_whole_sound_fits_the_attack_and_loop_budget():
     assert shot is not None
     rate, nbytes, note, ft = shot
     assert nbytes <= 2048 - smp.STOPPER and rate <= 9644.0 and rate >= 9644.0 * 0.9
-    assert abs(smp.PAL / tables[ft][note] - rate) < 1e-6                  # an exact table rate
+    cents = _played_cents(tables, rate, note, ft, 76, range(72, 85))
+    assert abs(np.mean(cents)) < 1e-6                                     # centred on its keys
     # a 1.6 s decay would need far more than the budget at any acceptable rate
     assert smp.one_shot_tuning(1.6, 16744.0, 10, tables, 48, 40, 60, 9000) is None
 

@@ -111,30 +111,67 @@ def ntp_block(n: int) -> int:
     return 1 << max(8, math.ceil(math.log2(n)))
 
 
+def range_offsets(tables, key0: int, key_lo: int, key_hi: int
+                  ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """(valid, m1, m2), each (finetune, base note) in `tables` order: whether every key
+    key_lo..key_hi is in the table from that base note (played for key0), and the mean and
+    mean square of the cents by which the table's periods put those keys off, against the
+    base note's own pitch. A sample tuned e cents off at key0 plays its keys sqrt(e^2 + 2 e m1
+    + m2) cents off (RMS). The periods are whole numbers, so their steps are uneven where they
+    are small (period 28-57, the top octave: up to 50 cents); NTP plays them as they are
+    (make_tables.php: DOC frequency from each period)."""
+    per = np.array([tables[ft] for ft in tables], dtype=np.float64)       # (finetune, note)
+    n = np.arange(NOTES)
+    q = 1200 * np.log2(PAL / per) - 100 * n[None, :]                      # each period's offset from ET
+    d = np.arange(key_lo, key_hi + 1) - key0
+    valid = (n + key_lo - key0 >= 0) & (n + key_hi - key0 < NOTES)
+    idx = np.clip(n[:, None] + d[None, :], 0, NOTES - 1)                  # (note, key)
+    off = q[:, idx] - q[:, :, None]                                       # (finetune, note, key)
+    valid = np.broadcast_to(valid[None, :], q.shape)
+    return valid, off.mean(axis=2), (off ** 2).mean(axis=2)
+
+
+def tuning_rms(tables, t: tuple, key0: int, key_lo: int, key_hi: int) -> float:
+    """Cents (RMS) by which a best_tuning result puts the keys key_lo..key_hi off, beyond the
+    least the period table allows for them (range_offsets): 0 for the best possible."""
+    err, _, _, base, ft = t
+    valid, m1, m2 = range_offsets(tables, key0, key_lo, key_hi)
+    fi = list(tables).index(ft)
+    floor = float(np.sqrt(np.maximum(m2 - m1 ** 2, 0.0))[valid].min())
+    return float(np.sqrt(max(err ** 2 + 2 * err * m1[fi, base] + m2[fi, base], 0.0))) - floor
+
+
 def best_tuning(freq: float, tables, min_rate, max_rate, loop_bytes, key0, key_lo, key_hi,
                 whole_cycles: bool = False, high_within_cents: float | None = None
                 ) -> tuple[float, int, float, int, int]:
     """(err_cents, k, rate, base_note, finetune): `loop_bytes` = k periods at `rate`, played
-    by note base_note with finetune so that period gives exactly that rate. `whole_cycles`:
+    by note base_note with finetune for key0, err_cents off there. Chosen by the RMS error over
+    all the keys key_lo..key_hi (range_offsets), not at key0 alone. `whole_cycles`:
     only k that divide loop_bytes (every cycle the same whole number of samples, so the k
     cycles stay identical after 8-bit rounding: no loop-rate buzz). `high_within_cents`: the
-    highest rate tuned within this many cents (else the closest tuning). A long loop has
+    highest rate tuned within this many cents (RMS) of the best tuning the table allows for
+    those keys (else the closest tuning). A long loop has
     hundreds of k, and the closest of them is anywhere in the window: Panpipes 16384 B at
     14903 Hz, Elec Organ 8192 B at 9165 Hz, where the rate costs the attack too."""
     ks = np.arange(max(1, math.ceil(loop_bytes * freq / max_rate)), math.floor(loop_bytes * freq / min_rate) + 1)
     if whole_cycles:
         ks = ks[loop_bytes % ks == 0]
-    n = np.arange(NOTES)
-    valid = (n + key_lo - key0 >= 0) & (n + key_hi - key0 < NOTES)
+    valid, m1, m2 = range_offsets(tables, key0, key_lo, key_hi)
     if not len(ks) or not valid.any():
         raise ValueError(f"no tuning for {freq:.1f} Hz over keys {key_lo}-{key_hi}")
     fts = list(tables)
     per = np.array([tables[ft] for ft in fts], dtype=np.float64)          # (finetune, note)
     rates = loop_bytes * freq / ks                                        # (k,)
-    err = 1200 * np.log2((PAL / per)[None, :, :] / rates[:, None, None])  # (k, finetune, note)
-    a = np.where(valid[None, None, :], np.abs(err), np.inf)
+    err = 1200 * np.log2((PAL / per)[None, :, :] / rates[:, None, None])  # (k, finetune, note): at key0
+    # chosen by the RMS error over every key the sample plays, not at key0 alone: the table's
+    # periods are whole numbers, up to 50 cents off in its top octaves, and a base note there
+    # put all the other notes off by its error (MI2 177's ReggaeBass, 30 cents flat)
+    rms = np.sqrt(np.maximum(err ** 2 + 2 * err * m1[None] + m2[None], 0.0))
+    a = np.where(valid[None, :, :], rms, np.inf)
     if high_within_cents is not None:
-        tuned = np.nonzero(a.min(axis=(1, 2)) <= high_within_cents)[0]
+        # within that many cents of the best tuning the table allows over those keys (for one
+        # key, of exact): its uneven steps are there at every rate
+        tuned = np.nonzero(a.min(axis=(1, 2)) <= a.min() + high_within_cents)[0]
         if len(tuned):                                                # ks ascend: rates descend
             ki = int(tuned[0])
             fi, ni = np.unravel_index(int(np.argmin(a[ki])), a[ki].shape)
@@ -460,24 +497,26 @@ def one_shot_tuning(t_floor: float, rate: float, budget_pages: int, tables, key0
     """Can a decaying sound be a one-shot instead of attack + loop? It can when the whole sound,
     up to the 8-bit floor (`t_floor` s), fits in one DOC block no larger than the attack + loop
     blocks (`budget_pages`), at a rate no more than `max_drop` below the looped sample's rate.
-    Returns (rate, bytes, base_note, finetune): the highest exact table rate that fits (a
-    one-shot has no loop to fit, so it plays exactly in tune), or None."""
+    Returns (rate, bytes, base_note, finetune), or None. A one-shot has no loop to fit, so its
+    rate is free: each base note's is set to centre its keys' pitches (range_offsets), and of
+    those within 2 cents RMS of the best that fit, the highest rate is taken."""
     block = 1 << int(math.log2(budget_pages * 256))
     floor_rate = max(min_rate, rate * (1 - max_drop))
     cap = min(rate, (block - STOPPER) / max(t_floor, 1e-6))
     if cap < floor_rate:
         return None
-    best = None
-    for ft, per in tables.items():
+    valid, m1, m2 = range_offsets(tables, key0, key_lo, key_hi)
+    spread = np.sqrt(np.maximum(m2 - m1 ** 2, 0.0))       # what is left with the base note m1 cents off
+    cands = []
+    for fi, (ft, per) in enumerate(tables.items()):
         for i in range(NOTES):
-            if not (0 <= i + key_lo - key0 and i + key_hi - key0 < NOTES):
-                continue
-            r = PAL / per[i]
-            if r <= cap and (best is None or r > best[0]):
-                best = (r, i, ft)
-    if best is None or best[0] < floor_rate:
+            r = PAL / per[i] * 2 ** (m1[fi, i] / 1200)
+            if valid[fi, i] and floor_rate <= r <= cap:
+                cands.append((float(spread[fi, i]), r, i, ft))
+    if not cands:
         return None
-    r, i, ft = best
+    least = min(c[0] for c in cands)
+    _, r, i, ft = max((c for c in cands if c[0] <= least + 2.0), key=lambda c: c[1])
     return r, min(block - STOPPER, int(math.ceil(t_floor * r))), i, ft
 
 
@@ -943,7 +982,7 @@ def _sync_tuning(m: dict, src: _Source, cfg: dict, tables, z: int, att_bytes: in
                     t = best_tuning(freq, tables, z * freq / (k + 0.5), z * freq / (k - 0.5), z, m["key"], *src.keys)
                 except ValueError:
                     continue
-                if t[1] == k and abs(t[0]) <= cfg.get("sync_loop_tune_cents", 3.0) and (
+                if t[1] == k and tuning_rms(tables, t, m["key"], *src.keys) <= cfg.get("sync_loop_tune_cents", 3.0) and (
                         best is None or abs(length - want) < abs(best[2] * best[0][1] - want)):
                     best = (t, from_s, length / k)
             if best is None:

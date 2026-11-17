@@ -39,7 +39,7 @@ from .imuse import read_timbres
 from .modfile import mod_file
 from .mt32 import GM_DRUM_NAMES, rhythm_keys
 from .munt import SR, Munt
-from .ntpsamples import (MAX_SAMPLES, ModSample, best_tuning, build_samples, cached_render, cc7_curve, forget_renders, floor_time,
+from .ntpsamples import (MAX_SAMPLES, PAL, ModSample, best_tuning, build_samples, cached_render, cc7_curve, forget_renders, floor_time,
                          drum_steps, is_steady, loop_problems, loop_summary, ntp_block, ntp_doc_pages, period_tables, rate_summary,
                          build_drum, build_melodic, plan_loops, plan_loops_valued, SHOT, size_label)
 from .ntpsong import RHYTHM, Note, convert_song, ntp_oscillators, plan_tracks, program_of, read_notes, sample_for
@@ -269,11 +269,37 @@ def _pitch_plans(spec: dict, usage_notes: list[tuple[int, Note]], cfg: dict, tab
     max_rate = cfg.get("pitch_max_rate", cfg["max_rate"])
     hold = spec.get("hold_seconds", 2.0)
 
+    tunings: dict = {}
+
+    def tuned(k: int, r: float, whole: bool) -> tuple | None:
+        if (k, r, whole) not in tunings:
+            try:
+                tunings[k, r, whole] = best_tuning(key_hz(k), tables, r * 0.97, r * 1.03, loop, k, k, k, whole_cycles=whole)
+            except ValueError:
+                tunings[k, r, whole] = None
+        return tunings[k, r, whole]
+
     def base_note(k: int, r: float, whole: bool) -> int | None:
-        try:
-            return best_tuning(key_hz(k), tables, r * 0.97, r * 1.03, loop, k, k, k, whole_cycles=whole)[3]
-        except ValueError:
-            return None
+        t = tuned(k, r, whole)
+        return None if t is None else t[3]
+
+    # The period table's whole-number periods step unevenly where they are small (the top
+    # octave: up to 50 cents), so a key far above its sample can't be played in tune: each
+    # cent past `pitch_free_cents` costs `pitch_cents_db`, and a key more than `pitch_max_cents`
+    # off is a wrong note, short or not: 100 dB, so such a sound gets another zone or a better
+    # key (Atlantis 147's Clarinet 1, keys 45-101 from key 76: its top notes 36 cents off)
+    free_c, per_c = cfg.get("pitch_free_cents", 15.0), cfg.get("pitch_cents_db", 2.0)
+    max_c = cfg.get("pitch_max_cents", 25.0)
+
+    def off_cents(k: int, r: float, n: int, whole: bool) -> float:
+        t = tuned(k, r, whole)
+        if t is None:
+            return 0.0
+        _, _, rate, n0, ft = t
+        i = n0 + n - k
+        if not 0 <= i < len(tables[ft]):
+            return 0.0                               # out of the table: the candidates' reach says so
+        return abs(1200 * math.log2(PAL / tables[ft][i] / rate) - 100 * (n - k))
 
     out = {}
     for m in spec["melodic"]:
@@ -315,14 +341,26 @@ def _pitch_plans(spec: dict, usage_notes: list[tuple[int, Note]], cfg: dict, tab
                                     live_weight=cfg.get("docsim2_live_weight", 0.0))
         else:
             err = NoteError(doc_key(munt, m["program"]), render, munt.cache.parent / "docsim.json")
+        measure = err
+
+        def err(k: int, r: float, n: int, measure=measure, whole=not shots) -> float:
+            c = off_cents(k, r, n, whole)
+            return measure(k, r, n) + per_c * max(0.0, c - free_c) + (100.0 if c > max_c else 0.0)
         cands = pitchplan.candidates(min(w), max(w), lambda k: rates(k, shots),
                                      lambda k, r: base_note(k, r, whole=not shots))
         now_rates = [shot_rate(m["key"])] if shots else pitchplan.loop_rates(m["key"], loop, min_rate, cfg["max_rate"])
+        # only rates from which the period table reaches every played key, as the candidates'
+        # (MI2 177's ReggaeBass kept key 38 at 18795 Hz for keys 29-72: key 72 is past the
+        # table there, so the build tuned it a note lower, every note 30 cents flat)
+        now_rates = [r for r in now_rates if r and any(
+            c.key == m["key"] and c.lo_ok <= min(w) and c.hi_ok >= max(w)
+            for c in pitchplan.candidates(m["key"], m["key"], lambda k, r=r: [r],
+                                          lambda k, r: base_note(k, r, whole=not shots)))]
         wp = key_weights(w, cfg)
         plans = pitchplan.plan(wp, cands, err, cfg.get("pitch_max_zones", 1))
         now = (sum(wt * err(m["key"], now_rates[0], k) for k, wt in wp.items()) / sum(wp.values())
                if now_rates else float("nan"))
-        err.save()
+        measure.save()
         # the measure sees the first 0.6 s, not the loop the new key and rate get: move only
         # for a real gain (Panpipes in MI154: key 72 -> 74 for 0.0 dB, its raw loop 16384 ->
         # 8192 B and rougher)
@@ -1187,12 +1225,41 @@ def _build_song_quiet(job) -> tuple[object, str | None]:
               f"(reserve {reserve}); loops {loop_summary(samples, cfg)}")
         print(f"{name}: rates (Hz) {rate_summary(samples)}")
     grid, patterns, rep = plan_tracks(song.path, samples, programs, drums, cfg, song_cfg, cc7)
+    if line := tuning_report(samples, rep.played, tables):
+        print(f"{name}: {line}")
     if ntp_oscillators([2 if k == "melodic" else 1 for k in rep.track_kinds]) is None:
         return None, f"{name}: NTP's converter can't assign oscillators to these tracks"
     vmap = docvolume.measured_map() if cfg.get("doc_volume", "linear") == "measured" else None
     (out_dir / game.song_file(song.sid, "mod")).write_bytes(
         mod_file(game.song_title(song.sid), samples, grid, patterns, tables, vmap))
     return rep, None
+
+
+def note_cents(s: ModSample, note: int, key: int, tables) -> float:
+    """Cents by which sample `s` played at table note `note` is off MIDI key `key` (against
+    the sample's own pitch at key0): NTP plays the note's whole-number period as it is."""
+    return 1200 * math.log2(PAL / tables[s.finetune][note] / s.rate) - 100 * (key - s.key0)
+
+
+def tuning_report(samples: list[ModSample], played: dict, tables, over: float = 10.0) -> str:
+    """One log line: how many melodic notes play more than `over` and 20 cents off their key,
+    and the sounds with any, worst first ("" when none is over)."""
+    notes = bad = bad20 = 0
+    worst: dict[str, float] = {}
+    for (si, note, key), n in played.items():
+        s = samples[si]
+        if not s.rate:
+            continue
+        c = abs(note_cents(s, note, key, tables))
+        notes += n
+        if c > over:
+            bad += n
+            bad20 += n if c > 20 else 0
+            worst[s.name] = max(worst.get(s.name, 0.0), c)
+    if not bad:
+        return ""
+    return (f"tuning {bad} of {notes} notes over {over:.0f} cents ({bad20} over 20): "
+            + ", ".join(f"{k} {v:.0f}" for k, v in sorted(worst.items(), key=lambda kv: -kv[1])))
 
 
 def doc_key(munt: Munt, program: int) -> int | str:
