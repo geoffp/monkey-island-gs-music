@@ -136,7 +136,7 @@ doctor:
     fi
     echo "host tools OK"
     # optional: song previews and the General MIDI renders
-    ffmpeg -hide_banner -demuxers 2>/dev/null | grep libopenmpt >/dev/null || echo "note: no ffmpeg with libopenmpt: MOD previews (build/<game>/ntp/<mode>/wav/) are skipped"
+    ffmpeg -hide_banner -demuxers 2>/dev/null | grep libopenmpt >/dev/null || echo "note: no ffmpeg with libopenmpt: desktop MOD previews (build/<game>/ntp/<mode>/wav-desktop/) are skipped; the DOC renders (wav/) don't need it"
     command -v fluidsynth >/dev/null || echo "note: no fluidsynth: \`just render\` and \`just gm-wav\` won't run"
     [ -d "{{data}}" ] || echo "note: game data for {{game}} not found at '{{data}}' (see README)"
     [ -d "{{roms}}" ] || echo "note: no MT-32 ROMs at '{{roms}}' (needed only for MT-32 rendering)"
@@ -497,13 +497,16 @@ _ntpmod-one mode:
     {{lowprio}}
     d="{{out}}/ntp/{{mode}}"; rm -rf "$d" && mkdir -p "$d/wav"
     uv run ntpmod --game {{game}} {{out}}/extracted/midi/mt32/*.mid -o "$d" --samples "{{mode}}"
+    # previews as the IIgs's DOC plays them (migs.docrender: no interpolation, the measured volume curve)
+    ls $d/*.mod | xargs -P {{num_cpus()}} -n 4 uv run docrender -o "$d/wav"
+    echo "previews: $d/wav/ (as the DOC plays them)"
+    # and as a desktop player smooths them (libopenmpt: interpolated, linear volume), if ffmpeg has it
     # (not grep -q: it exits at the first match, ffmpeg dies of SIGPIPE, and pipefail fails the test)
     if ffmpeg -hide_banner -demuxers 2>/dev/null | grep libopenmpt >/dev/null; then
+      mkdir -p "$d/wav-desktop"
       ls $d/*.mod | xargs -P {{num_cpus()}} -I{} sh -c \
-        'ffmpeg -hide_banner -loglevel error -y -f libopenmpt -i "$1" -ac 2 -ar 44100 "$2/wav/$(basename "$1" .mod).wav"' _ {} "$d"
-      echo "previews: $d/wav/"
-    else
-      echo "previews: skipped (no ffmpeg with libopenmpt)"
+        'ffmpeg -hide_banner -loglevel error -y -f libopenmpt -i "$1" -ac 2 -ar 44100 "$2/wav-desktop/$(basename "$1" .mod).wav"' _ {} "$d"
+      echo "desktop previews: $d/wav-desktop/"
     fi
 
 # Rebuild the MODs even if their inputs are unchanged (so does `just clean`)

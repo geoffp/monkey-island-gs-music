@@ -29,6 +29,7 @@ midisynth-voices = "migs.midisynth_voices:main"
 ntpmod = "migs.ntpmod:main"
 ntpcheck = "migs.ntpfile:main"
 docmap = "migs.docmap:main"
+docrender = "migs.docrender:main"
 looplab = "migs.looplab:main"
 
 [dependency-groups]
