@@ -104,10 +104,36 @@ drum_floor_lsb = 1.5    # drums end at the 8-bit floor (drum_end: junk near the 
 
 # The two builds (justfile `ntp_modes`): build/<game>/ntp/<name>/ and /songs/<NAME> on the disks
 # (INST.PER.SONG, INST.SHARED). Each is its sample-set mode with nothing overridden.
+# inst-per-song is docsim 2.0's planner, as for Monkey Island 1 (src/migs/docsim2.py;
+# docs/ninjatrackerplus.md, "docsim 2.0 trials"; settings and reasons: config/games/monkey/ntp.toml):
+# loops, zones, sampled keys and drum sizes priced by docsim2 against Munt, per DOC page, with
+# merges decided per song. Atlantis had the older usage-ranked loops until 2026-11-16.
 [modes.inst-per-song]
 base = "per-song"
+loop_budget = "docsim2"
+pitch_measure = "docsim2"
+exposure_cap_s = 3.0
+docsim2_mod_weight = 1.0
+docsim2_live_weight = 0.2
+alone_weight = 2.0
+loop_time_after_attack = true
+loop_exposure_cap_s = 20.0
+drum_value_weight = 0.5
+loops_take_zones = true
+zone_value_weight = 0.5
+merges = "priced"
+merge_max_cost_db = 1.0
 [modes.inst-shared]
 base = "shared"
+
+# inst-per-song with every sound's zones alike in whether they keep its own movement (trial,
+# 2026-11-16, user: Atlantis 48's opening whistle zone lacked the vibrato its sound has). When
+# one steady zone of a sound got a raw loop, the sound's other steady zones get one too
+# (ntpsamples.equalise_loops); if the group doesn't pack, it all goes back to short loops.
+# Build it with `just game=atlantis ntpmod loops-by-sound`.
+[modes.loops-by-sound]
+base = "inst-per-song"
+loops_by_sound = true
 
 # Trial variants, built side by side for listening: a `base` sample-set mode plus overrides.
 # Add the name to `ntp_modes` in the justfile. E.g. the original loops next to `shared`:
