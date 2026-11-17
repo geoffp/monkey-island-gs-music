@@ -481,8 +481,44 @@ def _faded(seg: np.ndarray, frac_div: int) -> np.ndarray:
 # ---------------------------------------------------------------------------
 # Building the samples
 
+def loop_units(samples: list[ModSample], grow: set[int], max_loop: int,
+               group_of: dict[int, object] | None = None) -> list[tuple[list[int], list[dict[int, int]]]]:
+    """What the loop planners buy: (member sample indexes, ladder) per unit, each ladder entry a
+    set of loop sizes (index -> bytes) larger than the one before. A unit is one sample, its
+    entries its `raw_ok` sizes up to `max_loop`. With `group_of` (`loops_by_sound`: sample
+    index -> sound) a unit is all of a sound's growing zones and they are bought together: a
+    sound whose zones don't all keep its own movement (the vibrato, tremolo and beating that
+    only a raw loop carries) sounds different from zone to zone (user, 2026-11-16: Atlantis 48's
+    opening whistle zone lacked the vibrato its sound has). The first entry has every zone at
+    its smallest raw size (the cheapest way to make them all raw); the next ones are the raw sizes
+    above, each zone at the largest it allows up to that size. A sound with a zone that allows no raw loop stays short."""
+    ok = {i: sorted(z for z in samples[i].raw_ok if z <= min(max_loop, samples[i].max_loop)) for i in grow}
+    if group_of is None:
+        return [([i], [{i: z} for z in ok[i]]) for i in sorted(grow) if ok[i]]
+    groups: dict[object, list[int]] = {}
+    for i in sorted(grow):
+        groups.setdefault(group_of.get(i, ("alone", i)), []).append(i)
+    units = []
+    for idx in groups.values():
+        if any(not ok[i] for i in idx):
+            continue
+        ladder: list[dict[int, int]] = []
+        for t in [0, *sorted({z for i in idx for z in ok[i]})]:
+            e = {i: max([z for z in ok[i] if z <= t] or [ok[i][0]]) for i in idx}   # t = 0: each at its smallest
+            if not ladder or e != ladder[-1]:
+                ladder.append(e)
+        units.append((idx, ladder))
+    return units
+
+
+def _next_entry(ladder: list[dict[int, int]], sizes: dict[int, int]) -> dict[int, int] | None:
+    """The first ladder entry that grows some loop and shrinks none."""
+    return next((e for e in ladder if all(z >= sizes[i] for i, z in e.items()) and any(z > sizes[i] for i, z in e.items())),
+                None)
+
+
 def plan_loops(samples: list[ModSample], usage: dict[int, float], last_page: int,
-               max_loop: int) -> dict[int, int]:
+               max_loop: int, group_of: dict[int, object] | None = None) -> dict[int, int]:
     """Loop size per melodic sample index, spending the song's free DOC RAM (pages up to
     `last_page`) on its steady sounds: repeatedly double the loop with the most sustained
     playing time per byte, as long as everything still packs the way NTP packs it. A loop only
@@ -503,23 +539,25 @@ def plan_loops(samples: list[ModSample], usage: dict[int, float], last_page: int
         except ValueError:
             return False
 
-    while grow:
-        i = max(grow, key=lambda j: usage[j] / sizes[j])
-        nxt = [z for z in samples[i].raw_ok if z > sizes[i] and z <= min(max_loop, samples[i].max_loop)]
-        if not nxt:
-            grow.discard(i)
+    live = loop_units(samples, grow, max_loop, group_of)
+    while live:
+        u = max(live, key=lambda u: sum(usage[i] for i in u[0]) / sum(sizes[i] for i in u[0]))
+        nxt = _next_entry(u[1], sizes)
+        if nxt is None:
+            live.remove(u)
             continue
-        trial = {**sizes, i: min(nxt)}
+        trial = {**sizes, **nxt}
         if fits(trial):
             sizes = trial
         else:
-            grow.discard(i)
+            live.remove(u)
     return sizes
 
 
 def plan_loops_valued(samples: list[ModSample], usage: dict[int, float], last_page: int, max_loop: int,
                       score: Callable[[int, int], float], floor: float = 0.0, total: float | None = None,
-                      revertible: list[tuple[float, int, int, int, str]] = (), blocked: list | None = None
+                      revertible: list[tuple[float, int, int, int, str]] = (), blocked: list | None = None,
+                      group_of: dict[int, object] | None = None
                       ) -> tuple[dict[int, int], list[str], dict[int, int]]:
     """plan_loops priced by measurement (`loop_budget = "docsim2"`): the steady sounds' loops
     grow to the raw sizes that most improve `score(i, size)` (dB, lower = closer to the
@@ -531,7 +569,8 @@ def plan_loops_valued(samples: list[ModSample], usage: dict[int, float], last_pa
     block bytes before, after, name), drums from the value budget. A loop that doesn't fit may
     take them back, cheapest per page first and a drum's later steps before its earlier ones,
     when each is worth less per page than the loop. `blocked` collects the loops that still
-    didn't fit, as (value per page, sample index, size, pages).
+    didn't fit, as (value per page, sample index, size, pages). `group_of`: the loops of a
+    sound's zones are bought together (loop_units).
     Returns (loop size per melodic sample index, log lines, block bytes per reverted sample)."""
     sizes = {i: s.loop_len for i, s in enumerate(samples) if s.kind == "melodic" and s.loop_len}
     grow = {i for i, s in enumerate(samples) if s.kind == "melodic" and s.steady and usage.get(i, 0) > 0}
@@ -568,26 +607,29 @@ def plan_loops_valued(samples: list[ModSample], usage: dict[int, float], last_pa
             ov[nxt[1]] = nxt[2]
         return ov, used
 
+    units = loop_units(samples, grow, max_loop, group_of)
     banned: set[tuple[int, int]] = set()
     while True:
         opts = []
-        for i in grow:
-            cur = sizes[i]
-            for z in samples[i].raw_ok:
-                if z <= cur or z > min(max_loop, samples[i].max_loop) or (i, z) in banned:
+        for ui, (members, ladder) in enumerate(units):
+            for li, e in enumerate(ladder):
+                if (ui, li) in banned or not all(z >= sizes[i] for i, z in e.items()) \
+                        or not any(z > sizes[i] for i, z in e.items()):
                     continue
-                g = score(i, cur) - score(i, z)
-                pages = (ntp_block(z) - ntp_block(cur)) // 256
-                opts.append((g * usage[i] / total / max(pages, 1), i, z, g, pages))
+                g = sum((score(i, sizes[i]) - score(i, z)) * usage[i] / total for i, z in e.items() if z != sizes[i])
+                pages = sum(ntp_block(z) - ntp_block(sizes[i]) for i, z in e.items()) // 256
+                opts.append((g / max(pages, 1), ui, li, g, pages))
         opts = [o for o in opts if o[0] > floor]
         if not opts:
             break
-        v, i, z, g, pages = max(opts)
-        trial = {**sizes, i: z}
+        v, ui, li, g, pages = max(opts)
+        e = units[ui][1][li]
+        trial = {**sizes, **e}
         swap = (dict(over), []) if fits(trial, over) else take_back(v, trial)
         if swap is None:
-            banned.add((i, z))
+            banned.add((ui, li))
             if blocked is not None:
+                i, z = next((i, z) for i, z in e.items() if z != sizes[i])
                 blocked.append((v, i, z, pages))
             continue
         over, used = swap
@@ -595,8 +637,10 @@ def plan_loops_valued(samples: list[ModSample], usage: dict[int, float], last_pa
             live.remove(r)
             lines.append(f"  loop takes back {r[4]:<14} {r[3] // 256:3d} -> {r[2] // 256:3d} pages "
                          f"({r[0]:.4f}/page < {v:.4f})")
-        lines.append(f"  loop value {samples[i].name:<16} {sizes[i]:5d} -> {z:5d} B: {score(i, sizes[i]):+5.1f} -> "
-                     f"{score(i, z):+5.1f} dB, {pages} pages ({v:.4f}/page)")
+        for i, z in e.items():
+            if z != sizes[i]:
+                lines.append(f"  loop value {samples[i].name:<16} {sizes[i]:5d} -> {z:5d} B: {score(i, sizes[i]):+5.1f} -> "
+                             f"{score(i, z):+5.1f} dB, {pages} pages ({v:.4f}/page)")
         sizes = trial
     for i in sorted(grow):
         cands = [z for z in samples[i].raw_ok if z <= min(max_loop, samples[i].max_loop)]

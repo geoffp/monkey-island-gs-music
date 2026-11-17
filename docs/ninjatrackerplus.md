@@ -699,6 +699,32 @@ extra weight for a lead's held notes.
 - A bug found on the way: a zero-length note made another part's count −1, so MI152's and
   MI168's exposures went infinite and they lost every upgrade. It is fixed and has a test.
 
+## Loops by sound (trial `loops-by-sound`, 2026-11-16)
+
+User report: Atlantis 48's opening whistle (Whistle 2, program 109) lacks the vibrato that is key to its sound. The vibrato is in the MT-32 timbre (the song has no CC1 modulation: 48 holds only CC7 and CC10), so only a long raw loop carries it (a 512 B loop averages it out). The pitch plan gives a sound several key zones, each its own sample, and the loop planners bought raw loops one sample at a time. Zones of one sound then differed: in 48's usage-ranked build Str Sect 3's zones at keys 52 and 64 had 16384 B raw loops and the one at 73 a 512 B loop.
+
+**Rule (`loops_by_sound = true`; `ntpsamples.loop_units`, both planners).** A sound's steady zones are bought together: all of them raw, or none. A unit's first step puts each zone at its smallest raw size (the cheapest all-raw set), later steps at the larger sizes; value (docsim2 dB x share) and pages add up over the unit. A sound with a zone that allows no raw loop stays short. Off, a unit is one sample and the planners are unchanged: **MI1's 16 songs build byte-identical to the build before the change.**
+
+**Atlantis 48 (docsim2 planner, which Atlantis uses since 2026-11-16).** Pipe Org 1 gets raw loops in all three zones (16384, 8192, 8192 B); Str Sect 3 (186 pages for its first step with the larger sizes, 154 for the cheapest) and Whistle 2 stay short in every zone. **The whistle's vibrato still isn't kept:** docsim2 scores its raw loops about the same as the short ones (key 57: 512 B -7.0 dB, 8192 B -4.9, 16384 B -7.7; key 64: -7.1 / -5.5; key 76: -6.2 / -6.0, lower is closer), so no unit of it earns its pages. The measure doesn't hear the vibrato the user does.
+
+**MI1 (`inst-per-song` against `loops-by-sound`, all 16 songs).** 5 songs are unchanged (150, 159, 162, 163, 166). 11 change, **9 for the worse**: a sound that had raw loops in some zones loses them in all when its zones don't all fit, and the pages it freed go unspent.
+
+| song | DOC pages | loops that changed |
+|---|---|---|
+| 151 | 198 -> 136 | 63: 16384 -> 512 |
+| 152 | 206 -> 114 | 51: 16384 -> 512, 60: 8192 -> 512 |
+| 153 | 224 -> 38 | 57, 74, 81: 16384 -> 512 (the organ drone) |
+| 154 | 228 -> 104 | 62, 69: 16384 -> 512 |
+| 158 | 204 -> 112 | 52: 16384 -> 512, 60: 8192 -> 512 |
+| 160 | 220 -> 220 | 64: 16384 -> 512; Fantasy 512 -> 16384 |
+| 161 | 236 -> 234 | 72: 16384 -> 8192; 84: 512 -> 8192 |
+| 164 | 228 -> 104 | 62, 74: 16384 -> 512 |
+| 165 | 212 -> 152 | 69, 80: 8192 -> 512 |
+| 167 | 218 -> 158 | 69, 71: 8192 -> 512 |
+| 168 | 220 -> 160 | 69, 70: 8192 -> 512 |
+
+Only MI160 and MI161 gain a raw loop. **Not yet listened to.** The cost is in the all-or-nothing step: the zones' cheapest raw sizes together exceed the free pages, and nothing then takes zones or drums back for it (`loops_take_zones` values a loop per page by its own gain, the unit's is smaller). Ideas: let a blocked unit take zones back (merge a sound's zones) until its set fits; or rank the units by their best zone's gain, not the sum.
+
 ## Build options: tradeoffs (2026-11-08)
 What each option buys and costs, as measured. Sizes are totals over all 16 songs. Pattern data is 256 B per track per 64-row pattern, so allocation options change it through the track count; sample options change the sample data. Where a cost hasn't been measured, the entry says so.
 

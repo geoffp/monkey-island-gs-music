@@ -148,6 +148,15 @@ base = "shared"
 base = "inst-per-song"
 doc_volume = "measured"
 
+# inst-per-song with every sound's zones alike in whether they keep its own movement (trial,
+# 2026-11-16, user: Atlantis 48's opening whistle zone lacked the vibrato its sound has). When
+# one steady zone of a sound got a raw loop, the sound's other steady zones get one too
+# (ntpsamples.equalise_loops); if the group doesn't pack, it all goes back to short loops.
+# Build it with `just game=monkey ntpmod loops-by-sound`.
+[modes.loops-by-sound]
+base = "inst-per-song"
+loops_by_sound = true
+
 # Trial variants, built side by side for listening: a `base` sample-set mode plus overrides.
 # Add the name to `ntp_variants` in the game's game.toml. E.g. the original loops next to `shared`:
 # [modes.shared-avg]
