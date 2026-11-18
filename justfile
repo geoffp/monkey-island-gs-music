@@ -269,13 +269,19 @@ fetch-docs:
 emu_speed := "7.159mhz"
 seed_bram := "config/emu/default-bram.hex"
 
+# Write the GSSquared machine config for a BazFast HD image (the emulator recipes below)
+_config cfg name disk speed:
+    uv run gs2-config {{cfg}} --name "{{name}}" --speed {{speed}} \
+      --card 7=bazfast3 --disk 7:1={{disk}} --startup-slot 7 --your-card 6 --your-card 7 --seed {{seed_bram}}
+
+# ... and boot it (normal priority, like every emulator recipe)
+_boot cfg name disk speed: (_config cfg name disk speed)
+    @[ -x "{{gs2}}" ] || { echo "no GSSquared for {{platform}}"; exit 1; }
+    "{{gs2}}" "$PWD/{{cfg}}"
+
 # From the NTP disk (`just disk`) on a BazFast card, in GSSquared:
 # Boot the IIgs straight into SenseiPlay with our NinjaTrackerPlus songs
-emu speed=emu_speed: fetch-gssquared disk
-    uv run gs2-config {{out}}/disks/{{lowercase(prefix)}}-ntp.gs2 --name "{{label}} NinjaTrackerPlus (SenseiPlay)" --speed {{speed}} \
-      --card 7=bazfast3 --disk 7:1={{prefix}}.NTP.PO --startup-slot 7 --your-card 6 --your-card 7 --seed {{seed_bram}}
-    @[ -x "{{gs2}}" ] || { echo "no GSSquared for {{platform}}"; exit 1; }
-    "{{gs2}}" "$PWD/{{out}}/disks/{{lowercase(prefix)}}-ntp.gs2"
+emu speed=emu_speed: fetch-gssquared disk (_boot out+"/disks/"+lowercase(prefix)+"-ntp.gs2" label+" NinjaTrackerPlus (SenseiPlay)" prefix+".NTP.PO" speed)
 
 # Builds from the current code into build/<game>/test/<variant>/ and build/<game>/disks/<prefix>.TEST.PO.
 # The MODs are the full build's (ntpmod --only reads every song); no README, archives, previews
@@ -348,26 +354,16 @@ doc-curve:
     echo "config/doc-volume.toml, $d/curve.csv, $d/doc-volume-curve.html"
 
 # Boot the DOC volume sweep disk in GSSquared
-emu-docsweep speed=emu_speed: fetch-gssquared docsweep
-    uv run gs2-config build/docsweep/docsweep.gs2 --name "DOC volume sweep (SenseiPlay)" --speed {{speed}} \
-      --card 7=bazfast3 --disk 7:1=DOCSWEEP.PO --startup-slot 7 --your-card 6 --your-card 7 --seed {{seed_bram}}
-    @[ -x "{{gs2}}" ] || { echo "no GSSquared for {{platform}}"; exit 1; }
-    "{{gs2}}" "$PWD/build/docsweep/docsweep.gs2"
+emu-docsweep speed=emu_speed: fetch-gssquared docsweep (_boot "build/docsweep/docsweep.gs2" "DOC volume sweep (SenseiPlay)" "DOCSWEEP.PO" speed)
 
 # Boot the test disk (`just testdisk`) like `just emu`
-emu-test speed=emu_speed: fetch-gssquared
+emu-test speed=emu_speed: fetch-gssquared _need-testdisk (_boot out+"/disks/"+lowercase(prefix)+"-test.gs2" label+" NTP test disk (SenseiPlay)" prefix+".TEST.PO" speed)
+
+_need-testdisk:
     @[ -f "{{out}}/disks/{{prefix}}.TEST.PO" ] || { echo "no test disk: just testdisk \"<song ids>\""; exit 1; }
-    uv run gs2-config {{out}}/disks/{{lowercase(prefix)}}-test.gs2 --name "{{label}} NTP test disk (SenseiPlay)" --speed {{speed}} \
-      --card 7=bazfast3 --disk 7:1={{prefix}}.TEST.PO --startup-slot 7 --your-card 6 --your-card 7 --seed {{seed_bram}}
-    @[ -x "{{gs2}}" ] || { echo "no GSSquared for {{platform}}"; exit 1; }
-    "{{gs2}}" "$PWD/{{out}}/disks/{{lowercase(prefix)}}-test.gs2"
 
 # Experimental aside: boot System 6 + synthLAB with the MIDI Synth sequences (`just synthlab-disk`)
-emu-synthlab speed=emu_speed: fetch-gssquared synthlab-disk
-    uv run gs2-config {{out}}/disks/{{lowercase(prefix)}}-synthlab.gs2 --name "{{label}} synthLAB (experimental, BazFast HD)" --speed {{speed}} \
-      --card 7=bazfast3 --disk 7:1={{prefix}}.SYNTHLAB.PO --startup-slot 7 --your-card 6 --your-card 7 --seed {{seed_bram}}
-    @[ -x "{{gs2}}" ] || { echo "no GSSquared for {{platform}}"; exit 1; }
-    "{{gs2}}" "$PWD/{{out}}/disks/{{lowercase(prefix)}}-synthlab.gs2"
+emu-synthlab speed=emu_speed: fetch-gssquared synthlab-disk (_boot out+"/disks/"+lowercase(prefix)+"-synthlab.gs2" label+" synthLAB (experimental, BazFast HD)" prefix+".SYNTHLAB.PO" speed)
 
 # ProDOS 8 image for BazFast, sized to the smallest power of two that holds it (4 MB in 2026-11):
 # SenseiPlay (its PRODOS + player) and our .NTP songs in /songs,
@@ -544,9 +540,7 @@ midisynth-tunetest:
     uv run midisynth-tunetest -o {{out}}/seq/tune
 
 # Boot the NTP disk and sample the DOC oscillators to build/<game>/disks/docscope.jsonl while you play something
-docscope seconds="240": fetch-gssquared fetch-mcp disk
-    uv run gs2-config {{out}}/disks/{{lowercase(prefix)}}-ntp.gs2 --name "{{label}} NinjaTrackerPlus (SenseiPlay)" --speed {{emu_speed}} \
-      --card 7=bazfast3 --disk 7:1={{prefix}}.NTP.PO --startup-slot 7 --your-card 6 --your-card 7 --seed {{seed_bram}}
+docscope seconds="240": fetch-gssquared fetch-mcp disk (_config out+"/disks/"+lowercase(prefix)+"-ntp.gs2" label+" NinjaTrackerPlus (SenseiPlay)" prefix+".NTP.PO" emu_speed)
     uv run gs2-docscope --config {{out}}/disks/{{lowercase(prefix)}}-ntp.gs2 --seconds {{seconds}} --log {{out}}/disks/docscope.jsonl
 
 # Drum-kit audition sequences (build/<game>/seq/stock/AUDITnn.SEQ + .txt key tables) for the default bank's kits
