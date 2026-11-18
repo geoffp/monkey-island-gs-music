@@ -77,12 +77,19 @@ def test_hybrid_key_weights_mix_an_equal_share_with_note_time():
     assert set(h) == set(w)                                  # unplayed keys never count
 
 
-def _budget(steps, plans=None, exposure=None, floor=0.01, last_page=255):
+def _budget_inputs(floor=0.01):
+    """The one melodic sound "A" (a 1016 B attack, a 512 B loop), its spec and a config for _value_budget."""
     import numpy as np
     from migs import ntpsamples as smp
     mel = smp.ModSample("A", np.zeros(1016 + 512), loop_start=1016, loop_len=512)
     spec = {"melodic": [{"name": "A", "ntp_attack_bytes": 1016}]}
     cfg = {"attack_bytes": 2040, "loop_bytes": 512, "upgrade_min_db_per_page": floor}
+    return mel, spec, cfg
+
+
+def _budget(steps, plans=None, exposure=None, floor=0.01, last_page=255):
+    from migs import ntpsamples as smp
+    mel, spec, cfg = _budget_inputs(floor)
     steps = {k: [smp.DrumStep(*st) for st in v] for k, v in steps.items()}
     return nm._value_budget(plans or {}, [mel], spec, cfg, last_page, exposure or {}, steps)
 
@@ -92,9 +99,7 @@ def test_value_budget_records_the_zones_it_buys():
     import pytest
     from migs import ntpsamples as smp
     from migs.pitchplan import Plan, Zone
-    mel = smp.ModSample("A", np.zeros(1016 + 512), loop_start=1016, loop_len=512)
-    spec = {"melodic": [{"name": "A", "ntp_attack_bytes": 1016}]}
-    cfg = {"attack_bytes": 2040, "loop_bytes": 512, "upgrade_min_db_per_page": 0.01}
+    mel, spec, cfg = _budget_inputs()
     one = Plan((Zone(40, 60, 50, 20000.0, -5.0),), -5.0)
     two = Plan((Zone(40, 50, 45, 20000.0, -8.0), Zone(51, 60, 55, 20000.0, -8.0)), -8.0)
     zones: list = []

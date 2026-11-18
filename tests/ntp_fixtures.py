@@ -26,9 +26,10 @@ def looped_melodic(name="x", attack=2040, loop_len=512, **attrs):
     return s
 
 
-def midi_song(tmp_path, events, name="s.mid"):
+def midi_song(tmp_path, events, name="s.mid", also=()):
+    """A MIDI file (120 ticks per beat) of one track of `events`, then a track for each of `also`."""
     mf = mido.MidiFile(ticks_per_beat=120)
-    mf.tracks.append(mido.MidiTrack(events))
+    mf.tracks += [mido.MidiTrack(ev) for ev in (events, *also)]
     p = tmp_path / name
     mf.save(p)
     return p

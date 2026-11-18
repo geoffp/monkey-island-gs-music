@@ -47,7 +47,6 @@ def test_grid_is_in_the_songs_own_ticks(tmp_path):
 
 def test_conversion_invariants(tmp_path):
     import mido
-    mf = mido.MidiFile(ticks_per_beat=120)
     t = mido.MidiTrack([mido.Message("program_change", channel=1, program=9, time=0)])
     tick = 0
     for i in range(32):                                          # jittered 16ths, chords of 3
@@ -57,9 +56,7 @@ def test_conversion_invariants(tmp_path):
             tick = at
         for k in (60, 64, 67):
             t.append(mido.Message("note_off", channel=1, note=k, velocity=0, time=0))
-    mf.tracks.append(t)
-    p = tmp_path / "1.mid"
-    mf.save(p)
+    p = midi_song(tmp_path, t, "1.mid")
     cfg = {**BASE, "oscillators": 31}
     grid, patterns, rep = sg.convert_song(p, [fake_sample()], {9: 0}, {}, cfg, dict(cfg))
     assert rep.notes == 96 and rep.dropped == 0
@@ -347,24 +344,20 @@ def test_attack_rows_play_at_unit_gain():
     assert sg.env_at(s, 0.2, 0.01, t_loop=0.24) == 1.0                # an octave down: attack lasts 2x
 
 
-def test_track_order_lets_the_ntp_converter_assign_every_oscillator():
+def test_track_order_lets_the_ntp_converter_assign_every_oscillator(tmp_path):
     # the converter's first-fit: interleaving strands odd oscillators even within 31
     interleaved = [1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2]          # 31 oscillators
     assert sg.ntp_oscillators(interleaved) is None
     assert sg.ntp_oscillators(sorted(interleaved, reverse=True)) is not None
     # convert_song emits melodic (2-osc) tracks first, so any song within budget fits
     import mido
-    mf = mido.MidiFile(ticks_per_beat=120)
     t = mido.MidiTrack([mido.Message("program_change", channel=1, program=9)])
     for i in range(12):
         t += [mido.Message("note_on", channel=9, note=36, velocity=100, time=0),
               mido.Message("note_on", channel=1, note=60 + i, velocity=90, time=5),
               mido.Message("note_off", channel=9, note=36, time=5)]
     t += [mido.Message("note_off", channel=1, note=60 + i, time=1 if i == 0 else 0) for i in range(12)]
-    mf.tracks.append(t)
-    import tempfile, pathlib
-    p = pathlib.Path(tempfile.mkdtemp()) / "x.mid"
-    mf.save(p)
+    p = midi_song(tmp_path, t, "x.mid")
     kick = smp.ModSample("kick", np.zeros(1014), kind="drum", seconds=0.5)
     cfg = {**BASE, "oscillators": 31}
     _, _, rep = sg.convert_song(p, [fake_sample(), kick], {9: 0}, {36: (1, 20, 1.0)}, cfg, dict(cfg))
@@ -383,7 +376,6 @@ def test_released_loops_are_halted_before_any_delayed_note(tmp_path):
     new loop starts at a stale volume), so the rest is looped, and a melodic track whose first
     note is delayed gets the rest on the row before it."""
     import mido
-    mf = mido.MidiFile(ticks_per_beat=120)
     t = mido.MidiTrack([mido.Message("program_change", channel=1, program=9, time=0)])
     tick = 0
     for i in range(24):                                           # jittered, detached notes
@@ -391,9 +383,7 @@ def test_released_loops_are_halted_before_any_delayed_note(tmp_path):
         t.append(mido.Message("note_on", channel=1, note=60 + i % 5, velocity=90, time=at - tick))
         t.append(mido.Message("note_off", channel=1, note=60 + i % 5, velocity=0, time=20))
         tick = at + 20
-    mf.tracks.append(t)
-    p = tmp_path / "1.mid"
-    mf.save(p)
+    p = midi_song(tmp_path, t, "1.mid")
     rest = smp.rest_sample()
     assert rest.loop_start and rest.loop_len and len(rest.ntp_blocks()) == 2   # header + loop: 2 oscillators
     assert not rest.data.any()
@@ -475,9 +465,7 @@ def test_a_song_that_changes_tempo_is_arranged_in_beats_and_its_mod_follows_the_
         tr += [mido.Message("note_on", channel=1, note=60 + i % 5, velocity=90, time=a - tick),
                mido.Message("note_off", channel=1, note=60 + i % 5, time=30)]
         tick = a + 30
-    mf = mido.MidiFile(ticks_per_beat=120)
-    mf.tracks.append(tr)
-    mf.save(p := tmp_path / "t.mid")
+    p = midi_song(tmp_path, tr, "t.mid")
     notes, _, _ = sg.read_notes(p)
     assert notes[32].t == pytest.approx(8.0)              # beat 16, at the first tempo
     assert [tuple(map(round, m, (6, 6))) for m in sg.read_tempo_map(p)] == [(8.0, 1.25)]
@@ -716,10 +704,7 @@ def _intro_song(tmp_path, start, loop_ticks):
         tick = a + 20
     marks = [mido.MetaMessage("marker", text="loopStart", time=start),
              mido.MetaMessage("marker", text="loopEnd", time=loop_ticks)]
-    mf = mido.MidiFile(ticks_per_beat=120)
-    mf.tracks += [mido.MidiTrack(marks), mido.MidiTrack(ev)]
-    mf.save(p := tmp_path / "intro.mid")
-    return p
+    return midi_song(tmp_path, marks, "intro.mid", also=[ev])
 
 
 def test_a_loop_after_an_intro_jumps_back_to_a_pattern_start(tmp_path):
