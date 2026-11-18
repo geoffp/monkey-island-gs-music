@@ -17,7 +17,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
-from migs.scumm_common import XOR_KEY, Block, xor  # noqa: F401  (re-exported)
+from migs.scumm_common import Block, xor
 
 HEADER = 8
 

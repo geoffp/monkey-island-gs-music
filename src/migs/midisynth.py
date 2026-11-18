@@ -10,9 +10,7 @@ from __future__ import annotations
 import struct
 from dataclasses import dataclass, field
 
-SEQ_TYPE, SEQ_AUX = 0xD5, 0x0001
 BNK_TYPE, BNK_AUX = 0xD6, 0x0001
-WAV_TYPE, WAV_AUX = 0xD8, 0x0004
 
 FORMAT_VERSION = 0x0100
 TRACKS = CHANNELS = INSTRUMENTS = 16

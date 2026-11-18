@@ -50,7 +50,7 @@ GEN2_OFF = envelope(attack=(0, 31), decay1=(0, 31), decay2=(0, 31), sustain=0, d
 Renderer = Callable[..., np.ndarray]           # munt.render with the paths bound
 
 
-def fit_envelope(env: np.ndarray, start: int, off: int, release_slow: bool = False) -> bytes:
+def fit_envelope(env: np.ndarray, start: int, off: int) -> bytes:
     """MIDI Synth envelope approximating a loudness contour (levels linear 0-127): attack to
     the peak, two decays (150 ms and 600 ms after it), sustain at the level 100 ms before
     note-off, and a release fitted to the fall after note-off."""
@@ -81,7 +81,7 @@ def fit_envelope(env: np.ndarray, start: int, off: int, release_slow: bool = Fal
         sustain=ls,
         decay3_rate=dt.segment_rate(l2, ls, t(d2, sus_at)),
         # cap the release at ~1 s so stopping playback (All Notes Off -> Release 1) is prompt
-        release1=(0, max(MIN_RELEASE_RATE, dt.segment_rate(level_off, 0, rel * (2 if release_slow else 1)))),
+        release1=(0, max(MIN_RELEASE_RATE, dt.segment_rate(level_off, 0, rel))),
         release2=(0, 31), release3_rate=31, velocity_gain=4)
 
 

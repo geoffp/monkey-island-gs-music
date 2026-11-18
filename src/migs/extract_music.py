@@ -32,7 +32,6 @@ from pathlib import Path
 import mido
 
 from . import games, imuse, mt32, ro, scumm_v5
-from .imuse import read_timbres  # noqa: F401  (re-exported: the NTP build reads what this writes)
 from .ro import Kind
 from .scumm_v4 import HEADER, Game
 

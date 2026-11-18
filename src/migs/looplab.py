@@ -266,7 +266,6 @@ class Trial:
     spc: float              # samples per cycle
     rms_lsb: float          # loop level in 8-bit steps
     buzz: float             # loop_buzz_db of the 8-bit loop
-    buzz_float: float       # ... before rounding
     step: float             # seam_step
     trem: float             # loop_tremolo_db
     sflux: float            # seam_flux
@@ -316,7 +315,7 @@ def trial(snd: Sound, cand: str, loop_bytes: int, attack_bytes: int, tables: dic
     hand_db, hand_flux = handover(qa, ql, k)
     return Trial(
         sound=snd.name, cand=cand, bytes=loop_bytes, k=k, rate=rate, cents=err, spc=loop_bytes / k,
-        rms_lsb=float(np.sqrt(np.mean(ql ** 2))), buzz=loop_buzz_db(ql, k), buzz_float=loop_buzz_db(loop, k),
+        rms_lsb=float(np.sqrt(np.mean(ql ** 2))), buzz=loop_buzz_db(ql, k),
         step=seam_step(ql), trem=loop_tremolo_db(ql, k), sflux=seam_flux(ql, k), hand_db=hand_db,
         hand_flux=hand_flux, like=likeness_db(ql, k, snd.ref_amp, snd.st.weights),
         att_err=attack_error_db(snd, qa, ql, rate), attack=qa, loop=ql)

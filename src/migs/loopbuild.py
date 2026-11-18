@@ -82,7 +82,6 @@ def modulation_period(y: np.ndarray, dt: float, lo: float = 0.06, hi: float = 1.
 @dataclass
 class Settle:
     attack_s: float         # the attack is over (see `settle`)
-    peak_s: float           # loudest moment of the beat-averaged level
     mod_s: float | None     # wobble (beat/chorus/tremolo) period of the level, s
     depth_db: float         # 5-95 % range of the level in the sustain (wobble depth)
     steady: bool            # the beat-averaged level holds (slope above `decay` dB/s after `sus_from`)
@@ -149,7 +148,7 @@ def settle(tr: Tracks, band: float = 1.5, decay: float = -2.0, dead_db: float = 
             if float(np.sum(w[keep] * res) / np.sum(w[keep])) < 1.0:
                 attack = float(tr.t[i])
                 break
-    return Settle(attack, float(tr.t[ip]), mod, depth, steady, slope, dead, Ls, w)
+    return Settle(attack, mod, depth, steady, slope, dead, Ls, w)
 
 
 def cycle_at_rate(cyc_fine: np.ndarray, k: int, out: int) -> np.ndarray:

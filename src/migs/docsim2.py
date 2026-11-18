@@ -262,12 +262,6 @@ class Movement:
         """The rate of `kind` ("fm" or "am") movement if it is regular here, else 0."""
         return (self.fm_hz if self.fm_regular else 0.0) if kind == "fm" else (self.am_hz if self.am_regular else 0.0)
 
-    def describe(self) -> str:
-        if not self.hz:
-            return "no periodic movement"
-        return (f"vibrato {self.fm_hz:.2f} Hz +-{self.fm_cents:.0f} cents" if self.fm_periodic
-                else f"level swing {self.am_hz:.2f} Hz +-{self.am_db:.1f} dB")
-
 
 def _line(track: np.ndarray, rate: float) -> tuple[float, float, float]:
     """(rate Hz, peak depth, share) of the strongest line of `track` (sampled at `rate`) in

@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import argparse
 import sys
-from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple
@@ -98,7 +97,6 @@ class VoiceReport:
     peak: int                   # most voices needed at once
     seconds_over: float         # time with more than VOICES voices needed
     length: float               # s
-    by_slot: Counter[int]       # notes per slot
 
     @property
     def percent_over(self) -> float:
@@ -117,7 +115,7 @@ def report(seq: Sequence, bank: Bank) -> VoiceReport:
         last = t
         busy += d
         peak = max(peak, busy)
-    return VoiceReport(len(sp), peak, over, seq.seconds(), Counter(s.slot for s in sp))
+    return VoiceReport(len(sp), peak, over, seq.seconds())
 
 
 def main(argv: list[str] | None = None) -> int:

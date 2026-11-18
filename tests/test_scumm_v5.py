@@ -76,8 +76,8 @@ def test_v5_songs_extract_with_their_custom_timbres(tmp_path):
     assert sg.program_of(notes[0], chan_prog) == 128
     toml = em.timbres_toml(timbres, {"ReggaeBass": 32})
     (tmp_path / "timbres.toml").write_text(toml)
-    assert em.read_timbres(tmp_path / "timbres.toml") == {128: timbres[0]}
-    assert em.read_timbres(tmp_path / "none.toml") == {}
+    assert imuse.read_timbres(tmp_path / "timbres.toml") == {128: timbres[0]}
+    assert imuse.read_timbres(tmp_path / "none.toml") == {}
 
 
 def test_timbre_temporary_areas_are_246_bytes_apart_in_7_bit_addresses():
