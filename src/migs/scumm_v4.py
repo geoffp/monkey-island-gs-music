@@ -13,16 +13,12 @@ import struct
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import NamedTuple
 
-XOR_KEY = 0x69
+from migs.scumm_common import XOR_KEY, Block, xor  # noqa: F401  (re-exported)
+
 HEADER = 6                       # block header: size (4) + tag (2)
 LF_DATA = HEADER + 2             # an LF block's data starts after its room number
 DIRECTORY_TAGS = (b"0R", b"0S", b"0N", b"0C")   # rooms, scripts, sounds, costumes
-
-
-def xor(data: bytes, key: int = XOR_KEY) -> bytes:
-    return data.translate(bytes(b ^ key for b in range(256)))
 
 
 def _find_file(directory: Path, name: str) -> Path:
@@ -34,16 +30,6 @@ def _find_file(directory: Path, name: str) -> Path:
         if p.name.lower() == name.lower():
             return p
     raise FileNotFoundError(f"{name} not found in {directory}")
-
-
-class Block(NamedTuple):
-    offset: int
-    size: int        # including the header
-    tag: bytes
-
-    @property
-    def end(self) -> int:
-        return self.offset + self.size
 
 
 def block_at(data: bytes, off: int) -> Block:

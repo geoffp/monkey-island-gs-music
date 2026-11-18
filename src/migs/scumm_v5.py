@@ -16,24 +16,10 @@ import struct
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import NamedTuple
 
-XOR_KEY = 0x69
+from migs.scumm_common import XOR_KEY, Block, xor  # noqa: F401  (re-exported)
+
 HEADER = 8
-
-
-def xor(data: bytes, key: int = XOR_KEY) -> bytes:
-    return bytes(b ^ key for b in data)
-
-
-class Block(NamedTuple):
-    offset: int
-    size: int        # including the header
-    tag: bytes
-
-    @property
-    def end(self) -> int:
-        return self.offset + self.size
 
 
 def block_at(data: bytes, off: int, header_in_size: bool = True) -> Block:
