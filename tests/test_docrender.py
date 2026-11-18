@@ -92,3 +92,14 @@ def test_to_output_by_blocks_is_resample_poly_of_the_whole():
                                       np.repeat(doc, docrender.HOLD, axis=0), axis=0),
                               48000 // g, fs // g, axis=0)
         assert np.array_equal(docrender.to_output(doc, 48000, block=700), whole)
+
+
+def test_render_wav_streams_what_the_whole_song_gives():
+    # a block at a time, the song is never held as floats: the same 16-bit samples, scaled or not
+    m = song({(0, 0): [25, 1, FX_SPEED, 6], (0, 40): [37, 1, FX_VOLUME, 48]}, [square()])
+    whole = docrender.to_output(docrender.render_doc(m, TABLES, LINEAR), 48000) * 3.0
+    pcm, peak = docrender.render_wav(m, TABLES, LINEAR, 48000, 3.0)
+    assert abs(peak - np.max(np.abs(whole))) < 1e-12
+    assert np.array_equal(pcm, docrender._pcm(whole))
+    scaled, _ = docrender.render_wav(m, TABLES, LINEAR, 48000, 3.0, scale=peak)
+    assert np.array_equal(scaled, docrender._pcm(whole / peak))
