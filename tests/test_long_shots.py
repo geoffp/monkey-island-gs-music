@@ -6,6 +6,7 @@ from migs import docsim2 as d2
 from migs import ntpsamples as smp
 from migs.docram import DOC_RATE
 from migs.munt import SR
+from ntp_fixtures import looped_melodic
 
 
 def tone(f0, seconds, fs, decay_s=None):
@@ -67,10 +68,7 @@ def test_play_sample_applies_a_flattened_shots_decay():
 
 
 def _sample(name, loop_len, att=2048, shots=()):
-    s = smp.ModSample(name, np.zeros(att + loop_len), loop_start=att, loop_len=loop_len, kind="melodic")
-    s.steady = False
-    s.raw_ok = tuple(smp.SHOT | z for z in shots)
-    return s
+    return looped_melodic(name, att, loop_len, steady=False, raw_ok=tuple(smp.SHOT | z for z in shots))
 
 
 def test_planner_prices_a_one_shot_against_attack_and_loop():

@@ -17,6 +17,15 @@ def fake_sample(kind="melodic", **kw):
     return s
 
 
+def looped_melodic(name="x", attack=2040, loop_len=512, **attrs):
+    """A silent melodic sample of `attack` bytes then a `loop_len` loop; `attrs` set on it after
+    (steady, max_loop, raw_ok, ...)."""
+    s = smp.ModSample(name, np.zeros(attack + loop_len), loop_start=attack, loop_len=loop_len, kind="melodic")
+    for k, v in attrs.items():
+        setattr(s, k, v)
+    return s
+
+
 def midi_song(tmp_path, events, name="s.mid"):
     mf = mido.MidiFile(ticks_per_beat=120)
     mf.tracks.append(mido.MidiTrack(events))

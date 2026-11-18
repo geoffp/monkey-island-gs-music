@@ -8,7 +8,7 @@ import pytest
 
 from migs import audio, munt
 from migs import ntpsamples as smp
-from ntp_fixtures import MAKE_TABLES, decaying_tone, synthetic_tables, wobbly_loop
+from ntp_fixtures import MAKE_TABLES, decaying_tone, looped_melodic, synthetic_tables, wobbly_loop
 
 
 @pytest.mark.skipif(not MAKE_TABLES.exists(), reason="run `just fetch-ntp`")
@@ -309,16 +309,14 @@ def test_a_planned_rate_with_no_whole_cycle_tuning_falls_back_to_the_config_wind
 
 
 def _steady(name, raw_ok=(8192, 16384), max_loop=16384):
-    s = smp.ModSample(name, np.zeros(2552), loop_start=2040, loop_len=512, kind="melodic")
-    s.steady, s.max_loop, s.raw_ok = True, max_loop, raw_ok
-    return s
+    return looped_melodic(name, steady=True, max_loop=max_loop, raw_ok=raw_ok)
 
 
 def test_valued_loop_planner_grows_what_measures_better_per_page():
     """loop_budget = "docsim2": a loop grows only where its measured score improves, and the
     best gain per page (weighted by held time) goes first."""
     organ, horn, flat = _steady("organ"), _steady("horn"), _steady("flat")
-    marimba = smp.ModSample("marimba", np.zeros(2552), loop_start=2040, loop_len=512, kind="melodic")
+    marimba = looped_melodic("marimba")
     samples = [organ, horn, flat, marimba]
     scores = {0: {512: -20.0, 8192: -21.0, 16384: -26.0},     # 16 KB is what helps (8 KB barely)
               1: {512: -20.0, 8192: -24.0, 16384: -24.0},     # 8 KB does it (16 KB adds nothing)

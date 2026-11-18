@@ -5,6 +5,7 @@ import numpy as np
 from migs import ntpsamples as smp
 from migs.docsim2 import Movement, movement, sound_kind
 from migs.munt import SR
+from ntp_fixtures import looped_melodic
 
 
 def vibrato(f0, cents, rate, seconds=4.0, fs=SR):
@@ -83,9 +84,7 @@ def test_sync_span_needs_room_in_the_recording():
 
 
 def _zone(name, move_ok):
-    s = smp.ModSample(name, np.zeros(2552), loop_start=2040, loop_len=512, kind="melodic")
-    s.steady, s.max_loop, s.raw_ok, s.move_ok, s.move_hz = True, 16384, move_ok, move_ok, 6.16
-    return s
+    return looped_melodic(name, steady=True, max_loop=16384, raw_ok=move_ok, move_ok=move_ok, move_hz=6.16)
 
 
 def test_a_moving_sounds_zones_get_their_loops_together():
