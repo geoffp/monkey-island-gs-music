@@ -12,6 +12,8 @@ from migs import ntpsamples as smp
 from migs import ntpsong as sg
 from ntp_fixtures import fake_sample, midi_song
 
+BASE = {"rows_per_unit": 2, "speed": 3, "quantize": 0.0}      # each test adds or overrides what it needs
+
 
 def test_grid_detection_on_jittered_16ths():
     rng = np.random.default_rng(1)
@@ -58,7 +60,7 @@ def test_conversion_invariants(tmp_path):
     mf.tracks.append(t)
     p = tmp_path / "1.mid"
     mf.save(p)
-    cfg = {"rows_per_unit": 2, "speed": 3, "quantize": 0.0, "oscillators": 31}
+    cfg = {**BASE, "oscillators": 31}
     grid, patterns, rep = sg.convert_song(p, [fake_sample()], {9: 0}, {}, cfg, dict(cfg))
     assert rep.notes == 96 and rep.dropped == 0
     # 3-note chords 2 rows apart: tracks still releasing alternate with fresh ones -> 3 or 6
@@ -93,7 +95,7 @@ def test_channel_volume_and_swell_set_levels(tmp_path):
     s.env_g = np.array([1.0, 2.0])                 # swells to twice its attack level
     # the row step limit would make the rows lag the swell; levels are the targets
     # (this note's swell peaks on its release row: "start" plays that row at the peak itself)
-    cfg = {"rows_per_unit": 2, "speed": 3, "quantize": 0.0, "oscillators": 31, "env_max_rise_db": 0,
+    cfg = {**BASE, "oscillators": 31, "env_max_rise_db": 0,
            "release_rows": "start"}
     grid, _, _ = sg.convert_song(p, [s], {9: 0}, {}, cfg, dict(cfg), cc7)
     vols = []
@@ -121,7 +123,7 @@ def test_envelope_rows_rise_at_most_env_max_rise_db(tmp_path):
     s.env_t, s.env_g = t, 10 ** (6 * np.sin(2 * np.pi * t / 0.6) / 20)      # +-6 dB beating, 0.6 s
 
     def held_volumes(limit):
-        cfg = {"rows_per_unit": 2, "speed": 3, "quantize": 0.0, "oscillators": 31, "env_max_rise_db": limit}
+        cfg = {**BASE, "oscillators": 31, "env_max_rise_db": limit}
         grid, _, rep = sg.convert_song(p, [s], {9: 0}, {}, cfg, dict(cfg))
         cells = next(c for c in grid.cells if any(v[0] for v in c.values()))
         r_on = min(r for r, c in cells.items() if c[0])
@@ -152,7 +154,7 @@ def test_steals_take_the_quietest_release(tmp_path):
     p = midi_song(tmp_path, ev)
     s = fake_sample()
     s.rel_g = np.linspace(1.0, 0.0, 101)                               # 1 s release ramp
-    cfg = {"rows_per_unit": 2, "speed": 3, "quantize": 0.0, "oscillators": 4,
+    cfg = {**BASE, "oscillators": 4,
            "unit_ticks": 30, "phase_ticks": 0}
     grid, _, rep = sg.convert_song(p, [s], {9: 0}, {}, cfg, dict(cfg))
     assert rep.tracks_used == 2 and rep.dropped == 0 and rep.stolen == 1
@@ -178,7 +180,7 @@ def test_steals_spare_small_parts(tmp_path):
     s.rel_g = np.linspace(1.0, 0.0, 101)
     bass, new = s.base_note - 20 + 1, s.base_note + 12 + 1
     for protect, victim_is_bass in ((0, True), (2, False)):
-        cfg = {"rows_per_unit": 2, "speed": 3, "quantize": 0.0, "oscillators": 8,
+        cfg = {**BASE, "oscillators": 8,
                "unit_ticks": 30, "phase_ticks": 0, "steal_protect": protect}
         grid, _, rep = sg.convert_song(p, [s], {9: 0}, {}, cfg, dict(cfg))
         assert rep.tracks_used == 4 and rep.stolen == 1
@@ -199,7 +201,7 @@ def test_loop_only_sounds_take_one_oscillator(tmp_path):
     lo = smp.ModSample("lo", np.zeros(512), loop_start=0, loop_len=512, base_note=30, key0=60,
                       env_t=np.array([0.0, 1.0]), env_g=np.array([1.0, 0.5]), rel_g=np.array([1.0, 0.0]))
     assert lo.ntp_blocks() == [512]
-    cfg = {"rows_per_unit": 2, "speed": 3, "quantize": 0.0, "oscillators": 2, "unit_ticks": 30, "phase_ticks": 0}
+    cfg = {**BASE, "oscillators": 2, "unit_ticks": 30, "phase_ticks": 0}
     _, _, rep = sg.convert_song(p, [fake_sample()], {9: 0}, {}, cfg, dict(cfg))
     assert rep.dropped == 1
     _, _, rep = sg.convert_song(p, [lo], {9: 0}, {}, cfg, dict(cfg))
@@ -218,7 +220,7 @@ def test_track_plan_keeps_early_one_oscillator_notes_from_fixing_the_split(tmp_p
     kick = fake_sample(kind="drum")
     kick.loop_len, kick.seconds = 0, 0.1
     drums = {k: (1, 20, 1.0) for k in (36, 38, 42)}
-    cfg = {"rows_per_unit": 2, "speed": 3, "quantize": 0.0, "oscillators": 6, "unit_ticks": 30, "phase_ticks": 0}
+    cfg = {**BASE, "oscillators": 6, "unit_ticks": 30, "phase_ticks": 0}
     _, _, first = sg.convert_song(p, [fake_sample(), kick], {9: 0}, drums, cfg, dict(cfg))
     assert first.dropped == 2 and first.melodic_cap is None
     _, _, rep = sg.plan_tracks(p, [fake_sample(), kick], {9: 0}, drums, cfg, dict(cfg))
@@ -235,7 +237,7 @@ def test_melodic_one_shots_may_use_one_oscillator_tracks(tmp_path):
     p = midi_song(tmp_path, ev)
     shot = fake_sample()
     shot.loop_start, shot.loop_len, shot.seconds = 0, 0, 0.3
-    cfg = {"rows_per_unit": 2, "speed": 3, "quantize": 0.0, "oscillators": 31, "unit_ticks": 30, "phase_ticks": 0}
+    cfg = {**BASE, "oscillators": 31, "unit_ticks": 30, "phase_ticks": 0}
     _, _, rep = sg.convert_song(p, [shot], {9: 0}, {}, cfg, dict(cfg))
     assert rep.track_kinds[0] == "drum" and rep.oscillators == 1
     _, _, rep = sg.convert_song(p, [shot], {9: 0}, {}, cfg, {**cfg, "melodic_one_shots": "melodic"})
@@ -254,7 +256,7 @@ def test_track_plan_prefers_fewer_tracks_at_equal_loss(tmp_path):
     kick = fake_sample(kind="drum")
     kick.loop_len, kick.seconds = 0, 0.1
     drums = {k: (1, 20, 1.0) for k in (36, 38)}
-    cfg = {"rows_per_unit": 2, "speed": 3, "quantize": 0.0, "oscillators": 31, "unit_ticks": 30, "phase_ticks": 0}
+    cfg = {**BASE, "oscillators": 31, "unit_ticks": 30, "phase_ticks": 0}
     _, _, first = sg.convert_song(p, [fake_sample(), kick], {9: 0}, drums, cfg, dict(cfg))
     assert first.tracks_used == 4
     _, _, rep = sg.plan_tracks(p, [fake_sample(), kick], {9: 0}, drums, cfg, dict(cfg))
@@ -278,7 +280,7 @@ def test_delayed_notes_far_from_the_default_volume_snap_to_a_row(tmp_path):
         ev += [mido.Message("note_off", channel=1, note=60, time=120),
                mido.Message("note_off", channel=1, note=64, time=0)]
         return midi_song(tmp_path, ev, name)
-    cfg = {"rows_per_unit": 2, "speed": 3, "quantize": 0.0, "oscillators": 31, "unit_ticks": 30, "phase_ticks": 0}
+    cfg = {**BASE, "oscillators": 31, "unit_ticks": 30, "phase_ticks": 0}
     for flam, snapped in ((False, 1), (True, 0)):
         p = song(f"{flam}.mid", flam)
         _, _, off = sg.convert_song(p, [fake_sample()], {9: 0}, {}, cfg, dict(cfg))
@@ -302,7 +304,7 @@ def test_delayed_notes_near_a_row_snap_to_it_within_delay_snap_ms(tmp_path):
                mido.Message("note_off", channel=1, note=60, time=20)]
         now = at + 20
     p = midi_song(tmp_path, ev)
-    cfg = {"rows_per_unit": 2, "speed": 3, "quantize": 0.0, "oscillators": 31, "unit_ticks": 30, "phase_ticks": 0,
+    cfg = {**BASE, "oscillators": 31, "unit_ticks": 30, "phase_ticks": 0,
            "delay_snap_db": 4.0}
     reps = {ms: sg.convert_song(p, [fake_sample()], {9: 0}, {}, cfg, {**cfg, "delay_snap_ms": ms})[2]
             for ms in (0, 25, 35)}
@@ -355,7 +357,7 @@ def test_track_order_lets_the_ntp_converter_assign_every_oscillator():
     mf = mido.MidiFile(ticks_per_beat=120)
     t = mido.MidiTrack([mido.Message("program_change", channel=1, program=9)])
     for i in range(12):
-        t += [mido.Message("note_on", channel=9, note=36, velocity=100, time=0 if i else 0),
+        t += [mido.Message("note_on", channel=9, note=36, velocity=100, time=0),
               mido.Message("note_on", channel=1, note=60 + i, velocity=90, time=5),
               mido.Message("note_off", channel=9, note=36, time=5)]
     t += [mido.Message("note_off", channel=1, note=60 + i, time=1 if i == 0 else 0) for i in range(12)]
@@ -364,7 +366,7 @@ def test_track_order_lets_the_ntp_converter_assign_every_oscillator():
     p = pathlib.Path(tempfile.mkdtemp()) / "x.mid"
     mf.save(p)
     kick = smp.ModSample("kick", np.zeros(1014), kind="drum", seconds=0.5)
-    cfg = {"rows_per_unit": 2, "speed": 3, "quantize": 0.0, "oscillators": 31}
+    cfg = {**BASE, "oscillators": 31}
     _, _, rep = sg.convert_song(p, [fake_sample(), kick], {9: 0}, {36: (1, 20, 1.0)}, cfg, dict(cfg))
     kinds = rep.track_kinds
     assert kinds == sorted(kinds, key=lambda k: k != "melodic")
@@ -395,7 +397,7 @@ def test_released_loops_are_halted_before_any_delayed_note(tmp_path):
     rest = smp.rest_sample()
     assert rest.loop_start and rest.loop_len and len(rest.ntp_blocks()) == 2   # header + loop: 2 oscillators
     assert not rest.data.any()
-    cfg = {"rows_per_unit": 2, "speed": 3, "quantize": 0.0, "oscillators": 31}
+    cfg = {**BASE, "oscillators": 31}
     grid, _, rep = sg.convert_song(p, [fake_sample(), rest], {9: 0}, {}, cfg, dict(cfg))
     assert rep.halted > 0
     delayed = 0
@@ -425,7 +427,7 @@ def test_one_oscillator_tracks_never_get_the_looped_rest(tmp_path):
     p = midi_song(tmp_path, ev)
     shot = smp.ModSample("x", np.zeros(8000), kind="melodic", base_note=30, key0=60, seconds=1.0,
                          env_t=np.array([0.1, 1.0]), env_g=np.array([1.0, 0.5]), rel_g=np.array([1.0, 0.5, 0.0]))
-    cfg = {"rows_per_unit": 2, "speed": 3, "quantize": 0.0, "oscillators": 31, "melodic_one_shots": "any"}
+    cfg = {**BASE, "oscillators": 31, "melodic_one_shots": "any"}
     grid, _, rep = sg.convert_song(p, [shot, smp.rest_sample()], {9: 0}, {}, cfg, dict(cfg))
     assert set(rep.track_kinds) == {"drum"}
     cells = [c for track in grid.cells for c in track.values()]
@@ -449,7 +451,7 @@ def test_drums_borrow_idle_melodic_tracks_when_the_budget_is_full(tmp_path):
     p = midi_song(tmp_path, ev)
     kick = smp.ModSample("kick", np.zeros(2038), kind="drum", seconds=0.2)
     snare = smp.ModSample("snare", np.zeros(2038), kind="drum", seconds=0.2)
-    base = {"rows_per_unit": 2, "speed": 3, "quantize": 0.0, "oscillators": 31}
+    base = {**BASE, "oscillators": 31}
     drums = {36: (1, 20, 1.0), 38: (2, 22, 1.0)}
     _, _, never = sg.convert_song(p, [fake_sample(), kick, snare], {9: 0}, drums, base, {**base, "drum_borrow": "never"})
     _, _, last = sg.convert_song(p, [fake_sample(), kick, snare], {9: 0}, drums, base, {**base, "drum_borrow": "last"})
@@ -542,7 +544,7 @@ def test_halt_before_delayed_leaves_nothing_sounding_for_a_delayed_note(tmp_path
     note's default volume for d ticks (MI160 on the IIGS: +24 to +35 dB for 50-67 ms). With
     halt_before_delayed the track is halted (rest + C00) on the row before."""
     p, samples = _ghost_song(tmp_path, 307)
-    cfg = {"rows_per_unit": 2, "speed": 3, "quantize": 0.0, "oscillators": 2, "unit_ticks": 30, "phase_ticks": 0,
+    cfg = {**BASE, "oscillators": 2, "unit_ticks": 30, "phase_ticks": 0,
            "halt_before_delayed": False}
     grid, _, rep = sg.convert_song(p, samples, {9: 0}, {}, cfg, dict(cfg))
     assert rep.delayed == 1 and _ghosts(grid, samples) == 1                   # the option off
@@ -568,7 +570,7 @@ def test_halt_before_delayed_moves_the_note_when_the_row_before_starts_one(tmp_p
     s = fake_sample()
     s.rel_g = np.linspace(1.0, 0.0, 101)
     samples = [s, smp.rest_sample()]
-    cfg = {"rows_per_unit": 2, "speed": 3, "quantize": 0.0, "oscillators": 2, "unit_ticks": 30, "phase_ticks": 0,
+    cfg = {**BASE, "oscillators": 2, "unit_ticks": 30, "phase_ticks": 0,
            "halt_before_delayed": True}
     grid, _, rep = sg.convert_song(p, samples, {9: 0}, {}, cfg, dict(cfg))
     assert rep.ghost_moves == 1 and rep.ghost_halts == 0 and _ghosts(grid, samples) == 0
@@ -625,7 +627,7 @@ def test_a_looping_song_repeats_exactly_as_long_as_the_game_loop(tmp_path):
     loop_ticks = 16 * 60 + 17
     p = _loop_song(tmp_path, loop_ticks)
     assert sg.read_loop(p) == pytest.approx((0.0, loop_ticks * sg.RO_TIMEBASE.tick_s))
-    cfg = {"rows_per_unit": 2, "speed": 3, "quantize": 0.0, "oscillators": 31}
+    cfg = {**BASE, "oscillators": 31}
     grid, patterns, rep = sg.convert_song(p, [fake_sample()], {9: 0}, {}, cfg, dict(cfg))
     assert rep.loop_rows > 0 and abs(rep.loop_err_ms) < 3 and rep.loop_fit_rows >= 1
     assert patterns == 1 + -(-rep.loop_rows // sg.ROWS)
@@ -653,7 +655,7 @@ def test_a_song_that_plays_once_stops_on_its_last_row_with_F00(tmp_path):
                                  mido.Message("note_off", channel=1, note=60, velocity=0, time=length)],
                       name=f"{length}.mid")
         assert sg.read_loop(p) is None
-        cfg = {"rows_per_unit": 2, "speed": 3, "quantize": 0.0, "oscillators": 31}
+        cfg = {**BASE, "oscillators": 31}
         grid, patterns, rep = sg.convert_song(p, [fake_sample()], {9: 0}, {}, cfg, dict(cfg))
         assert rep.loop_rows == 0
         assert not any(c[r][2] == sg.FX_JUMP for c in grid.cells for r in c)
@@ -675,7 +677,7 @@ def test_releases_that_cross_the_loop_sound_into_the_next_pass(tmp_path):
     its release cells move to the start of the pass, before the track's first note, and the
     release still ends silent (the rest), so nothing rings on into the next pass."""
     p = _loop_song(tmp_path, 16 * 60, held=True, first=120)
-    cfg = {"rows_per_unit": 2, "speed": 3, "quantize": 0.0, "oscillators": 31}
+    cfg = {**BASE, "oscillators": 31}
     samples = [fake_sample(), smp.rest_sample()]
     grid, patterns, rep = sg.convert_song(p, samples, {9: 0}, {}, cfg, dict(cfg))
     assert rep.loop_wrapped > 0 and rep.loop_cut == 0
@@ -697,7 +699,7 @@ def test_releases_that_cross_the_loop_sound_into_the_next_pass(tmp_path):
 def test_a_note_the_grid_puts_past_the_loop_end_plays_on_the_last_row(tmp_path):
     loop_ticks = 16 * 60
     p = _loop_song(tmp_path, loop_ticks, held=True, late=loop_ticks - 4)
-    cfg = {"rows_per_unit": 2, "speed": 3, "quantize": 0.0, "oscillators": 31}
+    cfg = {**BASE, "oscillators": 31}
     grid, _, rep = sg.convert_song(p, [fake_sample()], {9: 0}, {}, cfg, dict(cfg))
     assert rep.loop_late == 1 and rep.loop_cut == 0 and rep.dropped == 0
     last = sg.ROWS + rep.loop_rows - 1
@@ -728,7 +730,7 @@ def test_a_loop_after_an_intro_jumps_back_to_a_pattern_start(tmp_path):
     p = _intro_song(tmp_path, start, loop_ticks)
     tb = sg.RO_TIMEBASE.tick_s
     assert sg.read_loop(p) == pytest.approx((start * tb, (start + loop_ticks) * tb))
-    cfg = {"rows_per_unit": 2, "speed": 3, "quantize": 0.0, "oscillators": 31}
+    cfg = {**BASE, "oscillators": 31}
     grid, patterns, rep = sg.convert_song(p, [fake_sample()], {9: 0}, {}, cfg, dict(cfg))
     assert rep.loop_start_row > 1 and abs(rep.loop_err_ms) < 3
     jumps = [c[r][3] for c in grid.cells for r in c if c[r][2] == sg.FX_JUMP]
@@ -758,7 +760,7 @@ def test_short_notes_halve_the_rows_until_they_fit():
     assert sg._fit_rows(long_notes, 0.221, 2, cfg, {}) == 2                # already short enough rows
     assert sg._fit_rows(notes, 0.221, 2, cfg, {"row_fit": "grid"}) == 2    # a song can opt out
     # as the build calls it: the song's config arrives with the defaults (rows_per_unit) merged in
-    full = {"rows_per_unit": 2, "speed": 3, "quantize": 0.0, "row_fit": "short-notes"}
+    full = {**BASE, "row_fit": "short-notes"}
     song = {**full, "unit_ticks": 0.221 / sg.RO_TIMEBASE.tick_s, "phase_ticks": 0}
     assert sg._timing(notes, full, song).row_s == pytest.approx(0.221 / 4)
     assert sg._timing(notes, full, {**song, "row_fit": "grid"}).row_s == pytest.approx(0.221 / 2)
@@ -777,7 +779,7 @@ def test_mean_release_rows_play_the_release_averaged_over_the_row(tmp_path):
     def release_row(mode):
         s = fake_sample()
         s.rel_g = np.array([1.0, 0.05, 0.0])                     # per 10 ms: gone in 20 ms
-        cfg = {"rows_per_unit": 2, "speed": 3, "quantize": 0.0, "oscillators": 31}
+        cfg = {**BASE, "oscillators": 31}
         if mode:
             cfg["release_rows"] = mode
         song = {**cfg, "unit_ticks": 60, "phase_ticks": 0}       # 125 ms rows: a note is 4 rows

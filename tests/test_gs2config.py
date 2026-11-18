@@ -10,7 +10,7 @@ from migs.gs2config import Disk, write_config
 
 def test_new_config_is_valid_toml_with_seeded_patched_bram(tmp_path):
     f = tmp_path / "m.gs2"
-    write_config(f, "MI1", "ludicrous", {7: "bazfast3"}, [(7, 1, "MI.NTP.PO")],
+    write_config(f, "MI1", "ludicrous", {7: "bazfast3"}, [Disk(7, 1, "MI.NTP.PO")],
                  {bram.STARTUP_SLOT: 7, bram.SLOT_INTERNAL[6]: 1, bram.SLOT_INTERNAL[7]: 1}, REAL)
     cfg = tomllib.loads(f.read_text())
     assert cfg["platform"] == "apple2gs" and cfg["speed"] == "ludicrous"
@@ -25,7 +25,7 @@ def test_rewrite_keeps_gssquared_id_and_saved_bram(tmp_path):
     f = tmp_path / "m.gs2"
     saved = bram.patch(REAL, {0x1E: 3})                                    # user changed volume
     f.write_text(f'gs2_version = 1\nid = "abc-123"\nclock = "ntsc"\nbram = "{saved.hex()}"\n')
-    write_config(f, "MI1", "2.8mhz", {}, [(5, 1, "SYSTEM.DISK.PO")], {bram.STARTUP_SLOT: 5}, REAL)
+    write_config(f, "MI1", "2.8mhz", {}, [Disk(5, 1, "SYSTEM.DISK.PO")], {bram.STARTUP_SLOT: 5}, REAL)
     cfg = tomllib.loads(f.read_text())
     b = bytes.fromhex(cfg["bram"])
     assert cfg["id"] == "abc-123" and cfg["speed"] == "2.8mhz"
