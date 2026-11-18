@@ -81,6 +81,31 @@ def test_candidates_must_reach_every_key_of_their_zone():
     assert [z.key for z in plans[0].zones] == [30, 70]
 
 
+
+def test_a_zone_cost_of_its_whole_span_can_move_its_key_or_split_it():
+    """span_cost prices what depends on a zone's whole span (its tuning, fitted over every key
+    it plays): asked best-first, it moves a zone off the key its notes alone would choose."""
+    w = {40: 1.0, 50: 3.0, 52: 1.0}
+    cands = [pp.Candidate(k, 16000.0, 0, 127) for k in range(40, 53)]
+    asked = []
+
+    def wide_at_50(c, lo, hi):                  # key 50 can't play a span reaching down to 40
+        asked.append((c.key, lo, hi))
+        return 100.0 if c.key == 50 and lo == 40 else 0.0
+    one, two = pp.plan(w, cands, lambda k, r, n: abs(n - k), 2, span_cost=wide_at_50)
+    assert one.zones[0].key != 50
+    assert [z.key for z in two.zones] == [40, 50]                       # or split it off
+    assert pp.plan(w, cands, lambda k, r, n: abs(n - k), 1)[0].zones[0].key == 50
+    assert len(asked) < len(cands) * 6                                  # best-first: not every candidate per span
+
+
+def test_an_unplayable_span_takes_another_plan():
+    w = {40: 1.0, 70: 1.0}
+    cands = [pp.Candidate(55, 16000.0, 0, 127), pp.Candidate(40, 16000.0, 0, 127), pp.Candidate(70, 16000.0, 0, 127)]
+    plans = pp.plan(w, cands, lambda k, r, n: abs(n - k) / 10, 2,
+                    span_cost=lambda c, lo, hi: np.inf if hi - lo > 10 else 0.0)
+    assert [p.count for p in plans] == [2]
+
 def test_steadiness_follows_the_level_trend_not_a_wobble():
     t = np.arange(int(2.6 * SR)) / SR
     wobble = 10 ** (10 * np.sin(2 * np.pi * t / 0.5) / 20)                 # +-10 dB rotary-like wobble

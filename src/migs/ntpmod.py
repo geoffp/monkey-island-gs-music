@@ -294,15 +294,8 @@ def _pitch_plans(spec: dict, usage_notes: list[tuple[int, Note]], cfg: dict, tab
     free_c, per_c = cfg.get("pitch_free_cents", 15.0), cfg.get("pitch_cents_db", 2.0)
     max_c = cfg.get("pitch_max_cents", 25.0)
 
-    def off_cents(k: int, r: float, n: int, whole: bool) -> float:
-        t = tuned(k, r, whole)
-        if t is None:
-            return 0.0
-        _, _, rate, n0, ft = t
-        i = n0 + n - k
-        if not 0 <= i < len(tables[ft]):
-            return 0.0                               # out of the table: the candidates' reach says so
-        return abs(1200 * math.log2(PAL / tables[ft][i] / rate) - 100 * (n - k))
+    def cents_db(c: float) -> float:
+        return per_c * max(0.0, c - free_c) + (100.0 if c > max_c else 0.0)
 
     out = {}
     for m in spec["melodic"]:
@@ -313,6 +306,39 @@ def _pitch_plans(spec: dict, usage_notes: list[tuple[int, Note]], cfg: dict, tab
         def render(key: int, prog=m["program"]) -> np.ndarray:
             x = cached_render(munt, prog, key, hold)
             return x[audio.onset(x):]
+
+        pitch: dict[int, float] = {}
+
+        def pitch_hz(key: int, prog=m["program"]) -> float:
+            """The pitch the build tunes to: measured on the render (build_melodic), not the key's
+            nominal one (ReggaeBass at key 34 is 12 cents flat)."""
+            if key not in pitch:
+                x = cached_render(munt, prog, key, hold)
+                pitch[key] = SR / audio.refine_period(x, audio.onset(x) + int(0.25 * SR), key_hz(key))
+            return pitch[key]
+
+        spans: dict = {}
+
+        def span_cost(c, lo: int, hi: int, whole: bool = True, w=None) -> float:
+            """The tuning's cost over keys lo..hi, as the build tunes the zone: over all of them
+            (best_tuning's RMS), from the measured pitch, within 3 % of the planned rate. Tuned at
+            its own key alone, the plan saw MI2 222's ReggaeBass (keys 26-67 from key 34) at most
+            21 cents off; built, keys 66-67 were 29-33 cents off (2026-11-17)."""
+            tag = (c.key, c.rate, lo, hi, whole)
+            if tag not in spans:
+                try:
+                    _, _, rate, n0, ft = best_tuning(pitch_hz(c.key), tables, c.rate * 0.97, c.rate * 1.03, loop,
+                                                     c.key, min(lo, c.key), max(hi, c.key), whole_cycles=whole)
+                except ValueError:
+                    spans[tag] = np.inf
+                    return np.inf
+                cost = 0.0
+                for n, wt in w.items():
+                    if lo <= n <= hi:
+                        cents = abs(1200 * math.log2(PAL / tables[ft][n0 + n - c.key] / rate) - 100 * (n - c.key))
+                        cost += wt * cents_db(cents)
+                spans[tag] = cost
+            return spans[tag]
 
         def shot_rate(key: int, m=m) -> float | None:
             """The rate this sound would be a one-shot at, sampled at `key` (build_melodic's
@@ -345,10 +371,6 @@ def _pitch_plans(spec: dict, usage_notes: list[tuple[int, Note]], cfg: dict, tab
         else:
             err = NoteError(doc_key(munt, m["program"]), render, munt.cache.parent / "docsim.json")
         measure = err
-
-        def err(k: int, r: float, n: int, measure=measure, whole=not shots) -> float:
-            c = off_cents(k, r, n, whole)
-            return measure(k, r, n) + per_c * max(0.0, c - free_c) + (100.0 if c > max_c else 0.0)
         cands = pitchplan.candidates(min(w), max(w), lambda k: rates(k, shots),
                                      lambda k, r: base_note(k, r, whole=not shots))
         now_rates = [shot_rate(m["key"])] if shots else pitchplan.loop_rates(m["key"], loop, min_rate, cfg["max_rate"])
@@ -360,8 +382,10 @@ def _pitch_plans(spec: dict, usage_notes: list[tuple[int, Note]], cfg: dict, tab
             for c in pitchplan.candidates(m["key"], m["key"], lambda k, r=r: [r],
                                           lambda k, r: base_note(k, r, whole=not shots)))]
         wp = key_weights(w, cfg)
-        plans = pitchplan.plan(wp, cands, err, cfg.get("pitch_max_zones", 1))
-        now = (sum(wt * err(m["key"], now_rates[0], k) for k, wt in wp.items()) / sum(wp.values())
+        tune = functools.partial(span_cost, whole=not shots, w=wp)
+        plans = pitchplan.plan(wp, cands, err, cfg.get("pitch_max_zones", 1), span_cost=tune)
+        now = ((sum(wt * err(m["key"], now_rates[0], k) for k, wt in wp.items())
+                + tune(pitchplan.Candidate(m["key"], now_rates[0], 0, 127), min(wp), max(wp))) / sum(wp.values())
                if now_rates else float("nan"))
         measure.save()
         # the measure sees the first 0.6 s, not the loop the new key and rate get: move only

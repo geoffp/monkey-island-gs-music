@@ -78,9 +78,13 @@ def candidates(lo: int, hi: int, rates_for: Callable[[int], list[float]],
 
 
 def plan(weights: Mapping[int, float], cands: list[Candidate], error: Callable[[int, float, int], float],
-         max_zones: int = 1) -> list[Plan]:
+         max_zones: int = 1, span_cost: Callable[[Candidate, int, int], float] | None = None) -> list[Plan]:
     """The best plan for 1..max_zones zones (fewer if there are fewer played keys).
-    `weights`: played key -> weight (note seconds); `error(k, rate, n)`: dB."""
+    `weights`: played key -> weight (note seconds); `error(k, rate, n)`: dB. `span_cost(c, lo,
+    hi)`: what more candidate c costs for playing the keys lo..hi (weighted dB summed over them,
+    at least 0, inf if it can't): what depends on the zone as a whole, such as its tuning, which
+    the build fits over every key the zone plays. It is asked best-first, only of candidates
+    that could still win."""
     keys = sorted(k for k, w in weights.items() if w > 0)
     if not keys or not cands:
         return []
@@ -99,8 +103,19 @@ def plan(weights: Mapping[int, float], cands: list[Candidate], error: Callable[[
             if not ok.any():
                 continue
             s = np.where(ok, pre[:, j + 1] - pre[:, i], np.inf)
-            c = int(np.argmin(s))
-            best[i, j] = (float(s[c]), c)
+            if span_cost is None:
+                c = int(np.argmin(s))
+                best[i, j] = (float(s[c]), c)
+                continue
+            got = (np.inf, -1)
+            for c in np.argsort(s, kind="stable"):
+                if not s[c] < got[0]:                    # sorted, and span costs are >= 0
+                    break
+                v = float(s[c]) + span_cost(cands[c], keys[i], keys[j])
+                if v < got[0]:
+                    got = (v, int(c))
+            if got[1] >= 0:
+                best[i, j] = got
     plans = []
     # dp[z][j]: (cost, splits) for keys[0..j] in z zones
     dp = {0: {-1: (0.0, ())}}

@@ -111,8 +111,21 @@ def ntp_block(n: int) -> int:
     return 1 << max(8, math.ceil(math.log2(n)))
 
 
+_OFFSETS: dict = {}
+
+
 def range_offsets(tables, key0: int, key_lo: int, key_hi: int
                   ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """range_offsets_of, kept: it depends only on the keys relative to key0, and the pitch plan
+    asks it for every zone it prices."""
+    tag = (id(tables), key_lo - key0, key_hi - key0)
+    if tag not in _OFFSETS or _OFFSETS[tag][0] is not tables:
+        _OFFSETS[tag] = (tables, range_offsets_of(tables, key0, key_lo, key_hi))
+    return _OFFSETS[tag][1]
+
+
+def range_offsets_of(tables, key0: int, key_lo: int, key_hi: int
+                     ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """(valid, m1, m2), each (finetune, base note) in `tables` order: whether every key
     key_lo..key_hi is in the table from that base note (played for key0), and the mean and
     mean square of the cents by which the table's periods put those keys off, against the
