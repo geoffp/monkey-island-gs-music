@@ -11,7 +11,7 @@ Sources (fetched by `just fetch-ntp` into `vendor/ntp/`):
 ## Why consider it instead of MIDI Synth
 - **Many tracks:** 1–31, "TL;DR 15" [PAGE]. Each track uses 1 or 2 of the 32 DOC oscillators; 2 when looped samples need swap mode, 4 with "channel doubling" (which limits a song to 7 tracks). Compare MIDI Synth's **7 voices × 4 oscillators**.
 - **Static allocation:** each tracker channel owns its oscillators, so there's **no voice stealing**. The converter assigns notes to tracks itself.
-- **Effects:** 30 of 31 Protracker effects (not E0 filter). Effect 9 (sample offset) only works on streamed samples [PAGE].
+- **Effects:** 30 of 31 Protracker effects (not E0 filter). Effect 9 (sample offset) only works on streamed samples [PAGE]. Effect by effect, as the player's source implements them (tick model, effect memory, quirks such as arpeggio restarting the sample, ED0 losing the note, EC0 not cutting, B/D/F00 sharing one variable): `docs/ntp-effects.md` (2026-11-17, read from `ninjatrackerplus.s`, partly not run); which could help us: `plans/protracker-effects.md`.
 - **No envelopes:** loudness over time is done with volume effects (C set volume, A volume slide, EC note cut), i.e. a primitive ADSR.
 - **Samples:** up to 255 instruments in NTP. The MOD route limits that to **31** samples. 8-bit mono. 64 KB DOC RAM, aligned to power-of-two sizes (256 B–32 KB).
 - **Streaming:** samples over 32 KB − 8 bytes (or any, by option) are streamed from main RAM through a 512-byte DOC buffer per streaming track. This costs CPU; "the normal 4 streamed tracks work fine" [PAGE].
