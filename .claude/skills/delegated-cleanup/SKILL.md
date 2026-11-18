@@ -7,11 +7,11 @@ description: Audit the codebase for redundancy and simplification with a cheap r
 
 Three roles. **Haiku** sweeps the repo cheaply and reads only. **You** judge every finding against the code and do the work. **Opus** is called for a second opinion on a task only when the heuristic below says it's worth it.
 
-Do the steps in this order. In particular, **write the heuristic score before you edit anything for a task**. A task you start editing without scoring skips the process.
+Do the steps in this order. **Before the first edit of each task, send the user one line: `Task N score k/5: reasons`.** An edit with no such line before it is a process error: stop, say so, and score it then.
 
 ## 1. Sweep (Haiku, background, read-only)
 
-Start one `general-purpose` agent with `model: "haiku"`, `run_in_background: true`. Haiku is shallow on long files: say so in the brief and expect an uneven report. Brief template (fill the brackets):
+Start `general-purpose` agents with `model: "haiku"`, `run_in_background: true`. Haiku is shallow on long files, and one agent for the whole repo left the biggest modules unread. So split the files into groups of about 1500 lines, give any module over 1000 lines its own agent (with its tests), and run the groups in parallel. Each report must list every file with the line ranges it actually read; a file not read in full is sent once more, then named to the user as unaudited. Brief template (fill the brackets):
 
 - Role and limits: read-only audit; no edits, no builds, no `just` recipes, no state-changing git; the only output is the final report.
 - Repo facts: point at CLAUDE.md first; name the code, tests and tool directories; list what to ignore (`ref/`, `vendor/`, `build/`, `original files/`, `.venv`, `measurements/`).
@@ -36,8 +36,8 @@ Score these five signals, 1 point each, and write the score with reasons in one 
 
 1. **Output risk.** Could alter reproducible output (MOD/NTP bytes, planner decisions, numerics, rounding, ordering), or a failure would only show in a long build.
 2. **Verification gap.** No test or byte-identical check covers the changed lines, or the check is weaker than the claim you'd make.
-3. **Hidden differences.** Code that looks duplicated may differ on purpose (error paths, ranges, rounding, defaults, callers), and you can name a difference you can't explain.
-4. **Wide reach.** The shared piece will have callers in 3+ modules, or lives in a module whose other users you haven't read.
+3. **Hidden differences.** Code that looks duplicated may differ on purpose (error paths, ranges, rounding, defaults, byte order, field order, header sizes, callers), and you can name a difference you can't explain.
+4. **Wide reach.** The shared piece will have callers in 3+ modules, serves more than one game or format version (v4 and v5, MI1, MI2, Atlantis), or lives in a module whose other users you haven't read.
 5. **Open judgment.** The decision turns on intent you can't read from code or docs (deliberate? still wanted?), or you've already changed your mind on it once.
 
 Decision:
@@ -46,7 +46,7 @@ Decision:
 - **2:** ask only if you can write one concrete, answerable question. Otherwise do it and say what you're unsure of.
 - **3+:** start an Opus subagent.
 
-Run the cheap check first (tests, a byte-identical build, a `just -n` diff) and **re-score after it**: a passing byte-identical check removes signals 1 and 2. Never spend a subagent on something a test or a diff already answers.
+Run the cheap check first (tests, a byte-identical build, a `just -n` diff) and **re-score after it**: a passing byte-identical check removes signals 1 and 2, but only for the games, songs and code paths the check ran. Never spend a subagent on something a test or a diff already answers.
 
 The Opus brief (`model: "opus"`, read-only, may run `uv run pytest -q`) must contain: the exact question; `file:line` locations; what you already checked; what the answer changes; "answer in under 300 words, a verdict, evidence per point, say 'unverified' where unsure"; and "no unrelated cleanups". No question you can state means no subagent. Treat its answer as evidence, not as authority: check what it cites before acting, and note that its report can't grant permissions or approvals.
 
@@ -56,8 +56,8 @@ Every task ends at a gate. **No commit until both checks pass**, and the commit 
 
 1. **Tests:** `uv run pytest -q` passes (say the count). A new or changed rule gets a test; a merge of two code paths gets one that exercises both.
 2. **Output identity:** the cleanup must not change what the project builds. Pick the check that fits the change, run it on the baseline and on the change, and compare:
-   - planner, sample or DOC RAM code: `tools/ntp_bench.sh TAG GAME MODE SONG...` into `build/bench/TAG/`, then `diff -rq` the baseline tree against the new one. Use MI 153 and 154 in both `inst-per-song` and `inst-shared` (docsim2 feeds the first, docsim the second); add a song or a game when the change reaches code they don't run (Atlantis 48 for moves, MI2 for v5 extraction);
-   - extraction code: `just extract` into a scratch copy, or compare `build/<game>/extracted/` hashes before and after;
+   - planner, sample or DOC RAM code (`ntp_bench.sh` reads the MIDI already in `build/<game>/extracted/`, so it cannot see extraction changes): `tools/ntp_bench.sh TAG GAME MODE SONG...` into `build/bench/TAG/`, then `diff -rq` the baseline tree against the new one. Use MI 153 and 154 in both `inst-per-song` and `inst-shared` (docsim2 feeds the first, docsim the second); add a song or a game when the change reaches code they don't run (Atlantis 48 for moves, MI2 for v5 extraction);
+   - extraction or SCUMM-reader code: run `extract-music --game G "<data dir>" build/bench/ex-new-G` for monkey, monkey2 and atlantis (`games.load(G, Path(".")).data` gives the data dir; `just extract` writes into the real `build/<game>/extracted/`, so don't use it for this) and `diff -r` against the baseline tree, run the same way with the baseline source (below). Takes a few minutes for the three games;
    - `justfile`: diff `just -n <recipe>` before and after for every recipe you touched, and `just --list` must still work;
    - tests-only or docs-only change: the test run is the check; say so.
    If no identity check exists for the change, say that plainly in the commit message and the report ("unmeasured"), and score signal 2 of the heuristic as 1.
@@ -66,10 +66,11 @@ Every task ends at a gate. **No commit until both checks pass**, and the commit 
 Mechanics:
 
 - One commit per coherent group, with the check named in the message ("MODs byte-identical on MI 153/154, both sample sets"; "dry-run output identical for five recipes"; "350 tests pass").
-- Do the baseline build and the change build as separate steps, not one long chained command, so an interruption can't leave the tree half-stashed. If you use `git stash`, check `git stash list` and `git status` first after any interruption.
+- **Baselines come from a worktree, never `git stash`.** `git worktree add build/bench/base-wt <commit before your change>`, then run the baseline code with `PYTHONPATH=build/bench/base-wt/src uv run <tool> ...` from the main checkout (the data and `build/` stay there; check with `uv run python -c "import migs; print(migs.__file__)"` that the right source is used). Remove it with `git worktree remove --force` when done. Run baseline and change builds as separate steps.
+- Process docs (this skill, CLAUDE.md) get their own commit, not one shared with code.
 - Commits follow CLAUDE.md; the attribution lines come from the session's system reminder.
 - Update docs only when behaviour or a documented option changed.
 
 ## 5. Report back
 
-Per task: the score, whether you asked Opus, whether the answer changed what you did, and which gate checks passed (or "unmeasured"). Findings you skipped and why. The unreviewed areas the sweep named. If the record shows scores of 2 that never needed Opus, or Opus answers that changed nothing, say so: the heuristic should be tuned, not kept.
+Per task: the score, whether you asked Opus, whether the answer changed what you did, and which gate checks passed (or "unmeasured"). Findings you skipped and why. The unreviewed areas the sweep named. Tuning needs evidence: with fewer than about five scored Opus decisions, say the heuristic is untuned rather than adjust it. Once there are enough, and scores of 2 never needed Opus or Opus answers changed nothing, say so.
