@@ -126,14 +126,8 @@ def _step(mod: Mod, inst: int, period: int, note_of: dict[int, int], tables) -> 
     return PAL / p / DOC_RATE
 
 
-def render_doc(mod: Mod, tables, gains: np.ndarray, tail_s: float = 1.0, max_s: float = 600.0) -> np.ndarray:
-    """(DOC samples x 2) at DOC_RATE: the song as the DOC's two summed sides."""
-    out = list(doc_blocks(mod, tables, gains, tail_s, max_s))
-    return np.concatenate(out) if out else np.zeros((0, 2))
-
-
 def doc_blocks(mod: Mod, tables, gains: np.ndarray, tail_s: float = 1.0, max_s: float = 600.0):
-    """render_doc a tick at a time: (n x 2) blocks at DOC_RATE, in order."""
+    """The song as the DOC's two summed sides, a tick at a time: (n x 2) blocks at DOC_RATE, in order."""
     note_of = {p: i for i, p in enumerate(tables[0])}
     voices = [_Voice() for _ in range(mod.channels)]
     side = np.array([STEREO[c % len(STEREO)] for c in range(mod.channels)])
@@ -298,13 +292,6 @@ class Output:
         return out
 
 
-def to_output(doc: np.ndarray, rate: int = 48000, block: int = 1 << 15) -> np.ndarray:
-    """DOC-rate sides -> `rate` (Output, of a whole song)."""
-    o = Output(rate, doc.shape[1], block)
-    parts = [o.feed(doc[at:at + block]) for at in range(0, doc.shape[0], block)] + [o.finish()]
-    return np.concatenate(parts)
-
-
 def _pcm(y: np.ndarray) -> np.ndarray:
     return np.clip(np.round(y * 32767), -32768, 32767).astype("<i2")
 
@@ -312,7 +299,7 @@ def _pcm(y: np.ndarray) -> np.ndarray:
 def render_wav(mod: Mod, tables, gains: np.ndarray, rate: int = 48000, gain: float = 0.25,
                scale: float | None = None) -> tuple[np.ndarray, float]:
     """(16-bit frames, peak) of the song at `rate`, block by block (the whole song never held
-    as floats): to_output(render_doc(...)) * gain, divided by `scale` if given. A peak over 1
+    as floats): the whole song through Output * gain, divided by `scale` if given. A peak over 1
     means it clipped: render again with scale = peak (rare: it costs a second render)."""
     o = Output(rate)
     pcm, peak = [], 0.0
