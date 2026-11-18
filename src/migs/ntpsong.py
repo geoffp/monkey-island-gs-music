@@ -34,6 +34,21 @@ from .mt32 import RHYTHM_CHANNEL as RHYTHM
 from .ntpsamples import NOTES, ModSample
 
 ROWS = 64                                 # rows per pattern
+
+
+def _release_gain(s: ModSample, t):
+    """The sample's release curve (`rel_g`, one point per 10 ms after note-off) at time(s) `t`; 0 past its end."""
+    return np.interp(t, np.arange(len(s.rel_g)) * 0.01, s.rel_g, right=0.0)
+
+
+def _tempo_for(speed: int, row_s: float) -> int:
+    """The MOD tempo (BPM) at which rows of `row_s` seconds take `speed` ticks each."""
+    return round(2.5 * speed / row_s)
+
+
+def _option(song_cfg: dict, cfg: dict, key: str, default=None):
+    """A setting: the song's own if it has one, else the build's, else `default`."""
+    return song_cfg.get(key, cfg.get(key, default))
 CELL_EMPTY = (0, 0, -1, 0)                # note, instrument, effect (-1: none), parameter
 FX_SLIDE, FX_JUMP, FX_VOLUME, FX_BREAK, FX_EXTENDED, FX_SPEED = 0xA, 0xB, 0xC, 0xD, 0xE, 0xF
 NOTE_DELAY = 0xD0                         # EDx: delay the note by x ticks
@@ -258,29 +273,14 @@ def tempo_commands(ideal: float | Callable[[int], float], speed: int, rows: int,
     tempos around each row's ideal."""
     if callable(ideal):
         return _tempo_commands_map(ideal, speed, rows, can_set, tol)
-    lo, hi = math.floor(ideal), math.ceil(ideal)
-    row_ideal = 2.5 * speed / ideal
-    if lo == hi:
-        return [(0, lo)]
-    cur = lo if ideal - lo >= 0.5 else hi
-    out = [(0, cur)]
-    err = 0.0                                            # actual - ideal time at the start of row r
-    for r in range(1, rows):
-        err += 2.5 * speed / cur - row_ideal
-        want = cur
-        if err > tol:
-            want = hi                                    # running late: shorter rows
-        elif err < -tol:
-            want = lo
-        if want != cur and can_set(r):
-            cur = want
-            out.append((r, cur))
-    return out
+    return _tempo_commands_map(lambda r: ideal, speed, rows, can_set, tol, clamp=lambda v: v)
 
 
 def _tempo_commands_map(ideal_at: Callable[[int], float], speed: int, rows: int,
-                        can_set: Callable[[int], bool], tol: float) -> list[tuple[int, int]]:
-    clamp = lambda v: max(32, min(255, v))
+                        can_set: Callable[[int], bool], tol: float,
+                        clamp: Callable[[int], int] = lambda v: max(32, min(255, v))) -> list[tuple[int, int]]:
+    """tempo_commands for an ideal that follows the row; tempos are clamped to what NTP reads as a
+    tempo (`clamp`: 32-255, since Fxx below 32 sets the speed)."""
     i0 = ideal_at(0)
     cur = clamp(math.floor(i0) if i0 - math.floor(i0) >= 0.5 else math.ceil(i0))
     out = [(0, cur)]
@@ -428,7 +428,7 @@ def _fit_rows(notes: list[Note], unit_s: float, rpu: int, cfg: dict, song_cfg: d
     Not below `row_fit_min_ms` (default 30: speed 3 at MOD tempo 250), nor past 120 patterns.
     A song opts out with its own `row_fit = "grid"` (song_cfg arrives with the defaults merged
     in, so its `rows_per_unit` can't tell a song's choice from the default)."""
-    opt = lambda k, d: song_cfg.get(k, cfg.get(k, d))
+    opt = functools.partial(_option, song_cfg, cfg)
     if opt("row_fit", "grid") != "short-notes":
         return rpu
     lengths = [n.off - n.t for n in notes if n.channel != RHYTHM]
@@ -451,19 +451,19 @@ def _timing(notes: list[Note], cfg: dict, song_cfg: dict, tb: Timebase = RO_TIME
     rpu = _fit_rows(notes, unit * tb.tick_s, rpu, cfg, song_cfg)
     row_s = unit * tb.tick_s / rpu
     # MOD tempo 32-255: change the speed (ticks per row) until the tempo fits
-    tempo = round(2.5 * speed / row_s)
+    tempo = _tempo_for(speed, row_s)
     while tempo > 255:
         speed -= 1
-        tempo = round(2.5 * speed / row_s)
+        tempo = _tempo_for(speed, row_s)
     while tempo < 32:
         speed += 1
-        tempo = round(2.5 * speed / row_s)
+        tempo = _tempo_for(speed, row_s)
     # `tick_max_ms` (with release_slides): more ticks while a tick is longer, so a slide falls in
     # finer steps and EDx places notes finer; rows and pattern data stay the same
-    tick_max = song_cfg.get("tick_max_ms", cfg.get("tick_max_ms"))
-    while tick_max and row_s / speed > tick_max / 1000 and speed < 15 and round(2.5 * (speed + 1) / row_s) <= 255:
+    tick_max = _option(song_cfg, cfg, "tick_max_ms")
+    while tick_max and row_s / speed > tick_max / 1000 and speed < 15 and _tempo_for(speed + 1, row_s) <= 255:
         speed += 1
-        tempo = round(2.5 * speed / row_s)
+        tempo = _tempo_for(speed, row_s)
     shift = (row_s - (phase * tb.tick_s) % row_s) % row_s + row_s      # grid aligned, >= 1 row lead-in
     return _Timing(row_s, speed, tempo, shift, song_cfg.get("quantize", cfg["quantize"]))
 
@@ -520,7 +520,7 @@ class _Arranger:
 
     def __init__(self, samples: list[ModSample], cfg: dict, song_cfg: dict, rep: Report):
         self.samples, self.rep = samples, rep
-        self.opt = lambda k, default=None: song_cfg.get(k, cfg.get(k, default))
+        self.opt = functools.partial(_option, song_cfg, cfg)
         self.budget = self.opt("oscillators", 31)
         self.mel_cap = song_cfg.get("melodic_tracks")    # None: first come; else 2-osc tracks <= this,
         self.grid = Grid(0)                              # 1-osc tracks <= budget - 2 x this
@@ -534,6 +534,12 @@ class _Arranger:
                            docvolume.written_levels(docvolume.CURVE if measured else None))
 
     # --- tracks
+
+    def put_rest(self, c: list[int], mute: bool = False) -> None:
+        """Make cell `c` play the rest sample (ends what the track played); `mute`: with C00 too."""
+        c[0], c[1] = self.samples[self.rest].base_note + 1, self.rest + 1
+        if mute:
+            c[2], c[3] = FX_VOLUME, 0
 
     def level_at(self, tr: int, r: int) -> int:
         """MOD volume track `tr` plays at row r: its latest Cxx (or a delayed note's default)."""
@@ -620,17 +626,9 @@ class _Arranger:
         s = self.samples[t.inst - 1]
         if s.kind == "rest" or (not s.loop_len and t.oneshot_end <= (r - 1) * row_s):
             return False
-        for rr in range(r - 1, -1, -1):
-            c = self.grid.cells[tr].get(rr)
-            if c is None:
-                continue
-            if c[0] and c[1] and self.samples[c[1] - 1].kind == "rest":
-                return False
-            if c[2] == FX_VOLUME:
-                return c[3] > 0
-            if c[0] and c[1]:
-                return self.samples[c[1] - 1].default_volume > 0
-        return False
+        # (a rest cell reads as 0 here: a rest's default volume is 0, and every Cxx written on a rest
+        # cell while notes are placed is C00; `finish` may put a rest over a Cxx, but runs after this)
+        return self.level_at(tr, r - 1) > 0
 
     def halt_before(self, tr: int, r: int) -> bool:
         """Halt track tr on row r-1 (the rest + C00) so a delayed note at r finds nothing
@@ -640,7 +638,7 @@ class _Arranger:
         if self.rest is None or (c is not None and c[0]):
             return False
         c = self.grid.get(tr, r - 1)
-        c[0], c[1], c[2], c[3] = self.samples[self.rest].base_note + 1, self.rest + 1, FX_VOLUME, 0
+        self.put_rest(c, mute=True)
         return True
 
     def preceding_silent(self, tr: int, s: ModSample, si: int, r: int, row_s: float) -> bool:
@@ -711,15 +709,15 @@ class _Arranger:
                 # a row holds one volume: the release's RMS gain over the row, not its first instant
                 # (Elec Org 2 falls 20 dB in 10 ms; its first 110 ms row averages 0.31, not 1.0)
                 ts = np.linspace(i * row_s, (i + 1) * row_s, 12)
-                gg = rms(np.interp(ts, np.arange(len(s.rel_g)) * 0.01, s.rel_g, right=0.0))
+                gg = rms(_release_gain(s, ts))
             else:
-                gg = float(np.interp(i * row_s, np.arange(len(s.rel_g)) * 0.01, s.rel_g, right=0.0))
+                gg = float(_release_gain(s, i * row_s))
             vv = max(0, min(64, round(v_off * gg)))
-            if self.grid.effect_free(tr, rr) and self.grid.cells[tr].get(rr, CELL_EMPTY)[0] == 0:
+            if self.grid.free(tr, rr):
                 c = self.grid.set_effect(tr, rr, FX_VOLUME, vv)
                 if vv == 0 and self.rest is not None and self.tracks[tr].kind == "melodic":
                     # replace the silent loop with the rest (ntpsamples.rest_sample)
-                    c[0], c[1] = self.samples[self.rest].base_note + 1, self.rest + 1
+                    self.put_rest(c)
                     self.rep.halted += 1                  # (the track keeps the note's sample: choice unchanged)
             last = rr
             if vv == 0:
@@ -740,10 +738,10 @@ class _Arranger:
         speed, tick = timing.speed, timing.tick_s
         n = steps * speed
         ts = (np.arange(n)[:, None] + np.linspace(0, 1, 6)[None, :]) * tick
-        g = np.interp(ts, np.arange(len(s.rel_g)) * 0.01, s.rel_g, right=0.0)
+        g = _release_gain(s, ts)
         target = v_off / 64 * np.sqrt(np.mean(g ** 2, axis=1))          # per tick, re volume 64
         w = wmap[max(0, min(64, self.level_at(tr, r_off - 1)))]
-        free = [self.grid.effect_free(tr, r_off + i) and self.grid.cells[tr].get(r_off + i, CELL_EMPTY)[0] == 0
+        free = [self.grid.free(tr, r_off + i)
                 for i in range(steps)]
         last = r_off
         for i, (eff, par, w) in enumerate(plan_release(target, w, wmap, levels, speed, free)):
@@ -755,14 +753,14 @@ class _Arranger:
                 break
         else:
             rr = r_off + steps
-            if self.grid.effect_free(tr, rr) and self.grid.cells[tr].get(rr, CELL_EMPTY)[0] == 0:
+            if self.grid.free(tr, rr):
                 self.grid.set_effect(tr, rr, FX_VOLUME, 0)
                 last = rr
             else:
                 return last
         c = self.grid.cells[tr].get(last, CELL_EMPTY)
         if c[2] == FX_VOLUME and c[3] == 0 and self.rest is not None and self.tracks[tr].kind == "melodic":
-            c[0], c[1] = self.samples[self.rest].base_note + 1, self.rest + 1   # the rest ends it
+            self.put_rest(c)                                   # the rest ends it
             self.rep.halted += 1
         return last
 
@@ -807,7 +805,7 @@ class _Arranger:
             if stuck and self.rest is not None and self.tracks[tr].kind == "melodic" \
                     and not cells.get(end_row - 1, CELL_EMPTY)[0]:
                 c = self.grid.get(tr, end_row - 1)
-                c[0], c[1], c[2], c[3] = self.samples[self.rest].base_note + 1, self.rest + 1, FX_VOLUME, 0
+                self.put_rest(c, mute=True)
                 self.rep.loop_halted += 1
 
     def _overwritable(self, row: int) -> int | None:
@@ -939,7 +937,7 @@ class _Arranger:
             first = min((r for r, c in grid.cells[t].items() if c[0] and c[1] != rest), default=None)
             if first and grid.cells[t][first][2] == FX_EXTENDED and grid.cells[t][first][1]:
                 c = grid.get(t, first - 1)
-                c[0], c[1] = self.samples[self.rest].base_note + 1, self.rest + 1
+                self.put_rest(c)
                 rep.halted += 1
         if loop is None:
             # The song ends on its last row with F00 (stop). Not D00, nor the end of the order
@@ -1057,7 +1055,7 @@ def convert_song(path: Path, samples: list[ModSample], programs: dict, drums: di
                 continue
             si, note_idx = hit[:2]
         else:
-            si = sample_for(programs, program_of(n, chan_prog), n.key)
+            si = sample_of(n)
             if si is None:
                 rep.dropped += 1
                 continue
@@ -1173,9 +1171,9 @@ def plan_tracks(path: Path, samples, programs, drums, cfg: dict, song_cfg: dict,
     Tried for both drum-path borrowing orders ("last": open a 1-oscillator track while the
     budget allows; "first": reuse an idle 2-oscillator track first, which often needs fewer
     tracks), each with the melodic-track cap search of _plan_split."""
-    if not song_cfg.get("track_plan", cfg.get("track_plan", True)):
+    if not _option(song_cfg, cfg, "track_plan", True):
         return convert_song(path, samples, programs, drums, cfg, song_cfg, cc7)
-    borrow = song_cfg.get("drum_borrow", cfg.get("drum_borrow", "last"))
+    borrow = _option(song_cfg, cfg, "drum_borrow", "last")
     orders = [borrow] if borrow == "never" else [borrow] + [b for b in ("last", "first") if b != borrow]
     key = lambda res: (allocation_cost(res[2]), res[2].tracks_used)
     best = None
@@ -1204,7 +1202,7 @@ def _plan_split(path, samples, programs, drums, cfg, song_cfg, cc7, key):
             tried[m][2].melodic_cap = m
         return tried[m]
 
-    budget = song_cfg.get("oscillators", cfg.get("oscillators", 31))
+    budget = _option(song_cfg, cfg, "oscillators", 31)
     m0 = first[2].track_kinds.count("melodic")
     best = min((at(m0),) + tuple(at(m) for m in (m0 - 1, m0 + 1) if 0 <= m <= budget // 2), key=key)
     step = 1 if best[2].melodic_cap > m0 else -1 if best[2].melodic_cap < m0 else 0
