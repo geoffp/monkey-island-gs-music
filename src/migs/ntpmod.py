@@ -139,8 +139,7 @@ def _priced_merges(spec: dict, opts: dict, songs: list[tuple[list[Note], dict]],
         a, b = scorer.sample_db(s_e, p, keys), scorer.sample_db(s_o, p, keys)
         keep = _judge_merge(own["name"], name, a, b, limit, force, grants, "melodic", log)
         if keep:
-            e["covers"] = [*e["covers"], p]
-            gone.add(id(own))
+            _absorb(e, own, p, gone)
     # Drums. A key whose Munt render is identical to one already sampled shares that sample (the
     # MT-32's toms come in identical pairs: 41/43, 45/47, 48/50). A key that is the same sound at
     # another pitch merges whatever it costs: the user heard the toms as one sound at three
@@ -158,20 +157,17 @@ def _priced_merges(spec: dict, opts: dict, songs: list[tuple[list[Note], dict]],
             continue
         if digest(c) == digest(d["key"]):
             log(f"  merge {own['name']:<16} -> {name:<14} identical render (merged)")
-            d["covers"] = [*d["covers"], c]
-            gone.add(id(own))
+            _absorb(d, own, c, gone)
             continue
         twin = kept.get(digest(c))
         if twin is not None:
             log(f"  merge {own['name']:<16} -> {twin['name']:<14} identical render (merged)")
-            twin["covers"] = [*twin["covers"], c]
-            gone.add(id(own))
+            _absorb(twin, own, c, gone)
             continue
         same, semis = audio.same_sound(render(d["key"]), render(c), SR)
         if same and cfg.get("merge_same_sound", True):
             log(f"  merge {own['name']:<16} -> {name:<14} the same sound {semis:+.1f} semitones (merged)")
-            d["covers"] = [*d["covers"], c]
-            gone.add(id(own))
+            _absorb(d, own, c, gone)
             pitched.add(id(d))
             continue
         s_d, covers, _ = build_drum({**d, "covers": [d["key"], c]}, cfg, munt, tables)
@@ -182,8 +178,7 @@ def _priced_merges(spec: dict, opts: dict, songs: list[tuple[list[Note], dict]],
         b = docsim2.drum_db(ref, SR, s_o.data, s_o.rate, 0, s_o.seconds)
         keep = _judge_merge(own["name"], name, a, b, limit, force, grants, "drum", log)
         if keep:
-            d["covers"] = [*d["covers"], c]
-            gone.add(id(own))
+            _absorb(d, own, c, gone)
         else:
             kept[digest(c)] = own
     for d in drum:
@@ -243,6 +238,13 @@ def _log_pitches(plans: dict, count: dict[str, int], log) -> None:
 
 def _merge_word(cheap: bool, forced: bool) -> str:
     return "merged" if cheap else "merged: a loop took its pages" if forced else "own sample"
+
+
+def _absorb(target: dict, own: dict, covered, gone: set) -> None:
+    """Merge: `target`'s sample also covers `covered` (a program or rhythm key), and entry `own`,
+    whose sample it replaces, is gone."""
+    target["covers"] = [*target["covers"], covered]
+    gone.add(id(own))
 
 
 def _judge_merge(own: str, into: str, merged_db: float, own_db: float, limit: float, force: set,
