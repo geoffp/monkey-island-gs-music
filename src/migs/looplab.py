@@ -114,38 +114,12 @@ def loop_snapshot_whole(x, lo, hi, period, k, out, at=None, cycles=4):
 # Joining an attack to a loop (as ntpsamples.attack_and_loop, for any loop)
 
 def join(x: np.ndarray, a: int, period: float, rate: float, k: int, attack_bytes: int, loop: np.ndarray,
-         xfade_cycles: float = 4.0, level_match: bool = True, exact_zero: bool = False
-         ) -> tuple[np.ndarray, np.ndarray]:
+         xfade_cycles: float = 4.0, exact_zero: bool = False) -> tuple[np.ndarray, np.ndarray]:
     """The source's first `attack_bytes` at `rate`, crossfaded over its last few loop cycles
     into the loop, which is rotated to the rising zero crossing that continues the attack's
     tail best (`exact_zero`: on the band-limited waveform, loopbuild.zero_start_exact)."""
-    zero_start = zero_start_exact if exact_zero else smp.zero_start
-    L = len(loop)
-    att_end = a + attack_bytes / rate * SR
-    hi = min(len(x), int(round(att_end)) + int(4 * period))
-    seg = x[a:hi]
-    attack = resample(seg, int(round(len(seg) * rate / SR)))[:attack_bytes]
-    if len(attack) < attack_bytes:
-        attack = np.pad(attack, (0, attack_bytes - len(attack)))
-    n = min(attack_bytes // 4, max(4, int(round(xfade_cycles * L / k))))
-    tail = attack[-n:]
-    if level_match:
-        e_tail, e_lp = audio.rms(tail), audio.rms(loop)
-        if e_tail > 0 and e_lp > 0:
-            loop = loop * (e_tail / e_lp)
-    idx = np.nonzero((np.roll(loop, 1) < 0) & (loop >= 0))[0]
-    if not len(idx):
-        idx = np.array([int(np.argmin(np.abs(loop)))])
-
-    def score(c):
-        ext = np.roll(loop, -c)[np.arange(-n, 0) % L]
-        return audio.ncc(tail, ext)
-    loop = zero_start(loop, int(max(idx, key=score)))
-    ext = loop[np.arange(-n, 0) % L]
-    w = 0.5 - 0.5 * np.cos(np.linspace(0, np.pi, n + 1)[1:])
-    attack = attack.copy()
-    attack[-n:] = tail * (1 - w) + ext * w
-    return attack, loop
+    return smp.join_averaged(x, a, period, rate, k, attack_bytes, loop, xfade_cycles,
+                             zero_start=zero_start_exact if exact_zero else smp.zero_start)
 
 
 # ---------------------------------------------------------------------------
@@ -283,14 +257,8 @@ class Trial:
 
 
 def _fixed_loop_point(snd: Sound, att_end: float, sustain_s: float) -> float:
-    """Where ntpsamples.attack_and_loop takes the loop: `sustain_s` after the onset, moved back
-    in 10 ms steps (not before the attack's end) while the level there is under 20 % of the peak."""
-    env = audio.rms_envelope(snd.x)
-    top = float(np.max(env[snd.a:])) or 1.0
-    at = snd.a + sustain_s * SR
-    while at > att_end and env[int(at)] < 0.2 * top:
-        at -= 0.01 * SR
-    return max(at, att_end)
+    """Where ntpsamples.attack_and_loop takes the loop."""
+    return smp.loop_point(snd.x, snd.a, att_end, sustain_s)
 
 
 def trial(snd: Sound, cand: str, loop_bytes: int, attack_bytes: int, tables: dict, cfg: dict,

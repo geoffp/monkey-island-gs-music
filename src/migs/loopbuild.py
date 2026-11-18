@@ -236,6 +236,13 @@ def rising_crossings(loop: np.ndarray, below: float, over: int = 8) -> list[tupl
     return [(p % n, d) for p, d in out if d > 0]
 
 
+def rising_zeros(loop: np.ndarray) -> np.ndarray:
+    """Indices where the periodic loop rises through zero (the sample before is below it, this one is
+    not); if it never does, the sample nearest zero."""
+    idx = np.nonzero((np.roll(loop, 1) < 0) & (loop >= 0))[0]
+    return idx if len(idx) else np.array([int(np.argmin(np.abs(loop)))])
+
+
 def rotate_to(loop: np.ndarray, p: float) -> np.ndarray:
     """The periodic loop rotated so position p (a zero crossing) lands on index 0, set to 0."""
     n = len(loop)
@@ -277,8 +284,7 @@ def join_aligned(x: np.ndarray, a: int, period: float, rate: float, k: int, atta
     if cross:
         loop = rotate_to(loop, min(cross, key=lambda c: c[1])[0])
     else:
-        idx = np.nonzero((np.roll(loop, 1) < 0) & (loop >= 0))[0]
-        loop = zero_start_exact(loop, int(idx[0]) if len(idx) else int(np.argmin(np.abs(loop))))
+        loop = zero_start_exact(loop, int(rising_zeros(loop)[0]))
     ext = loop[np.arange(-n, 0) % L]                        # the loop's continuation before index 0
     tpos = np.arange(-n, 0) * (SR / rate)                   # those points, in source samples
 

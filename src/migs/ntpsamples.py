@@ -271,6 +271,51 @@ def zero_start(loop: np.ndarray, c: int) -> np.ndarray:
     return loopbuild.rotate_to(loop, p)                   # the residual at index 0 is ~1e-16
 
 
+def loop_point(x: np.ndarray, a: int, att_end: float, sustain_s: float) -> float:
+    """Source index the loop's cycles are taken at: `sustain_s` after the onset, moved back in
+    10 ms steps (not before the attack's end) while the level there is under 20 % of the peak."""
+    env = audio.rms_envelope(x)
+    top = float(np.max(env[a:])) or 1.0
+    at = a + sustain_s * SR
+    while at > att_end and env[int(at)] < 0.2 * top:
+        at -= 0.01 * SR
+    return max(at, att_end)
+
+
+def join_averaged(x: np.ndarray, a: int, period: float, rate: float, k: int, attack_bytes: int,
+                  loop: np.ndarray, xfade_cycles: float = 4.0, zero_start=zero_start
+                  ) -> tuple[np.ndarray, np.ndarray]:
+    """The source's first `attack_bytes` at `rate`, crossfaded over its last `xfade_cycles` loop
+    periods into `loop`, which is level-matched to the attack's tail and rotated to the rising zero
+    crossing that continues the tail best. Returns (attack, loop)."""
+    att_end = a + attack_bytes / rate * SR
+    margin = int(4 * period)
+    hi = min(len(x), int(round(att_end)) + margin)
+    seg = x[a:hi]
+    attack = resample(seg, int(round(len(seg) * rate / SR)))[:attack_bytes]
+    if len(attack) < attack_bytes:
+        attack = np.pad(attack, (0, attack_bytes - len(attack)))
+    L = len(loop)
+    n = min(attack_bytes // 4, max(4, int(round(xfade_cycles * L / k))))
+    tail = attack[-n:]
+    # Level-match the loop to the attack's tail: the loop is taken later in the sustain, where
+    # the level differs; unmatched, every note stepped by up to ~4 dB at the handover (choppy).
+    # The envelope then starts from gain 1 here (_row_envelope eases it to the contour).
+    e_tail, e_lp = audio.rms(tail), audio.rms(loop)
+    if e_tail > 0 and e_lp > 0:
+        loop = loop * (e_tail / e_lp)
+    idx = loopbuild.rising_zeros(loop)
+
+    def score(c):
+        ext = np.roll(loop, -c)[np.arange(-n, 0) % L]
+        return audio.ncc(tail, ext)
+    loop = zero_start(loop, int(max(idx, key=score)))
+    ext = loop[np.arange(-n, 0) % L]           # what the loop would have been before its start
+    w = 0.5 - 0.5 * np.cos(np.linspace(0, np.pi, n + 1)[1:])
+    attack[-n:] = tail * (1 - w) + ext * w
+    return attack, loop
+
+
 def attack_and_loop(x: np.ndarray, a: int, period: float, rate: float, k: int, attack_bytes: int,
                     loop_bytes: int, sustain_s: float = 0.4, xfade_cycles: float = 4.0,
                     raw: bool = False) -> tuple[np.ndarray, np.ndarray, float, float]:
@@ -288,12 +333,7 @@ def attack_and_loop(x: np.ndarray, a: int, period: float, rate: float, k: int, a
       DOC RAM. Of the rising crossings, the one whose phase best matches the attack's tail is
       used, so the crossfade doesn't cancel itself."""
     att_end = a + attack_bytes / rate * SR
-    env = audio.rms_envelope(x)
-    top = float(np.max(env[a:])) or 1.0
-    at = a + sustain_s * SR
-    while at > att_end and env[int(at)] < 0.2 * top:
-        at -= 0.01 * SR
-    at = max(at, att_end)
+    at = loop_point(x, a, att_end, sustain_s)
     loop = (raw_loop if raw else periodic_loop)(x, at, period, k, loop_bytes)
     if raw:
         # the attack moves into phase with the loop (E'+'s join): it ends at whatever phase
@@ -301,31 +341,7 @@ def attack_and_loop(x: np.ndarray, a: int, period: float, rate: float, k: int, a
         # (Panpipes 16384 B at 21770 Hz: every rising crossing correlated -0.97, a 13 dB dip)
         attack, loop = loopbuild.join_aligned(x, a, period, rate, k, attack_bytes, loop, xfade_cycles)
         return attack, loop, att_end, at
-    margin = int(4 * period)
-    hi = min(len(x), int(round(att_end)) + margin)
-    seg = x[a:hi]
-    attack = resample(seg, int(round(len(seg) * rate / SR)))[:attack_bytes]
-    if len(attack) < attack_bytes:
-        attack = np.pad(attack, (0, attack_bytes - len(attack)))
-    n = min(attack_bytes // 4, max(4, int(round(xfade_cycles * loop_bytes / k))))
-    tail = attack[-n:]
-    # Level-match the loop to the attack's tail: the loop is taken later in the sustain, where
-    # the level differs; unmatched, every note stepped by up to ~4 dB at the handover (choppy).
-    # The envelope then starts from gain 1 here (_row_envelope eases it to the contour).
-    e_tail, e_lp = audio.rms(tail), audio.rms(loop)
-    if e_tail > 0 and e_lp > 0:
-        loop = loop * (e_tail / e_lp)
-    idx = np.nonzero((np.roll(loop, 1) < 0) & (loop >= 0))[0]
-    if not len(idx):
-        idx = np.array([int(np.argmin(np.abs(loop)))])
-
-    def score(c):
-        ext = np.roll(loop, -c)[np.arange(-n, 0) % loop_bytes]
-        return audio.ncc(tail, ext)
-    loop = zero_start(loop, int(max(idx, key=score)))
-    ext = loop[np.arange(-n, 0) % loop_bytes]           # what the loop would have been before its start
-    w = 0.5 - 0.5 * np.cos(np.linspace(0, np.pi, n + 1)[1:])
-    attack[-n:] = tail * (1 - w) + ext * w
+    attack, loop = join_averaged(x, a, period, rate, k, attack_bytes, loop, xfade_cycles)
     return attack, loop, att_end, at
 
 
