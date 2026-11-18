@@ -103,12 +103,10 @@ def _priced_merges(spec: dict, opts: dict, songs: list[tuple[list[Note], dict]],
     limit = cfg.get("merge_max_cost_db", 1.0)
     hold = spec.get("hold_seconds", 2.0)
     held: dict[int, dict[int, float]] = {}
-    hits: dict[int, float] = {}
+    hits = _rhythm_hits(songs)
     for notes, chan_prog in songs:
         for n in notes:
-            if n.channel == RHYTHM:
-                hits[n.key] = hits.get(n.key, 0.0) + 1
-            else:
+            if n.channel != RHYTHM:
                 w = held.setdefault(program_of(n, chan_prog), {})
                 w[n.key] = w.get(n.key, 0.0) + (n.off - n.t)
     scorer = docsim2_scorer(munt, cfg)
@@ -138,11 +136,7 @@ def _priced_merges(spec: dict, opts: dict, songs: list[tuple[list[Note], dict]],
         s_o = best_loop(own, (min(lo, own["key"]), max(hi, own["key"])))
         keys = docsim2.pick_keys(w)
         a, b = scorer.sample_db(s_e, p, keys), scorer.sample_db(s_o, p, keys)
-        keep = a - b <= limit or own["name"] in force
-        log(f"  merge {own['name']:<16} -> {name:<14} {a:+5.1f} vs own {b:+5.1f} dB: "
-            f"{a - b:+4.1f} ({_merge_word(a - b <= limit, own['name'] in force)})")
-        if not keep and grants is not None:
-            grants.append((own["name"], a - b, "melodic"))
+        keep = _judge_merge(own["name"], name, a, b, limit, force, grants, "melodic", log)
         if keep:
             e["covers"] = [*e["covers"], p]
             gone.add(id(own))
@@ -185,11 +179,7 @@ def _priced_merges(spec: dict, opts: dict, songs: list[tuple[list[Note], dict]],
         ref = x[audio.onset(x):]
         a = docsim2.drum_db(ref, SR, s_d.data, s_d.rate, covers[c][0], s_d.seconds)
         b = docsim2.drum_db(ref, SR, s_o.data, s_o.rate, 0, s_o.seconds)
-        keep = a - b <= limit or own["name"] in force
-        log(f"  merge {own['name']:<16} -> {name:<14} {a:+5.1f} vs own {b:+5.1f} dB: "
-            f"{a - b:+4.1f} ({_merge_word(a - b <= limit, own['name'] in force)})")
-        if not keep and grants is not None:
-            grants.append((own["name"], a - b, "drum"))
+        keep = _judge_merge(own["name"], name, a, b, limit, force, grants, "drum", log)
         if keep:
             d["covers"] = [*d["covers"], c]
             gone.add(id(own))
@@ -222,8 +212,45 @@ def _best_drum_key(d: dict, hits: dict[int, float], digest, render, cfg: dict, m
     return best[1]
 
 
+def _rhythm_hits(songs: list) -> dict[int, float]:
+    """How many times the songs hit each rhythm key."""
+    hits: dict[int, float] = {}
+    for notes, _ in songs:
+        for n in notes:
+            if n.channel == RHYTHM:
+                hits[n.key] = hits.get(n.key, 0.0) + 1
+    return hits
+
+
+def _zone_cost(m: dict, cfg: dict) -> list[int]:
+    """DOC blocks one more zone of sound `m` takes: its attack and its loop."""
+    return [ntp_block(m.get("ntp_attack_bytes", cfg["attack_bytes"])), ntp_block(cfg["loop_bytes"])]
+
+
+def _log_pitches(plans: dict, count: dict[str, int], log) -> None:
+    """One line per sound: the pitch plan it ended with, `count[name]` zones."""
+    for name, (ps, secs, now, _) in plans.items():
+        p = ps[count[name] - 1]
+        log(f"  pitch {name:<13} {secs:6.1f} s of notes: {now:+5.1f} -> {p.error_db:+5.1f} dB  "
+            f"{pitchplan.describe(p)}")
+
+
 def _merge_word(cheap: bool, forced: bool) -> str:
     return "merged" if cheap else "merged: a loop took its pages" if forced else "own sample"
+
+
+def _judge_merge(own: str, into: str, merged_db: float, own_db: float, limit: float, force: set,
+                 grants: list | None, kind: str, log) -> bool:
+    """Whether sound `own` merges into `into`, given the dB each scores (`merged_db` playing its
+    notes from `into`'s sample, `own_db` from its own): within `limit`, or forced. Logs the verdict
+    and, when the own sample is kept, records what it gains in `grants` (kind: "melodic" or "drum")."""
+    cost = merged_db - own_db
+    keep = cost <= limit or own in force
+    log(f"  merge {own:<16} -> {into:<14} {merged_db:+5.1f} vs own {own_db:+5.1f} dB: "
+        f"{cost:+4.1f} ({_merge_word(cost <= limit, own in force)})")
+    if not keep and grants is not None:
+        grants.append((own, cost, kind))
+    return keep
 
 
 def melodic_entry(spec: dict, prog: int, key: int) -> dict | None:
@@ -370,7 +397,6 @@ def _pitch_plans(spec: dict, usage_notes: list[tuple[int, Note]], cfg: dict, tab
                                     live_weight=cfg.get("docsim2_live_weight", 0.0))
         else:
             err = NoteError(doc_key(munt, m["program"]), render, munt.cache.parent / "docsim.json")
-        measure = err
         cands = pitchplan.candidates(min(w), max(w), lambda k: rates(k, shots),
                                      lambda k, r: base_note(k, r, whole=not shots))
         now_rates = [shot_rate(m["key"])] if shots else pitchplan.loop_rates(m["key"], loop, min_rate, cfg["max_rate"])
@@ -387,7 +413,7 @@ def _pitch_plans(spec: dict, usage_notes: list[tuple[int, Note]], cfg: dict, tab
         now = ((sum(wt * err(m["key"], now_rates[0], k) for k, wt in wp.items())
                 + tune(pitchplan.Candidate(m["key"], now_rates[0], 0, 127), min(wp), max(wp))) / sum(wp.values())
                if now_rates else float("nan"))
-        measure.save()
+        err.save()
         # the measure sees the first 0.6 s, not the loop the new key and rate get: move only
         # for a real gain (Panpipes in MI154: key 72 -> 74 for 0.0 dB, its raw loop 16384 ->
         # 8192 B and rougher)
@@ -433,8 +459,8 @@ def _extra_zones(plans: dict, samples: list[ModSample], spec: dict, cfg: dict, l
             break
         name = best[1]
         m = entry[name]
-        extra = [ntp_block(m.get("ntp_attack_bytes", cfg["attack_bytes"])), ntp_block(cfg["loop_bytes"])]
-        if not docram.fits(sorted(blocks + extra, reverse=True), last_page):
+        extra = _zone_cost(m, cfg)
+        if not docram.fits(blocks + extra, last_page):
             plans = {k: v for k, v in plans.items() if k != name}     # no room for this one: try the others
             continue
         blocks += extra
@@ -503,23 +529,18 @@ def _loop_from(s: ModSample, key: int) -> float:
 
 
 def _budget(plans, samples, song_spec, unplanned, songs, usage_notes, cfg, last_page, tables, munt, log,
-            alone: Alone | None = None) -> tuple[dict[str, int], dict[str, int], dict]:
+            alone: Alone) -> tuple[dict[str, int], dict[str, int], dict]:
     """Exposures and drum steps for _value_budget, which it runs; logs its choices. Returns
     (zones per sound, drum bytes, what the loop budget needs to trade pages with it: the
     exposures, their total, and the drum upgrades taken)."""
     limit = cfg.get("exposure_cap_s", 0.6)       # each note counted up to the window the measure sees
     cap = lambda d: min(d, limit)
     exposure: dict[str, float] = {}
-    alone = alone or Alone(songs)
     for prog, n in usage_notes:
         m = melodic_entry(unplanned, prog, n.key)
         if m is not None:
             exposure[m["name"]] = exposure.get(m["name"], 0.0) + alone.exposure(n, 0.0, limit)
-    hits: dict[int, float] = {}
-    for notes, _ in songs:
-        for n in notes:
-            if n.channel == RHYTHM:
-                hits[n.key] = hits.get(n.key, 0.0) + 1
+    hits = _rhythm_hits(songs)
     steps = {}
     for d in song_spec["drum"]:
         st = drum_steps(d, cfg, munt, tables, hits)
@@ -560,12 +581,10 @@ def _value_budget(plans: dict, samples: list[ModSample], spec: dict, cfg: dict, 
     # an extra zone's dB against a loop's: the user found MI163/MI167's moved zones "about the same"
     # and wanted MI160's organ loop over zones (2026-11-13)
     zone_w = cfg.get("zone_value_weight", 1.0)
-    zone_cost = lambda m: [ntp_block(m.get("ntp_attack_bytes", cfg["attack_bytes"])), ntp_block(cfg["loop_bytes"])]
     lines = []
 
     def fits(extra: list[int], drums: dict[str, int]) -> bool:
-        bl = sorted(blocks + extra + list(drums.values()), reverse=True)
-        return docram.fits(bl, last_page)
+        return docram.fits(blocks + extra + list(drums.values()), last_page)
     banned: set = set()
     while True:
         opts = []
@@ -573,7 +592,7 @@ def _value_budget(plans: dict, samples: list[ModSample], spec: dict, cfg: dict, 
             z = count[name]
             if z < len(ps) and slots > 0 and ("zone", name) not in banned:
                 g = pitchplan.gain_db(ps[z - 1], ps[z])
-                pages = sum(zone_cost(entry[name])) // 256
+                pages = sum(_zone_cost(entry[name], cfg)) // 256
                 opts.append((zone_w * g * exposure.get(name, 0.0) / total / pages, "zone", name, z + 1, g, pages))
         for name, st in steps.items():
             i = level[name]
@@ -587,7 +606,7 @@ def _value_budget(plans: dict, samples: list[ModSample], spec: dict, cfg: dict, 
             break
         v, kind, name, to, g, pages = max(opts)
         if kind == "zone":
-            extra = zone_cost(entry[name])
+            extra = _zone_cost(entry[name], cfg)
             if not fits(extra, drum_blocks):
                 banned.add(("zone", name))
                 continue
@@ -841,17 +860,11 @@ def sample_set(spec: dict, cfg: dict, songs: list[tuple[list[Note], dict]], last
                                                  last_page, tables, munt, log, Alone(songs, cfg.get("alone_weight", 0.0)))
         song_spec = {**planned(count), "drum": [{**d, "ntp_bytes": drum_bytes[d["name"]]} if d["name"] in drum_bytes
                                                 else d for d in song_spec["drum"]]}
-        for name, (ps, secs, now, _) in plans.items():
-            p = ps[count[name] - 1]
-            log(f"  pitch {name:<13} {secs:6.1f} s of notes: {now:+5.1f} -> {p.error_db:+5.1f} dB  "
-                f"{pitchplan.describe(p)}")
+        _log_pitches(plans, count, log)
         samples, programs, drums = build(song_spec, {**cfg, "one_shots": False})
     elif plans:
         count = _extra_zones(plans, samples, unplanned, cfg, last_page)   # by name: see _budget
-        for name, (ps, secs, now, _) in plans.items():
-            p = ps[count[name] - 1]
-            log(f"  pitch {name:<13} {secs:6.1f} s of notes: {now:+5.1f} -> {p.error_db:+5.1f} dB  "
-                f"{pitchplan.describe(p)}")
+        _log_pitches(plans, count, log)
         if any(c > 1 for c in count.values()):
             song_spec = planned(count)
             samples, programs, drums = build(song_spec, {**cfg, "one_shots": False})
@@ -937,7 +950,7 @@ def sample_set(spec: dict, cfg: dict, songs: list[tuple[list[Note], dict]], last
             again: list[str] = []
             res = sample_set(whole, cfg, songs, last_page, tables, munt, again.append, _force | remerge)
             own = _sound_of(want[1], plans)
-            if any(sm.loop_len >= want[2] for sm in res[0] if sm.name == own or sm.name.startswith(f"{own} ")):
+            if any(sm.loop_len >= want[2] for sm in res[0] if _is_sound(sm.name, own)):
                 for line in log_back + again:
                     out(line)
                 return res
@@ -998,9 +1011,14 @@ def _set_candidates(b_sets: list, plans: dict, count: dict[str, int], tried: set
     return sorted(best.items(), key=lambda kv: -kv[1])
 
 
+def _is_sound(sample: str, sound: str) -> bool:
+    """Whether sample `sample` is `sound`'s: its sample or one of its zones ("<sound> <key>")."""
+    return sample == sound or sample.startswith(sound + " ")
+
+
 def _sound_of(sample: str, plans: dict) -> str:
     """The sound a sample belongs to: a zone is named "<sound> <key>"."""
-    return max((p for p in plans if sample == p or sample.startswith(p + " ")), key=len, default=sample)
+    return max((p for p in plans if _is_sound(sample, p)), key=len, default=sample)
 
 
 def _own_sample_values(grants: list, trade: dict, samples: list[ModSample], cfg: dict
@@ -1010,7 +1028,7 @@ def _own_sample_values(grants: list, trade: dict, samples: list[ModSample], cfg:
     of the set's exposure (drums x drum_value_weight), over the pages its samples take."""
     out = []
     for name, g, kind in grants:
-        pages = sum(b for sm in samples if sm.name == name or sm.name.startswith(f"{name} ")
+        pages = sum(b for sm in samples if _is_sound(sm.name, name)
                     for b in sm.ntp_blocks()) // 256
         if pages:
             w = cfg.get("drum_value_weight", 1.0) if kind == "drum" else 1.0
