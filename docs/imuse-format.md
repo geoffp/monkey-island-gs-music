@@ -89,6 +89,8 @@ MI2 has 16,193 pitch-bend events, Atlantis about 7,300; before 2026-11-17 the re
 - The driver plays transpose through the wheel; the reader keeps it on the note numbers, so the wheel it writes is the driver's less transpose << 7, clipped first with it counted. Percussion parts aren't bent.
 - A wheel value is written when it changes, on the part's output channel.
 
+**How much bends (2026-11-17, the extracted MT-32 MIDI;** an excursion is the wheel leaving 0 until it returns; a note is bent if it sounds during one): MI2, 20 of 97 songs bend. In most only 1–4 % of melodic notes are bent, and the bends are full ±2-semitone swoops (Trombone 1, Elec Gtr 2, Trumpets, Clarinet 1, Bassoon). Two songs stand out: 211 bends 76 % of its notes, by at most 0.26 semitone (BottleBlow and Glasses held about 20 cents off: a detune more than a bend), and 153 30 %. Fate of Atlantis, 11 of 113 songs: 061 bends 45 % of its notes, 073 19 %, 072 10 %, the rest under 7 %; mostly ±2-semitone bends on Fantasy, Str Sect 3, Panpipes, Trombone 1, Recorder, Shakuhachi. Munt renders of 211, 153, Atlantis 061 and 073 with and without bends sent for listening; not yet heard.
+
 ## Not followed
 - Modulation and the effect level.
 - **Pitch bend in the NTP build:** the extracted MIDI carries the bends (below), but `ntpsong.read_notes` ignores them, so the MODs play none (2026-11-17).
