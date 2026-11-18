@@ -17,6 +17,9 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import ctypes
+import ctypes.util
+import gc
 import functools
 import hashlib
 import io
@@ -1191,7 +1194,21 @@ def _build_song(job) -> tuple[str, object, str, str | None]:
             rep, err = None, f"{job[-1].prefix}{job[0].sid}: build failed\n{traceback.format_exc()}"
         finally:
             forget_renders()                    # a worker builds many songs: don't keep them all
+            _give_back()
     return job[0].sid, rep, buf.getvalue(), err
+
+
+def _give_back() -> None:
+    """Hand the song's freed memory back to the system. glibc keeps what a song's temporary
+    arrays freed: MI2 workers grew 230 -> 530 MB in 30 songs with under 1 MB live (tracemalloc,
+    2026-11-17); trimmed, 240 MB. A no-op without glibc's malloc_trim (macOS)."""
+    gc.collect()
+    if _TRIM is not None:
+        _TRIM(0)
+
+
+_libc = ctypes.util.find_library("c")
+_TRIM = getattr(ctypes.CDLL(_libc), "malloc_trim", None) if _libc else None
 
 
 def _gather(results) -> tuple[list[tuple[str, object]], list[tuple[str, str]]]:
