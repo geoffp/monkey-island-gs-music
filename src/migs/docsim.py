@@ -125,10 +125,10 @@ def drum_error_db(ref: np.ndarray, sample: np.ndarray, rate: float, semis: float
         p = np.mean([np.abs(np.fft.rfft(y[i:i + frame] * win, N_FFT)) ** 2 for i in range(0, n - frame + 1, hop)],
                     axis=0) * _WEIGHT
         return p / (p.sum() or 1.0)
-    return db(float(np.sum((np.sqrt(spec(got)) - np.sqrt(spec(want))) ** 2)))
+    return power_db(float(np.sum((np.sqrt(spec(got)) - np.sqrt(spec(want))) ** 2)))
 
 
-def db(power_ratio: float) -> float:
+def power_db(power_ratio: float) -> float:
     return float(10 * np.log10(power_ratio + 1e-12))
 
 
@@ -153,7 +153,7 @@ class NoteError:
         tag = f"{self.program}:{k}:{round(rate)}:{n}"
         def compute() -> float:
             y = doc_play(self._sample(k, round(rate)), round(rate), n - k, self.seconds)
-            return db(sum(spectrum_error(self._ref(n), mean_spectrum(y), key_hz(n))))
+            return power_db(sum(spectrum_error(self._ref(n), mean_spectrum(y), key_hz(n))))
         return self._cache.get(tag, compute)
 
     def save(self) -> None:

@@ -96,7 +96,7 @@ def test_forward_masking_hides_noise_in_a_hits_tail():
 
 
 def test_db_halving_the_distance_gains_6_db():
-    assert d2.db(0.1) - d2.db(0.2) == pytest.approx(-6.02, abs=0.01)
+    assert d2.amp_db(0.1) - d2.amp_db(0.2) == pytest.approx(-6.02, abs=0.01)
 
 
 def _looped(f0=200.0, rate=16000.0, cycles=4):

@@ -12,7 +12,6 @@ card with zero-cycle "Super DMA" transfers (Docs/Storage.md).
 from __future__ import annotations
 
 import argparse
-import json
 import re
 import sys
 from collections.abc import Iterable, Mapping
@@ -20,6 +19,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 from . import bram
+from .tomlout import toml_str
 
 SPEEDS = ("1.024mhz", "2.8mhz", "7.159mhz", "14.3mhz", "ludicrous")
 ID_RE = re.compile(r'^id\s*=\s*"([^"]*)"', re.M)
@@ -31,12 +31,6 @@ class Disk(NamedTuple):
     image: str          # path relative to the .gs2's directory
 
 
-def _toml_str(s: str) -> str:
-    """A TOML basic string. JSON's string escapes (\\\\, \\", \\n, \\uXXXX, ...) are all valid
-    TOML, so json.dumps produces one."""
-    return json.dumps(s, ensure_ascii=False)
-
-
 def render_config(name: str, speed: str, cards: Mapping[int, str], disks: Iterable[Disk],
                   machine_id: str | None = None, bram_hex: str | None = None) -> str:
     """The .gs2 text: root keys first (TOML puts every key after a [[table]] header into
@@ -45,14 +39,14 @@ def render_config(name: str, speed: str, cards: Mapping[int, str], disks: Iterab
         raise ValueError(f"speed must be one of {SPEEDS}")
     lines = ["gs2_version = 1"]
     if machine_id:
-        lines.append(f"id = {_toml_str(machine_id)}")
-    lines += [f"name = {_toml_str(name)}", 'platform = "apple2gs"', f"speed = {_toml_str(speed)}"]
+        lines.append(f"id = {toml_str(machine_id)}")
+    lines += [f"name = {toml_str(name)}", 'platform = "apple2gs"', f"speed = {toml_str(speed)}"]
     if bram_hex:
-        lines.append(f"bram = {_toml_str(bram_hex)}")
+        lines.append(f"bram = {toml_str(bram_hex)}")
     for slot, card in sorted(cards.items()):
-        lines += ["", "[[cards]]", f"slot = {slot}", f"card = {_toml_str(card)}"]
+        lines += ["", "[[cards]]", f"slot = {slot}", f"card = {toml_str(card)}"]
     for slot, drive, image in disks:
-        lines += ["", "[[storage]]", f"slot = {slot}", f"drive = {drive}", f"image = {_toml_str(image)}"]
+        lines += ["", "[[storage]]", f"slot = {slot}", f"drive = {drive}", f"image = {toml_str(image)}"]
     return "\n".join(lines) + "\n"
 
 

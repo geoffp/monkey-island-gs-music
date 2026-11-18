@@ -176,7 +176,7 @@ def _priced_merges(spec: dict, opts: dict, songs: list[tuple[list[Note], dict]],
         s_d, covers, _ = build_drum({**d, "covers": [d["key"], c]}, cfg, munt, tables)
         s_o, _, _ = build_drum(own, cfg, munt, tables)
         x = render(c)
-        ref = x[audio.onset(x):]
+        ref = audio.onset_cut(x)
         a = docsim2.drum_db(ref, SR, s_d.data, s_d.rate, covers[c][0], s_d.seconds)
         b = docsim2.drum_db(ref, SR, s_o.data, s_o.rate, 0, s_o.seconds)
         keep = _judge_merge(own["name"], name, a, b, limit, force, grants, "drum", log)
@@ -203,7 +203,7 @@ def _best_drum_key(d: dict, hits: dict[int, float], digest, render, cfg: dict, m
     for k in cands:
         s, covers, _ = build_drum({**d, "key": k}, cfg, munt, tables)
         tot = sum(hits.get(c, 0.0) for c in covered) or 1.0
-        score = sum(hits.get(c, 0.0) * docsim2.drum_db(render(c)[audio.onset(render(c)):], SR, s.data, s.rate,
+        score = sum(hits.get(c, 0.0) * docsim2.drum_db(audio.onset_cut(render(c)), SR, s.data, s.rate,
                                                         covers[c][0], s.seconds) for c in covered) / tot
         if best is None or score < best[0]:
             best = (score, k)
@@ -291,7 +291,7 @@ def key_weights(w: dict[int, float], cfg: dict) -> dict[int, float]:
 
 
 def _pitch_plans(spec: dict, usage_notes: list[tuple[int, Note]], cfg: dict, tables, munt: Munt
-                 ) -> dict[str, tuple[list[pitchplan.Plan], float, float]]:
+                 ) -> dict[str, tuple[list[pitchplan.Plan], float, float, bool]]:
     """Per melodic entry (by name): (plans for 1..pitch_max_zones zones, note seconds, the error
     of the configured key at its usual rate, whether it is planned as a one-shot)."""
     weights: dict[str, dict[int, float]] = {}
@@ -337,7 +337,7 @@ def _pitch_plans(spec: dict, usage_notes: list[tuple[int, Note]], cfg: dict, tab
 
         def render(key: int, prog=m["program"]) -> np.ndarray:
             x = cached_render(munt, prog, key, hold)
-            return x[audio.onset(x):]
+            return audio.onset_cut(x)
 
         pitch: dict[int, float] = {}
 
@@ -640,7 +640,7 @@ def docsim2_scorer(munt: Munt, cfg: dict, seconds: float = 3.0) -> docsim2.Score
     build/cache/docsim2.json (keyed by what is played, like docsim.json)."""
     def render(prog, key):
         x = cached_render(munt, prog, key, seconds)
-        return x[audio.onset(x):]
+        return audio.onset_cut(x)
     return docsim2.Scorer(render, SR, seconds, munt.cache.parent / "docsim2.json", name=lambda p: doc_key(munt, p),
                           mod_weight=cfg.get("docsim2_mod_weight", 1.0),
                           live_weight=cfg.get("docsim2_live_weight", 0.0),
@@ -751,7 +751,7 @@ def inharmonic_warnings(samples: list[ModSample], programs: dict, usage_notes: l
             continue
         for k in sorted({min(ks), max(ks)}):
             x = cached_render(munt, prog, k, hold)
-            ref = x[audio.onset(x):]
+            ref = audio.onset_cut(x)
             got = docsim2.play_sample(s, k - s.key0, hold)
             excess = docsim2.inharmonic_db(got, docram.DOC_RATE, key_hz(k)) - docsim2.inharmonic_db(ref, SR, key_hz(k))
             if excess > limit_db:

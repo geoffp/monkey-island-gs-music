@@ -29,7 +29,7 @@ excitation decays no faster than a 25 ms time constant after a loud frame, so th
 and drop-sample images in a hit's quiet tail count as the ear hears them (fitted to ISO 532-1
 time-varying Zwicker loudness on Conga, Kick, Tom and Snare: within 0.05; without it they
 scored 1.5-3x worse; PEAQ's time-domain spreading uses 8-30 ms).
-`db()` gives a score as 20 log10(distance): halving the distance gains 6 dB.
+`amp_db()` gives a score as 20 log10(distance): halving the distance gains 6 dB.
 
 Why: docs/similarity-measures.md (bake-off against listening verdicts and ISO 532-1 Zwicker
 loudness). docsim.py stays, unchanged, for the default builds.
@@ -388,7 +388,7 @@ def distance(ref: np.ndarray, got: np.ndarray, drum: bool = False, fs: float = D
     return d + live_weight * live_distance(ref, got, fs) if live_weight else d
 
 
-def db(d: float) -> float:
+def amp_db(d: float) -> float:
     return float(20 * np.log10(max(d, 1e-6)))
 
 
@@ -475,7 +475,7 @@ class Scorer:
             if self.vib_weight and not drum:
                 d += self.vib_weight * vib_distance(self._ref_vib(tag, key),
                                                     pitch_vibrato(y, DOC_RATE, key_hz(key)))
-            return db(d)
+            return amp_db(d)
         return self.cache.get(k, compute)
 
     @property
@@ -528,7 +528,7 @@ class NoteError:
             s = self._sample(k, r)
             seconds = len(self.render(k)) / self.sr
             y = self._docsim.doc_play(s, r, n - k, seconds)
-            return db(distance(self._ref(n), loudness_pattern(y), mod_weight=self.mod_weight,
+            return amp_db(distance(self._ref(n), loudness_pattern(y), mod_weight=self.mod_weight,
                                live_weight=self.live_weight))
         live = f"l{self.live_weight:g}" if self.live_weight else ""
         return self.cache.get(f"pitch:{self.name}:{k}:{round(rate)}:{n}:w{self.mod_weight:g}{live}", compute)
@@ -546,7 +546,7 @@ def drum_db(ref: np.ndarray, sr: int, sample: np.ndarray, rate: float, semis: fl
     got = docsim.doc_play(q, rate, semis, n / DOC_RATE)
     got = np.pad(got, (0, max(0, n - len(got))))
     want = to_doc_rate(ref[:int(n / DOC_RATE * sr) + 1], sr)[:n]
-    return db(distance(loudness_pattern(want, forward_s=DRUM_FORWARD_S),
+    return amp_db(distance(loudness_pattern(want, forward_s=DRUM_FORWARD_S),
                        loudness_pattern(got, forward_s=DRUM_FORWARD_S), drum=True))
 
 

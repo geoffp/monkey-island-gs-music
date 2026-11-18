@@ -890,7 +890,7 @@ def sound_movement(munt: Munt, program) -> str:
 @functools.lru_cache(maxsize=None)
 def key_movement(munt: Munt, program, key: int) -> docsim2.Movement:
     x = cached_render(munt, program, key, MOVE_HOLD)
-    return docsim2.movement(x[audio.onset(x):], SR, docsim.key_hz(key), 0.5, MOVE_HOLD - 0.1)
+    return docsim2.movement(audio.onset_cut(x), SR, docsim.key_hz(key), 0.5, MOVE_HOLD - 0.1)
 
 
 def sync_span(x: np.ndarray, at: float, want: float, period: float, tol: float = 0.04
@@ -1244,15 +1244,11 @@ def drum_steps(d: dict, cfg: dict, munt: Munt, tables, hits: dict[int, float]
         if out and size <= out[-1][0]:
             break                                       # no bigger block helps (top rate, whole drum)
         ws = {c: hits.get(c, 0.0) for c in covers} if any(hits.get(c) for c in covers) else {c: 1.0 for c in covers}
-        err = sum(w * measure(_onset_cut(cached_render(munt, None, c, 0.5)), s, off)
+        err = sum(w * measure(audio.onset_cut(cached_render(munt, None, c, 0.5)), s, off)
                   for c, (off, _) in covers.items() if (w := ws[c])) / sum(ws.values())
         out.append((size, err, s.seconds))
         block = 2 * size
     return out
-
-
-def _onset_cut(x: np.ndarray) -> np.ndarray:
-    return x[audio.onset(x):]
 
 
 def rest_sample() -> ModSample:

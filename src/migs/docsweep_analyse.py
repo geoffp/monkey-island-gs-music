@@ -61,7 +61,7 @@ def envelope(x: np.ndarray, rate: int, freq: float, search: float = 0.03,
     return np.array(t), np.array(a)
 
 
-def db(a: float) -> float:
+def amp_db(a: float) -> float:
     return 20 * math.log10(a) if a > 0 else -math.inf
 
 
@@ -88,9 +88,9 @@ def analyse(wav: Path, meta: dict) -> dict:
         dur = meta["step_rows"] * row_s
         seg = x[int((t0 + 0.25 * dur) * rate):int((t0 + 0.9 * dur) * rate)]
         pilot = tone_level(seg, rate, f["pilot"], 0.01)[0]
-        lv = {k: db(tone_level(seg, rate, f[c], 0.01)[0] / pilot) if pilot > 0 else -math.inf
+        lv = {k: amp_db(tone_level(seg, rate, f[c], 0.01)[0] / pilot) if pilot > 0 else -math.inf
               for k, c in (("test", "test"), ("neighbour", "neighbour"))}
-        results.append({**st, "pilot_db": db(pilot), **{f"{k}_db": v for k, v in lv.items()}})
+        results.append({**st, "pilot_db": amp_db(pilot), **{f"{k}_db": v for k, v in lv.items()}})
     return {"rate": rate, "freqs": f, "row_s": row_s, "start_s": t_on, "results": results,
             "nominal_row_s": meta["row_seconds"]}
 
@@ -108,7 +108,7 @@ def report(res: dict, out_csv: Path | None) -> str:
     for r in a:
         if r["test"] == 0:
             continue
-        lin = top + db(r["test"] / 64)
+        lin = top + amp_db(r["test"] / 64)
         lines.append(f" {r['test']:3d}  {doc_volume(r['test']):3d}  {r['test_db']:8.1f}  {r['test_db'] - lin:+8.1f}")
     lines.append("\nB: test tone on oscillator 2 (vs pilot, dB) with a neighbour on oscillator 1 (before) or 3 (after)")
     for r in rs:

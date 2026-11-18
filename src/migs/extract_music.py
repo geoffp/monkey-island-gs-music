@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import json
 import re
 import sys
 from collections import Counter, defaultdict
@@ -34,6 +33,7 @@ import mido
 from . import games, imuse, mt32, ro, scumm_v5
 from .ro import Kind
 from .scumm_v4 import HEADER, Game
+from .tomlout import toml_str
 
 PAN, VOLUME, REVERB = 10, 7, 91              # controller numbers
 
@@ -291,10 +291,6 @@ def channel_stats(events: list[ro.Event]) -> dict[int, ChannelStats]:
     return dict(stats)
 
 
-def _toml_str(s: str) -> str:
-    return json.dumps(s, ensure_ascii=False)    # JSON strings are valid TOML basic strings
-
-
 def _toml_bool(b: bool) -> str:
     return "true" if b else "false"
 
@@ -309,8 +305,8 @@ def _channel_notes(ch: int, s: ChannelStats, ctx: Context | None = None) -> list
             ctx = ctx or Context()
             p = s.programs[0]
             gm = ctx.gm_program(p)
-            out += [f"mt32_program = {p}", f"mt32_name = {_toml_str(ctx.name(p))}",
-                    f"gm_program = {gm}", f"gm_name = {_toml_str(mt32.GM_NAMES[gm])}"]
+            out += [f"mt32_program = {p}", f"mt32_name = {toml_str(ctx.name(p))}",
+                    f"gm_program = {gm}", f"gm_name = {toml_str(mt32.GM_NAMES[gm])}"]
             if p >= 128:
                 out.append("custom_timbre = true")
             if len(s.programs) > 1:
@@ -330,7 +326,7 @@ def _channel_notes(ch: int, s: ChannelStats, ctx: Context | None = None) -> list
         for k in keys:
             name = (mt32.GM_DRUM_NAMES.get(k, "?") if k in mt32.MT32_RHYTHM_KEYS
                     else "UNMAPPED (silent on MT-32)")
-            out.append(f"{k} = [{s.keys[k]}, {_toml_str(name)}]")
+            out.append(f"{k} = [{s.keys[k]}, {toml_str(name)}]")
     return out
 
 
@@ -344,9 +340,9 @@ def patch_notes(song: Song, ctx: Context | None = None) -> str:
         "",
         "[song]",
         f"sound_id = {song.sound_id}",
-        f"name = {_toml_str(song.name)}",
+        f"name = {toml_str(song.name)}",
         f"duplicates = {song.duplicates}",
-        f"source = {_toml_str(source)}",
+        f"source = {toml_str(source)}",
         f"ro_bytes = {song.size}",
         f"ticks_per_beat = {t.ppqn}",
         f"tempo_us_per_beat = {t.tempo_us}",
@@ -360,7 +356,7 @@ def patch_notes(song: Song, ctx: Context | None = None) -> str:
         f"max_polyphony = {total_polyphony(t.events)}",
     ]
     if song.ignored:
-        out.append(f"not_followed = {{ {', '.join(f'{_toml_str(k)} = {v}' for k, v in sorted(song.ignored.items()))} }}")
+        out.append(f"not_followed = {{ {', '.join(f'{toml_str(k)} = {v}' for k, v in sorted(song.ignored.items()))} }}")
     for ch, s in sorted(channel_stats(t.events).items()):
         out += _channel_notes(ch, s, ctx)
     return "\n".join(out) + "\n"
@@ -453,7 +449,7 @@ def timbres_toml(timbres: list[imuse.Timbre], gm: dict[str, int]) -> str:
            "# migs.extract_music. `program` is the id the MIDI files and the NTP build use for it;",
            "# `data` is the 246-byte timbre (MT-32 timbre temporary area layout).", ""]
     for i, tb in enumerate(timbres):
-        out += ["[[timbre]]", f"program = {128 + i}", f"name = {_toml_str(tb.name)}", f'key = "{tb.key}"',
+        out += ["[[timbre]]", f"program = {128 + i}", f"name = {toml_str(tb.name)}", f'key = "{tb.key}"',
                 *([f"gm_program = {gm[tb.name]}"] if tb.name in gm else []), f'data = "{tb.data.hex()}"', ""]
     return "\n".join(out)
 

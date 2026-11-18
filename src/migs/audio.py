@@ -59,6 +59,11 @@ def onset(x: np.ndarray, frac: float = 0.02) -> int:
     return int(np.argmax(np.abs(x) > frac * peak))
 
 
+def onset_cut(x: np.ndarray) -> np.ndarray:
+    """`x` from its onset."""
+    return x[onset(x):]
+
+
 def refine_period(x: np.ndarray, at: int, f0: float) -> float:
     """Period (samples) within 3% of SR/f0, by autocorrelation of 8 periods from sample `at`,
     refined by a parabola through the peak. SR/f0 itself if the peak sits at the edge of the
