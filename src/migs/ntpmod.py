@@ -316,7 +316,7 @@ def _pitch_plans(spec: dict, usage_notes: list[tuple[int, Note]], cfg: dict, tab
 
     def base_note(k: int, r: float, whole: bool) -> int | None:
         t = tuned(k, r, whole)
-        return None if t is None else t[3]
+        return None if t is None else t.base_note
 
     # The period table's whole-number periods step unevenly where they are small (the top
     # octave: up to 50 cents), so a key far above its sample can't be played in tune: each

@@ -17,6 +17,7 @@ import functools
 import math
 import re
 from collections.abc import Callable
+from typing import NamedTuple
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -154,9 +155,19 @@ def tuning_rms(tables, t: tuple, key0: int, key_lo: int, key_hi: int) -> float:
     return float(np.sqrt(max(err ** 2 + 2 * err * m1[fi, base] + m2[fi, base], 0.0))) - floor
 
 
+class Tuning(NamedTuple):
+    """A loop's tuning (best_tuning): `k` periods fill the loop at `rate`, played by `base_note`
+    with `finetune` for the sample's key, `err_cents` off there."""
+    err_cents: float
+    k: int
+    rate: float
+    base_note: int
+    finetune: int
+
+
 def best_tuning(freq: float, tables, min_rate, max_rate, loop_bytes, key0, key_lo, key_hi,
                 whole_cycles: bool = False, high_within_cents: float | None = None
-                ) -> tuple[float, int, float, int, int]:
+                ) -> Tuning:
     """(err_cents, k, rate, base_note, finetune): `loop_bytes` = k periods at `rate`, played
     by note base_note with finetune for key0, err_cents off there. Chosen by the RMS error over
     all the keys key_lo..key_hi (range_offsets), not at key0 alone. `whole_cycles`:
@@ -192,7 +203,7 @@ def best_tuning(freq: float, tables, min_rate, max_rate, loop_bytes, key0, key_l
     if ki is None:
         # first minimum in (k, finetune, note) scan order, as the original nested loops chose
         ki, fi, ni = np.unravel_index(int(np.argmin(a)), a.shape)
-    return float(err[ki, fi, ni]), int(ks[ki]), float(rates[ki]), int(ni), fts[fi]
+    return Tuning(float(err[ki, fi, ni]), int(ks[ki]), float(rates[ki]), int(ni), fts[fi])
 
 
 # ---------------------------------------------------------------------------
@@ -801,7 +812,7 @@ def rate_window(m: dict, cfg: dict, loop_bytes: int) -> tuple[float, float]:
 
 
 def _tune_loop(m: dict, src: _Source, cfg: dict, tables, steady: bool, sustain_s: float, eprime: bool
-               ) -> tuple[int, tuple[float, int, float, int, int]]:
+               ) -> tuple[int, Tuning]:
     """(loop bytes, best_tuning result): a steady sound's planned loop (`ntp_loop_bytes`),
     halved until it fits in the recording between the sustain start and note-off."""
     loop_bytes = m.get("ntp_loop_bytes", cfg["loop_bytes"]) if steady else cfg["loop_bytes"]
@@ -815,7 +826,7 @@ def _tune_loop(m: dict, src: _Source, cfg: dict, tables, steady: bool, sustain_s
 
 
 def _short_tuning(m: dict, src: _Source, cfg: dict, tables, eprime: bool, loop_bytes: int | None = None
-                  ) -> tuple[float, int, float, int, int]:
+                  ) -> Tuning:
     """best_tuning for the short loop. Tried in turn: the pitch plan's rate (+-3 %), the config's
     whole window, then, for a sound so low that one cycle doesn't fit `loop_bytes` at the window's
     lowest rate, the lowest rate that holds a whole cycle (Fate of Atlantis's Pipe Org 1 at key 19:
@@ -840,7 +851,7 @@ def _short_tuning(m: dict, src: _Source, cfg: dict, tables, eprime: bool, loop_b
 
 
 def _raw_tuning(m: dict, src: _Source, cfg: dict, tables, z: int, att_bytes: int, sustain_s: float
-                ) -> tuple[float, int, float, int, int] | None:
+                ) -> Tuning | None:
     """best_tuning for a raw loop of z bytes, or None if none fits the recording and passes
     raw_loop_ok. The rate is the highest tuned within `raw_loop_tune_cents` (the rate is the
     attack's too); if the loop isn't clean there, the highest so tuned at which it repeats
@@ -932,7 +943,7 @@ def sync_span(x: np.ndarray, at: float, want: float, period: float, tol: float =
 
 
 def _sync_tuning(m: dict, src: _Source, cfg: dict, tables, z: int, att_bytes: int
-                 ) -> tuple[tuple[float, int, float, int, int], float, float] | None:
+                 ) -> tuple[Tuning, float, float] | None:
     """(best_tuning result, sustain start s, period) for a z-byte loop holding a whole number of
     the sound's movement cycles (`sync_loops`), or None. Fewest cycles first (the highest rate
     in the config's window: rate = z x movement rate / cycles, so 2048 B holds one 6.16 Hz
