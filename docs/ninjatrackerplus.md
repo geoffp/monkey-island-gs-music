@@ -764,7 +764,8 @@ The user, after the sets that didn't fit: "a full movement 2-zone might perceptu
 
 Heard in the same renders, not caused by this option (both versions; open):
 - *M2160:* the Soundtrack patch's slow release is missing. The MOD's pulsing is stronger than Munt's (the user is unsure it is worth chasing).
-- *M2177:* a very staccato pluck, like pizzicato, is "very misrepresented" (sound not yet identified).
+- *M2177:* a very staccato pluck, like pizzicato, is "very misrepresented". Likely Acou Bass2 at keys 63–84 (133 notes, median 108 ms; one zone, key 68): its spectrum matches Munt within a few dB, and at keys 76–84 it is 1–4 dB below Munt over the first 100 ms (not yet confirmed by ear; solo clips sent).
+- *M2177:* ReggaeBass, one zone against two: "doesn't sound that much worse; both versions sound pretty bad", and Munt's release is "much quicker". Measured on solo renders (the 2-zone MOD, docrender, against Munt): after note-off Munt falls to about −15…−20 dB within 60 ms of the note's peak, and 100 ms after note-off it is down 16.5 dB (median of 70 notes). The MOD holds a release row at about −12 dB, then about −14…−18 dB for a second row, and cuts to −40: it is 9.3 dB down at 100 ms, about 5–7 dB above Munt for two 71 ms rows (`release_rows = "mean"`, speed 3). Not yet known whether the release curve the build measured (`rel_g`) is too slow for the keys played, or the row's RMS mean is too loud for a fast decay.
 - *M2208:* "out of place seeming tones under the pipe organs".
 
 ## Build options: tradeoffs (2026-11-08)
