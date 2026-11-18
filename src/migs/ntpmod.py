@@ -108,7 +108,7 @@ def _priced_merges(spec: dict, opts: dict, songs: list[tuple[list[Note], dict]],
         for n in notes:
             if n.channel != RHYTHM:
                 w = held.setdefault(program_of(n, chan_prog), {})
-                w[n.key] = w.get(n.key, 0.0) + (n.off - n.t)
+                _add_held(w, n)
     scorer = docsim2_scorer(munt, cfg)
     cfg1 = {**cfg, "one_shots": False}
     max_loop = cfg.get("max_loop_bytes", 16384)
@@ -212,6 +212,11 @@ def _best_drum_key(d: dict, hits: dict[int, float], digest, render, cfg: dict, m
     return best[1]
 
 
+def _add_held(w: dict[int, float], n: Note) -> None:
+    """Add note `n`'s held seconds to `w`, the seconds held per key."""
+    w[n.key] = w.get(n.key, 0.0) + (n.off - n.t)
+
+
 def _rhythm_hits(songs: list) -> dict[int, float]:
     """How many times the songs hit each rhythm key."""
     hits: dict[int, float] = {}
@@ -294,7 +299,7 @@ def _pitch_plans(spec: dict, usage_notes: list[tuple[int, Note]], cfg: dict, tab
         m = melodic_entry(spec, prog, n.key)
         if m is not None:
             w = weights.setdefault(m["name"], {})
-            w[n.key] = w.get(n.key, 0.0) + (n.off - n.t)
+            _add_held(w, n)
     loop, min_rate = cfg["loop_bytes"], cfg["min_rate"]
     max_rate = cfg.get("pitch_max_rate", cfg["max_rate"])
     hold = spec.get("hold_seconds", 2.0)
@@ -687,7 +692,7 @@ def _valued_loops(samples: list[ModSample], song_spec: dict, ranges: dict, usage
         si = sample_for(programs, prog, n.key)
         if si is not None:
             w = weights.setdefault(si, {})
-            w[n.key] = w.get(n.key, 0.0) + (n.off - n.t)
+            _add_held(w, n)
             a = _loop_from(samples[si], n.key) if after else 0.0
             exposure[si] = exposure.get(si, 0.0) + alone.exposure(n, a, limit)
             c = short.setdefault(si, [0, 0])
