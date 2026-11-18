@@ -221,3 +221,10 @@ long_shot_range_db = 50.0    # a long one-shot holds the sound until it stays th
                              # stored flat and its decay played by row volumes (no 8-bit floor)
 docsim2_fine_weight = 1.0    # decaying sounds: compare 0.15 s blocks through the decay (a slide the 0.6-1.5 s
                              # segment averages away)
+
+# Trial (2026-11-17, from MI2's, where 177 "sounds great"): releases as Cxx or A0y slides within
+# a row, ticks at most tick_max_ms (config/games/monkey2/ntp.toml, [modes.slides-per-song]).
+[modes.slides-per-song]
+base = "inst-per-song"
+release_slides = true
+tick_max_ms = 25.0

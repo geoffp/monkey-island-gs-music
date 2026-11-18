@@ -155,3 +155,10 @@ base = "shared"
 # rows_per_unit = 1
 # unit_ticks = 120      # override the detected grid unit (the song's MIDI ticks: 480 per beat)
 # phase_ticks = 12.0
+
+# Trial (2026-11-17, from MI2's, where 177 "sounds great"): releases as Cxx or A0y slides within
+# a row, ticks at most tick_max_ms (config/games/monkey2/ntp.toml, [modes.slides-per-song]).
+[modes.slides-per-song]
+base = "inst-per-song"
+release_slides = true
+tick_max_ms = 25.0
