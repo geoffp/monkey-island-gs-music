@@ -2,13 +2,11 @@ import numpy as np
 
 from migs.docram import DOC_RATE
 from migs.docsim2 import pitch_vibrato, vib_distance
+from loop_fixtures import vibrato_tone
 
 
 def tone(f0, cents, rate, seconds=3.0, fs=DOC_RATE):
-    t = np.arange(int(seconds * fs)) / fs
-    dev = cents * np.sin(2 * np.pi * rate * t)                       # cents of pitch swing
-    phase = 2 * np.pi * np.cumsum(f0 * 2 ** (dev / 1200)) / fs
-    return np.sin(phase) + 0.3 * np.sin(2 * phase)
+    return vibrato_tone(f0, cents, rate, seconds, fs)
 
 
 def test_vibrato_depth_is_recovered():

@@ -19,6 +19,14 @@ def tone(f0, secs, amps=(1.0, 0.5, 0.3), detune_hz=0.0, env=None):
     return y / np.max(np.abs(y))
 
 
+def vibrato_tone(f0, cents, rate, seconds=3.0, fs=SR):
+    """A tone of f0 Hz whose pitch swings +-`cents` at `rate` Hz, with a second harmonic."""
+    t = np.arange(int(seconds * fs)) / fs
+    dev = cents * np.sin(2 * np.pi * rate * t)                       # cents of pitch swing
+    phase = 2 * np.pi * np.cumsum(f0 * 2 ** (dev / 1200)) / fs
+    return np.sin(phase) + 0.3 * np.sin(2 * phase)
+
+
 def cycle(n, amps=(1.0, 0.5, 0.3)):
     t = np.arange(n) / n
     return sum(a * np.sin(2 * np.pi * h * t + 0.4 * h) for h, a in enumerate(amps, 1))

@@ -5,13 +5,12 @@ import numpy as np
 from migs import ntpsamples as smp
 from migs.docsim2 import Movement, movement, sound_kind
 from migs.munt import SR
+from loop_fixtures import vibrato_tone
 from ntp_fixtures import looped_melodic
 
 
 def vibrato(f0, cents, rate, seconds=4.0, fs=SR):
-    t = np.arange(int(seconds * fs)) / fs
-    phase = 2 * np.pi * np.cumsum(f0 * 2 ** (cents * np.sin(2 * np.pi * rate * t) / 1200)) / fs
-    return np.sin(phase) + 0.3 * np.sin(2 * phase)
+    return vibrato_tone(f0, cents, rate, seconds, fs)
 
 
 def beating(f0, beat, seconds=4.0, fs=SR):
