@@ -4,7 +4,7 @@
 Melodic sample = raw MT-32 attack (`attack_bytes`, loop header) + a loop holding k identical
 sustain cycles at a rate that makes the loop exactly k periods; note base + finetune make it
 play in tune. Short loops are E'+ (loopbuild) or the original averaged cycle; steady sounds
-may grow long raw loops into free DOC RAM (plan_loops). Decaying sounds that reach the 8-bit
+may grow long raw loops into free DOC RAM (plan_loops_valued). Decaying sounds that reach the 8-bit
 floor within their attack + loop budget become one-shots; drums are one-shots ending at that
 floor. Levels are measured in Munt, not guessed: each sample's peak, its velocity and key
 responses, and the MT-32's channel-volume (CC7) curve. Everything is sized and packed the way
@@ -569,45 +569,13 @@ def _faded(seg: np.ndarray, frac_div: int) -> np.ndarray:
 # ---------------------------------------------------------------------------
 # Building the samples
 
-def plan_loops(samples: list[ModSample], usage: dict[int, float], last_page: int,
-               max_loop: int) -> dict[int, int]:
-    """Loop size per melodic sample index, spending the song's free DOC RAM (pages up to
-    `last_page`) on its steady sounds: repeatedly double the loop with the most sustained
-    playing time per byte, as long as everything still packs the way NTP packs it. A loop only
-    grows to sizes in its `raw_ok` (raw loops that add no tremolo), skipping the others."""
-    sizes = {i: s.loop_len for i, s in enumerate(samples) if s.kind == "melodic" and s.loop_len}
-    grow = {i for i, s in enumerate(samples) if s.kind == "melodic" and s.steady and usage.get(i, 0) > 0}
-
-    def fits(sz: dict[int, int]) -> bool:
-        blocks = []
-        for i, s in enumerate(samples):
-            b = s.ntp_blocks()
-            if i in sz:
-                b = [sz[i]] if not s.loop_start else [b[0], sz[i]]
-            blocks += b
-        return docram.fits(blocks, last_page)
-
-    while grow:
-        i = max(grow, key=lambda j: usage[j] / sizes[j])
-        nxt = [z for z in samples[i].raw_ok if z > sizes[i] and z <= min(max_loop, samples[i].max_loop)]
-        if not nxt:
-            grow.discard(i)
-            continue
-        trial = {**sizes, i: min(nxt)}
-        if fits(trial):
-            sizes = trial
-        else:
-            grow.discard(i)
-    return sizes
-
-
 def plan_loops_valued(samples: list[ModSample], usage: dict[int, float], last_page: int, max_loop: int,
                       score: Callable[[int, int], float], floor: float = 0.0, total: float | None = None,
                       revertible: list[tuple[float, int, int, int, str]] = (), blocked: list | None = None,
                       sound: dict[int, object] | None = None, singles_give_way: bool = False,
                       blocked_sets: list | None = None, sets_bought: list | None = None
                       ) -> tuple[dict[int, int], list[str], dict[int, int]]:
-    """plan_loops priced by measurement (`loop_budget = "docsim2"`): the steady sounds' loops
+    """Loop sizes priced by measurement: the steady sounds' loops
     grow to the raw sizes that most improve `score(i, size)` (dB, lower = closer to the
     MT-32), weighted by their share of `usage` (held time; out of `total` if given, else of
     the steady sounds' own), per DOC page, best value first, while it is above `floor` and the

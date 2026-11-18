@@ -44,7 +44,7 @@ from .mt32 import GM_DRUM_NAMES, rhythm_keys
 from .munt import SR, Munt
 from .ntpsamples import (MAX_SAMPLES, PAL, ModSample, best_tuning, build_samples, cached_render, cc7_curve, forget_renders, floor_time,
                          drum_steps, is_steady, loop_problems, loop_summary, ntp_block, ntp_doc_pages, period_tables, rate_summary,
-                         build_drum, build_melodic, plan_loops, plan_loops_valued, SHOT, size_label)
+                         build_drum, build_melodic, plan_loops_valued, SHOT, size_label)
 from .ntpsong import RHYTHM, Note, convert_song, ntp_oscillators, plan_tracks, program_of, read_notes, sample_for
 
 SAMPLE_SETS = ("per-song", "shared")
@@ -863,110 +863,110 @@ def sample_set(spec: dict, cfg: dict, songs: list[tuple[list[Note], dict]], last
                 usage[si] = usage.get(si, 0.0) + (n.off - n.t)
         return usage
     usage = held(programs)
-    if cfg.get("loop_budget", "usage") == "docsim2":
-        trade = budget_info if cfg.get("pitch_measure", "docsim") == "docsim2" else None   # one scale only
-        tried: set[str] = set()                     # sounds that tried giving up a zone for their movement
-        for _ in range(8 if cfg.get("sets_take_zones") else 4):
-            lines: list[str] = []
-            blocked: list = []
-            b_sets: list = []
-            now_bought: list = []
-            sizes, reverted = _valued_loops(samples, song_spec, ranges_of(song_spec), usage, usage_notes, programs, cfg, last_page,
-                                            tables, munt, lines.append, trade, songs=songs, blocked=blocked,
-                                            blocked_sets=b_sets, sets_bought=now_bought)
-            have = {_sound_of(names[0], plans) for _, names in now_bought}     # sounds whose movement is in
-            owns = _own_sample_values(grants, trade, samples, cfg) if trade else []
-            back = _zones_for_loop(blocked, trade, count, plans, owns) if trade and cfg.get("loops_take_zones") else None
-            if back is None and trade and cfg.get("sets_take_zones") and b_sets:
-                # a sound whose movement set didn't fit may give up its own last zone for it
-                # (a whistle with vibrato in 2 zones against a plain one in 3): re-planned
-                # with one zone fewer, kept if the set is then bought and worth more than the zone
-                took = None
-                for own, worth in _set_candidates(b_sets, plans, count, tried):
-                    tried.add(own)
-                    # the cheapest zones per page first (each sound's last zone; the set's own
-                    # sound's too), while what they are worth in all stays below the set's worth
-                    gave, lost, gone = dict(count), 0.0, []
-                    while True:
-                        pool = [(zv, zn, to, zp) for zv, zn, to, zp in trade["zones"] if gave.get(zn) == to and to > 1]
-                        nxt = min(pool, default=None)
-                        if nxt is None or lost + nxt[0] * nxt[3] >= worth:
-                            lines.append(f"  loop set {own:<16} keeps its zones: "
-                                         + ("no zone left to take back" if nxt is None else
-                                            f"the zones it would take ({lost + nxt[0] * nxt[3]:.2f}) are worth more "
-                                            f"than its set ({worth:.2f})") + (f", after {', '.join(gone)}" if gone else ""))
-                            break
-                        gave[nxt[1]] = nxt[2] - 1
-                        lost += nxt[0] * nxt[3]
-                        gone.append(f"{nxt[1]} {nxt[2]} -> {nxt[2] - 1}")
-                        trial_spec = {**planned(gave), "drum": song_spec["drum"]}
-                        t_samples, t_programs, t_drums = build(trial_spec, {**cfg, "one_shots": False})
-                        t_bought: list = []
-                        _valued_loops(t_samples, trial_spec, ranges_of(trial_spec), held(t_programs), usage_notes, t_programs, cfg,
-                                      last_page, tables, munt, lambda *a: None, trade, songs=songs, sets_bought=t_bought)
-                        got = max((w for w, names in t_bought if _sound_of(names[0], plans) == own), default=0.0)
-                        kept = {_sound_of(names[0], plans) for _, names in t_bought}
-                        # and every sound that had its movement keeps it (MI165: Trombone 1's set
-                        # then pushed Syn Brass4's out, so Shakuhachi's zone went for nothing)
-                        if got > lost and have <= kept:
-                            log(f"  loop set {own:<16} takes back zones {', '.join(gone)} ({lost:.2f} in all) "
-                                f"for its movement (set worth {got:.2f})")
-                            took = gave, trial_spec, t_samples, t_programs, t_drums
-                            break
-                    if took is not None:
+    if cfg.get("loop_budget", "docsim2") != "docsim2":
+        raise SystemExit(f"loop_budget = {cfg['loop_budget']!r}: the usage-per-byte loop planner was removed "
+                         "(2026-11-18); loops are always priced by docsim2, so drop the setting")
+    trade = budget_info if cfg.get("pitch_measure", "docsim") == "docsim2" else None   # one scale only
+    tried: set[str] = set()                     # sounds that tried giving up a zone for their movement
+    for _ in range(8 if cfg.get("sets_take_zones") else 4):
+        lines: list[str] = []
+        blocked: list = []
+        b_sets: list = []
+        now_bought: list = []
+        sizes, reverted = _valued_loops(samples, song_spec, ranges_of(song_spec), usage, usage_notes, programs, cfg, last_page,
+                                        tables, munt, lines.append, trade, songs=songs, blocked=blocked,
+                                        blocked_sets=b_sets, sets_bought=now_bought)
+        have = {_sound_of(names[0], plans) for _, names in now_bought}     # sounds whose movement is in
+        owns = _own_sample_values(grants, trade, samples, cfg) if trade else []
+        back = _zones_for_loop(blocked, trade, count, plans, owns) if trade and cfg.get("loops_take_zones") else None
+        if back is None and trade and cfg.get("sets_take_zones") and b_sets:
+            # a sound whose movement set didn't fit may give up its own last zone for it
+            # (a whistle with vibrato in 2 zones against a plain one in 3): re-planned
+            # with one zone fewer, kept if the set is then bought and worth more than the zone
+            took = None
+            for own, worth in _set_candidates(b_sets, plans, count, tried):
+                tried.add(own)
+                # the cheapest zones per page first (each sound's last zone; the set's own
+                # sound's too), while what they are worth in all stays below the set's worth
+                gave, lost, gone = dict(count), 0.0, []
+                while True:
+                    pool = [(zv, zn, to, zp) for zv, zn, to, zp in trade["zones"] if gave.get(zn) == to and to > 1]
+                    nxt = min(pool, default=None)
+                    if nxt is None or lost + nxt[0] * nxt[3] >= worth:
+                        lines.append(f"  loop set {own:<16} keeps its zones: "
+                                     + ("no zone left to take back" if nxt is None else
+                                        f"the zones it would take ({lost + nxt[0] * nxt[3]:.2f}) are worth more "
+                                        f"than its set ({worth:.2f})") + (f", after {', '.join(gone)}" if gone else ""))
+                        break
+                    gave[nxt[1]] = nxt[2] - 1
+                    lost += nxt[0] * nxt[3]
+                    gone.append(f"{nxt[1]} {nxt[2]} -> {nxt[2] - 1}")
+                    trial_spec = {**planned(gave), "drum": song_spec["drum"]}
+                    t_samples, t_programs, t_drums = build(trial_spec, {**cfg, "one_shots": False})
+                    t_bought: list = []
+                    _valued_loops(t_samples, trial_spec, ranges_of(trial_spec), held(t_programs), usage_notes, t_programs, cfg,
+                                  last_page, tables, munt, lambda *a: None, trade, songs=songs, sets_bought=t_bought)
+                    got = max((w for w, names in t_bought if _sound_of(names[0], plans) == own), default=0.0)
+                    kept = {_sound_of(names[0], plans) for _, names in t_bought}
+                    # and every sound that had its movement keeps it (MI165: Trombone 1's set
+                    # then pushed Syn Brass4's out, so Shakuhachi's zone went for nothing)
+                    if got > lost and have <= kept:
+                        log(f"  loop set {own:<16} takes back zones {', '.join(gone)} ({lost:.2f} in all) "
+                            f"for its movement (set worth {got:.2f})")
+                        took = gave, trial_spec, t_samples, t_programs, t_drums
                         break
                 if took is not None:
-                    gave, song_spec, samples, programs, drums = took
-                    count = gave
-                    trade["zones"] = [zn for zn in trade["zones"] if zn[2] <= count[zn[1]]]
-                    usage = held(programs)
-                    for line in lines:
-                        if "keeps its zones" in line:
-                            log(line)
-                    continue
-            if back is None:
-                if blocked:
-                    v, name, z, pages = max(blocked)
-                    lines.append(f"  loop blocked {name:<16} {size_label(z):>5} B, {pages} pages ({v:.4f}/page): no cheaper "
-                                 f"upgrades free its pages")
-                break
-            want, gave, log_back, remerge = back
-            if remerge:                                 # own samples go back to their merge: build again from the top
-                again: list[str] = []
-                res = sample_set(whole, cfg, songs, last_page, tables, munt, again.append, _force | remerge)
-                own = _sound_of(want[1], plans)
-                if any(sm.loop_len >= want[2] for sm in res[0] if sm.name == own or sm.name.startswith(f"{own} ")):
-                    for line in log_back + again:
-                        out(line)
-                    return res
-                lines.append(f"  loop {want[1]} {want[2]} B would need own samples merged, but still wouldn't fit")
-                break
-            trial_spec = {**planned(gave), "drum": song_spec["drum"]}
-            t_samples, t_programs, t_drums = build(trial_spec, {**cfg, "one_shots": False})
-            t_lines: list[str] = []
-            t_sizes, t_rev = _valued_loops(t_samples, trial_spec, ranges_of(trial_spec), held(t_programs), usage_notes, t_programs,
-                                           cfg, last_page, tables, munt, t_lines.append, trade, songs=songs)
-            got = {t_samples[i].name: z for i, z in t_sizes.items()}
-            if got.get(want[1], 0) < want[2]:           # the loop still didn't get its pages: keep the zones
-                lines.append(f"  loop {want[1]} {want[2]} B would need zones back, but still wouldn't fit")
-                break
-            for line in log_back:
-                log(line)
-            changed = {name for name in gave if gave[name] != count[name]}
-            count = gave
-            trade["zones"] = [zn for zn in trade["zones"] if zn[2] <= count[zn[1]]]
-            song_spec, samples, programs, drums = trial_spec, t_samples, t_programs, t_drums
-            usage = held(programs)
-            for name in sorted(changed):
-                p = plans[name][0][count[name] - 1]
-                log(f"  pitch {name:<13} now {count[name]} zones: {p.error_db:+5.1f} dB  {pitchplan.describe(p)}")
-        for line in lines:
+                    break
+            if took is not None:
+                gave, song_spec, samples, programs, drums = took
+                count = gave
+                trade["zones"] = [zn for zn in trade["zones"] if zn[2] <= count[zn[1]]]
+                usage = held(programs)
+                for line in lines:
+                    if "keeps its zones" in line:
+                        log(line)
+                continue
+        if back is None:
+            if blocked:
+                v, name, z, pages = max(blocked)
+                lines.append(f"  loop blocked {name:<16} {size_label(z):>5} B, {pages} pages ({v:.4f}/page): no cheaper "
+                             f"upgrades free its pages")
+            break
+        want, gave, log_back, remerge = back
+        if remerge:                                 # own samples go back to their merge: build again from the top
+            again: list[str] = []
+            res = sample_set(whole, cfg, songs, last_page, tables, munt, again.append, _force | remerge)
+            own = _sound_of(want[1], plans)
+            if any(sm.loop_len >= want[2] for sm in res[0] if sm.name == own or sm.name.startswith(f"{own} ")):
+                for line in log_back + again:
+                    out(line)
+                return res
+            lines.append(f"  loop {want[1]} {want[2]} B would need own samples merged, but still wouldn't fit")
+            break
+        trial_spec = {**planned(gave), "drum": song_spec["drum"]}
+        t_samples, t_programs, t_drums = build(trial_spec, {**cfg, "one_shots": False})
+        t_lines: list[str] = []
+        t_sizes, t_rev = _valued_loops(t_samples, trial_spec, ranges_of(trial_spec), held(t_programs), usage_notes, t_programs,
+                                       cfg, last_page, tables, munt, t_lines.append, trade, songs=songs)
+        got = {t_samples[i].name: z for i, z in t_sizes.items()}
+        if got.get(want[1], 0) < want[2]:           # the loop still didn't get its pages: keep the zones
+            lines.append(f"  loop {want[1]} {want[2]} B would need zones back, but still wouldn't fit")
+            break
+        for line in log_back:
             log(line)
-        if reverted:
-            song_spec = {**song_spec, "drum": [{**d, "ntp_bytes": reverted[d["name"]]} if d["name"] in reverted else d
-                                               for d in song_spec["drum"]]}
-    else:
-        sizes = plan_loops(samples, usage, last_page, cfg.get("max_loop_bytes", 16384))
+        changed = {name for name in gave if gave[name] != count[name]}
+        count = gave
+        trade["zones"] = [zn for zn in trade["zones"] if zn[2] <= count[zn[1]]]
+        song_spec, samples, programs, drums = trial_spec, t_samples, t_programs, t_drums
+        usage = held(programs)
+        for name in sorted(changed):
+            p = plans[name][0][count[name] - 1]
+            log(f"  pitch {name:<13} now {count[name]} zones: {p.error_db:+5.1f} dB  {pitchplan.describe(p)}")
+    for line in lines:
+        log(line)
+    if reverted:
+        song_spec = {**song_spec, "drum": [{**d, "ntp_bytes": reverted[d["name"]]} if d["name"] in reverted else d
+                                           for d in song_spec["drum"]]}
     if cfg.get("one_shots", True) or any(sizes[i] != samples[i].loop_len for i in sizes):
         by_name = {samples[i].name: sz for i, sz in sizes.items()}
         song_spec = {**song_spec, "melodic": [_planned_size(m, by_name.get(m["name"], cfg["loop_bytes"]))
@@ -1096,7 +1096,7 @@ def check_fit(samples: list[ModSample], cfg: dict, last_page: int, log=lambda *a
 
 def resolve_mode(conf: dict, variant: str) -> tuple[str, dict]:
     """(sample-set mode, settings) for a build variant: per-song, shared, or a [modes.<name>]
-    trial with a `base`: per-song, shared or another [modes.<name>] (a chain, e.g. inst-real-gs
+    trial with a `base`: per-song, shared or another [modes.<name>] (a chain, e.g. slides-per-song
     on inst-per-song on per-song). Settings layer as defaults < the chain's modes, base first;
     `ntp_attack_bytes` add up along the chain instead of replacing each other."""
     modes = conf.get("modes", {})

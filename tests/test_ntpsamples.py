@@ -76,24 +76,6 @@ def test_raw_loop_keeps_chorus_and_has_a_continuous_seam():
     assert abs(loop[0] - loop[-1]) < 4 * step                      # end flows into the start
 
 
-def test_loop_planner_spends_free_doc_ram_on_steady_sounds_only():
-    def mk(name, steady, max_loop=16384):
-        s = smp.ModSample(name, np.zeros(2552), loop_start=2040, loop_len=512, kind="melodic")
-        s.steady, s.max_loop = steady, max_loop
-        s.raw_ok = (1024, 2048, 4096, 8192, 16384) if steady else ()
-        return s
-    samples = [mk("organ", True), mk("strings", True, 4096), mk("marimba", False),
-               smp.ModSample("kick", np.zeros(2038), kind="drum")]
-    usage = {0: 30.0, 1: 10.0, 2: 50.0}
-    sizes = smp.plan_loops(samples, usage, 239, 16384)
-    assert sizes[2] == 512                                          # decaying: stays short
-    assert sizes[1] == 4096                                         # capped by its recording
-    assert sizes[0] == 16384                                        # most sustain: biggest loop
-    tight = smp.plan_loops(samples, usage, 40, 16384)               # 41 pages: little room
-    blocks = [2048, tight[0], 2048, tight[1], 2048, 512, 2048]
-    assert sum(blocks) <= 41 * 256 and tight[0] >= tight[1]
-
-
 def test_steadiness_separates_sustained_from_decaying():
     sr = munt.SR
     t = np.arange(int(2.6 * sr)) / sr
@@ -267,15 +249,6 @@ def test_loop_problems_flags_a_tremolo_loop_in_a_sample_set():
     assert smp.loop_problems([s], cfg) and "tremolo" in smp.loop_problems([s], cfg)[0]
     s.rate = 1500.0
     assert smp.loop_problems([s], cfg) == []
-
-
-def test_loop_planner_skips_raw_sizes_that_fail_the_gate():
-    s = smp.ModSample("organ", np.zeros(2552), loop_start=2040, loop_len=512, kind="melodic")
-    s.steady, s.max_loop, s.raw_ok = True, 16384, (8192,)       # 1024-4096 would add a tremolo
-    sizes = smp.plan_loops([s], {0: 10.0}, 239, 16384)
-    assert sizes[0] == 8192
-    small = smp.plan_loops([s], {0: 10.0}, 20, 16384)           # no room for 8192: stays averaged
-    assert small[0] == 512
 
 
 def test_loop_construction_defaults_to_eprime_and_rejects_unknown_names():

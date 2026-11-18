@@ -114,7 +114,6 @@ drum_floor_lsb = 1.5    # drums end at the 8-bit floor (drum_end: junk near the 
 # merges decided per song. Atlantis had the older usage-ranked loops until 2026-11-16.
 [modes.inst-per-song]
 base = "per-song"
-loop_budget = "docsim2"
 pitch_measure = "docsim2"
 exposure_cap_s = 3.0
 docsim2_mod_weight = 1.0

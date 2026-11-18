@@ -125,7 +125,6 @@ ntp_attack_bytes = { "Elec Organ" = 1016, "Sax" = 1016, "Acou Bass" = 1016, "Vib
 #   always share).
 [modes.inst-per-song]
 base = "per-song"
-loop_budget = "docsim2"
 pitch_measure = "docsim2"
 exposure_cap_s = 3.0         # zones and drums: each note counted up to the 3 s docsim2 hears
 docsim2_mod_weight = 1.0     # per-band movement; with live 0.2, all 8 listening verdicts hold (by >= 1.6 dB)
