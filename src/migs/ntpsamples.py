@@ -588,11 +588,7 @@ def plan_loops(samples: list[ModSample], usage: dict[int, float], last_page: int
             if i in sz:
                 b = [sz[i]] if not s.loop_start else [b[0], sz[i]]
             blocks += b
-        try:
-            docram.allocate([docram.Wave(f"b{j}", bytes(b)) for j, b in enumerate(blocks)], 0, last_page)
-            return True
-        except ValueError:
-            return False
+        return docram.fits(blocks, last_page)
 
     while grow:
         i = max(grow, key=lambda j: usage[j] / sizes[j])
@@ -655,11 +651,7 @@ def plan_loops_valued(samples: list[ModSample], usage: dict[int, float], last_pa
             elif i in sz:
                 b = [sz[i]] if not s.loop_start else [b[0], sz[i]]
             blocks += b
-        try:
-            docram.allocate([docram.Wave(f"b{j}", bytes(b)) for j, b in enumerate(blocks)], 0, last_page)
-            return True
-        except ValueError:
-            return False
+        return docram.fits(blocks, last_page)
 
     def take_back(v_loop: float, trial: dict[int, int]) -> tuple[dict[int, int], list] | None:
         """Drum upgrades (cheapest per page first, a drum's last step first) worth less per
@@ -1342,7 +1334,7 @@ def ntp_doc_pages(samples: list[ModSample], last_page: int = 255) -> int:
     """DOC pages NTP needs for these samples (aligned blocks, packed largest first); raises
     ValueError if they don't fit below `last_page`."""
     blocks = sorted((b for s in samples for b in s.ntp_blocks()), reverse=True)
-    docram.allocate([docram.Wave(f"b{i}", bytes(b)) for i, b in enumerate(blocks)], 0, last_page)
+    docram.pack(blocks, last_page)
     return sum(b // 256 for b in blocks)
 
 

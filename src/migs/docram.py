@@ -63,6 +63,20 @@ def allocate(waves: list[Wave], first: int, last: int) -> dict[str, int]:
     return out
 
 
+def pack(sizes: list[int], last: int, first: int = 0) -> dict[str, int]:
+    """`allocate` for blocks given only by byte size (named b0, b1, ...); ValueError if they don't fit."""
+    return allocate([Wave(f"b{i}", bytes(n)) for i, n in enumerate(sizes)], first, last)
+
+
+def fits(sizes: list[int], last: int, first: int = 0) -> bool:
+    """Whether blocks of these byte sizes pack into DOC pages [first, last]."""
+    try:
+        pack(sizes, last, first)
+    except ValueError:
+        return False
+    return True
+
+
 def ram_image(waves: list[Wave], pages: dict[str, int]) -> bytes:
     """The 64 KB DOC RAM with each wave at its page, silence elsewhere."""
     ram = bytearray([SILENCE]) * (PAGES * PAGE)

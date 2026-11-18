@@ -434,10 +434,7 @@ def _extra_zones(plans: dict, samples: list[ModSample], spec: dict, cfg: dict, l
         name = best[1]
         m = entry[name]
         extra = [ntp_block(m.get("ntp_attack_bytes", cfg["attack_bytes"])), ntp_block(cfg["loop_bytes"])]
-        try:
-            docram.allocate([docram.Wave(f"b{i}", bytes(b)) for i, b in enumerate(sorted(blocks + extra, reverse=True))],
-                            0, last_page)
-        except ValueError:
+        if not docram.fits(sorted(blocks + extra, reverse=True), last_page):
             plans = {k: v for k, v in plans.items() if k != name}     # no room for this one: try the others
             continue
         blocks += extra
@@ -568,11 +565,7 @@ def _value_budget(plans: dict, samples: list[ModSample], spec: dict, cfg: dict, 
 
     def fits(extra: list[int], drums: dict[str, int]) -> bool:
         bl = sorted(blocks + extra + list(drums.values()), reverse=True)
-        try:
-            docram.allocate([docram.Wave(f"b{i}", bytes(b)) for i, b in enumerate(bl)], 0, last_page)
-            return True
-        except ValueError:
-            return False
+        return docram.fits(bl, last_page)
     banned: set = set()
     while True:
         opts = []
@@ -1081,11 +1074,7 @@ def check_fit(samples: list[ModSample], cfg: dict, last_page: int, log=lambda *a
         return out
 
     def fits(b: list[int]) -> bool:
-        try:
-            docram.allocate([docram.Wave(f"b{i}", bytes(n)) for i, n in enumerate(b)], 0, last_page)
-            return True
-        except ValueError:
-            return False
+        return docram.fits(b, last_page)
 
     need = sum(blocks()) // docram.PAGE
     cuts = [n for n in cfg.get("ntp_attack_bytes", {}) if any(s.name == n for s in samples)]
