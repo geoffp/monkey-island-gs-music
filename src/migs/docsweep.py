@@ -33,8 +33,9 @@ from __future__ import annotations
 import argparse
 import json
 import math
-import struct
 from pathlib import Path
+
+from . import modfile
 
 TABLE = 256
 PERIOD_C3 = 214
@@ -121,19 +122,13 @@ def mod_bytes() -> tuple[bytes, list[dict]]:
     put(TEST, rows - 1, 0, 0xF, 0)                    # F00: NTP ends the song
 
     data = sample_data()
-    out = bytearray(b"DOC VOLUME SWEEP".ljust(20, b"\0"))
-    for i in range(31):
-        if i < len(SAMPLES):
-            name = SAMPLES[i]
-            out += name.encode().ljust(22, b"\0") + struct.pack(">HBBHH", TABLE // 2, 0, 64, 0, TABLE // 2)
-        else:
-            out += bytes(22) + struct.pack(">HBBHH", 0, 0, 0, 0, 1)
-    out += bytes([patterns, 127]) + bytes(range(patterns)) + bytes(128 - patterns)
-    out += f"{TRACKS}CH".encode()
+    headers = [name.encode().ljust(22, b"\0") + modfile.SAMPLE_FIELDS.pack(TABLE // 2, 0, 64, 0, TABLE // 2)
+               for name in SAMPLES]
+    out = bytearray(modfile.pack_head(b"DOC VOLUME SWEEP", headers, patterns, TRACKS))
     for row in range(patterns * ROWS):
         for track in range(TRACKS):
             period, sample, eff, par = cells[track].get(row, (0, 0, 0, 0))
-            out += struct.pack(">HH", (sample & 0xF0) << 8 | period, (sample & 0x0F) << 12 | eff << 8 | par)
+            out += modfile.pack_cell(period, sample, eff, par)
     for name in SAMPLES:
         out += data[name]
     row_s = 2.5 * SPEED / BPM
