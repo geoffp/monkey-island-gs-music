@@ -83,6 +83,7 @@ def _budget(steps, plans=None, exposure=None, floor=0.01, last_page=255):
     mel = smp.ModSample("A", np.zeros(1016 + 512), loop_start=1016, loop_len=512)
     spec = {"melodic": [{"name": "A", "ntp_attack_bytes": 1016}]}
     cfg = {"attack_bytes": 2040, "loop_bytes": 512, "upgrade_min_db_per_page": floor}
+    steps = {k: [smp.DrumStep(*st) for st in v] for k, v in steps.items()}
     return nm._value_budget(plans or {}, [mel], spec, cfg, last_page, exposure or {}, steps)
 
 

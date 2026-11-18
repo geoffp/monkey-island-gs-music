@@ -1236,8 +1236,16 @@ def build_drum(d: dict, cfg: dict, munt: Munt, tables) -> tuple[ModSample, dict[
     return s, covers, line
 
 
+class DrumStep(NamedTuple):
+    """One block a drum can take (drum_steps): its DOC `size` in bytes, the `err_db` it scores,
+    and the `seconds` of the drum it stores."""
+    size: int
+    err_db: float
+    seconds: float
+
+
 def drum_steps(d: dict, cfg: dict, munt: Munt, tables, hits: dict[int, float]
-               ) -> list[tuple[int, float, float]]:
+               ) -> list[DrumStep]:
     """The blocks a drum can take with `drum_fill_block` (its own first, then each doubling
     until the rate reaches drum_max_rate) as (bytes, error dB, stored seconds). The error is
     docsim.drum_error_db against Munt, averaged over the keys it covers (each played at its
@@ -1257,7 +1265,7 @@ def drum_steps(d: dict, cfg: dict, munt: Munt, tables, hits: dict[int, float]
         ws = {c: hits.get(c, 0.0) for c in covers} if any(hits.get(c) for c in covers) else {c: 1.0 for c in covers}
         err = sum(w * measure(audio.onset_cut(cached_render(munt, None, c, 0.5)), s, off)
                   for c, (off, _) in covers.items() if (w := ws[c])) / sum(ws.values())
-        out.append((size, err, s.seconds))
+        out.append(DrumStep(size, err, s.seconds))
         block = 2 * size
     return out
 

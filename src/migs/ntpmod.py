@@ -29,6 +29,7 @@ import sys
 import tomllib
 import time
 import traceback
+from typing import NamedTuple
 from collections.abc import Callable
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
@@ -43,7 +44,7 @@ from .modfile import mod_file
 from .mt32 import GM_DRUM_NAMES, rhythm_keys
 from .munt import SR, Munt
 from .ntpsamples import (MAX_SAMPLES, PAL, ModSample, best_tuning, build_samples, cached_render, cc7_curve, forget_renders, floor_time,
-                         drum_steps, is_steady, loop_problems, loop_summary, ntp_block, ntp_doc_pages, period_tables, rate_summary,
+                         DrumStep, drum_steps, is_steady, loop_problems, loop_summary, ntp_block, ntp_doc_pages, period_tables, rate_summary,
                          build_drum, build_melodic, plan_loops_valued, SHOT, size_label)
 from .ntpsong import RHYTHM, Note, convert_song, ntp_oscillators, plan_tracks, program_of, read_notes, sample_for
 
@@ -290,8 +291,17 @@ def key_weights(w: dict[int, float], cfg: dict) -> dict[int, float]:
     return {k: share / len(w) + (1 - share) * v / total for k, v in w.items()}
 
 
+class PitchEntry(NamedTuple):
+    """A melodic sound's pitch plans: `plans` for 1..pitch_max_zones zones, `seconds` of notes,
+    the `error_db` of the configured key at its usual rate, and whether it is a `one_shot`."""
+    plans: list
+    seconds: float
+    error_db: float
+    one_shot: bool
+
+
 def _pitch_plans(spec: dict, usage_notes: list[tuple[int, Note]], cfg: dict, tables, munt: Munt
-                 ) -> dict[str, tuple[list[pitchplan.Plan], float, float, bool]]:
+                 ) -> dict[str, PitchEntry]:
     """Per melodic entry (by name): (plans for 1..pitch_max_zones zones, note seconds, the error
     of the configured key at its usual rate, whether it is planned as a one-shot)."""
     weights: dict[str, dict[int, float]] = {}
@@ -425,7 +435,7 @@ def _pitch_plans(spec: dict, usage_notes: list[tuple[int, Note]], cfg: dict, tab
         if plans and now_rates and now - plans[0].error_db < cfg.get("pitch_move_gain_db", 0.5):
             plans[0] = pitchplan.Plan((pitchplan.Zone(min(w), max(w), m["key"], now_rates[0], now),), now)
         if plans:
-            out[m["name"]] = (plans, sum(w.values()), now, shots)
+            out[m["name"]] = PitchEntry(plans, sum(w.values()), now, shots)
     return out
 
 
@@ -550,7 +560,7 @@ def _budget(plans, samples, song_spec, unplanned, songs, usage_notes, cfg, last_
     for d in song_spec["drum"]:
         st = drum_steps(d, cfg, munt, tables, hits)
         steps[d["name"]] = st
-        exposure[d["name"]] = sum(hits.get(c, 0.0) for c in d["covers"]) * cap(st[0][2])
+        exposure[d["name"]] = sum(hits.get(c, 0.0) for c in d["covers"]) * cap(st[0].seconds)
     # sounds by their own names (unplanned): a sound too wide for one sample starts zoned already
     taken: list = []
     zones: list = []
@@ -563,7 +573,7 @@ def _budget(plans, samples, song_spec, unplanned, songs, usage_notes, cfg, last_
 
 
 def _value_budget(plans: dict, samples: list[ModSample], spec: dict, cfg: dict, last_page: int,
-                  exposure: dict[str, float], steps: dict[str, list[tuple[int, float, float]]],
+                  exposure: dict[str, float], steps: dict[str, list[DrumStep]],
                   taken: list | None = None, zones: list | None = None
                   ) -> tuple[dict[str, int], dict[str, int], list[str]]:
     """sample_budget = "value": extra key zones and bigger drum blocks compete for the same DOC
@@ -578,7 +588,7 @@ def _value_budget(plans: dict, samples: list[ModSample], spec: dict, cfg: dict, 
     level = {name: 0 for name in steps}
     entry = {m["name"]: m for m in spec["melodic"]}
     blocks = [b for s in samples if s.kind != "drum" for b in s.ntp_blocks()]
-    drum_blocks = {name: st[0][0] for name, st in steps.items()}
+    drum_blocks = {name: st[0].size for name, st in steps.items()}
     slots = MAX_SAMPLES - len(samples)
     total = sum(exposure.values()) or 1.0
     floor = cfg.get("upgrade_min_db_per_page", 0.01)
@@ -604,7 +614,7 @@ def _value_budget(plans: dict, samples: list[ModSample], spec: dict, cfg: dict, 
             for j in range(i + 1, len(st)):
                 if ("drum", name, j) in banned:
                     continue
-                g, pages = st[i][1] - st[j][1], (st[j][0] - st[i][0]) // 256
+                g, pages = st[i].err_db - st[j].err_db, (st[j].size - st[i].size) // 256
                 opts.append((drum_w * g * exposure.get(name, 0.0) / total / pages, "drum", name, j, g, pages))
         opts = [o for o in opts if o[0] >= floor]
         if not opts:
@@ -622,13 +632,13 @@ def _value_budget(plans: dict, samples: list[ModSample], spec: dict, cfg: dict, 
                 zones.append((v, name, to, pages))
             lines.append(f"  budget zone {name:<13} -> {to} zones: {g:+.1f} dB, {pages} pages ({v:.3f}/page)")
         else:
-            trial = {**drum_blocks, name: steps[name][to][0]}
+            trial = {**drum_blocks, name: steps[name][to].size}
             if not fits([], trial):
                 banned.add(("drum", name, to))
                 continue
             st = steps[name]
-            lines.append(f"  budget drum {name:<13} {st[level[name]][0] // 256:3d} -> {st[to][0] // 256:3d} pages: "
-                         f"{st[level[name]][1]:+.1f} -> {st[to][1]:+.1f} dB ({v:.3f}/page)")
+            lines.append(f"  budget drum {name:<13} {st[level[name]].size // 256:3d} -> {st[to].size // 256:3d} pages: "
+                         f"{st[level[name]].err_db:+.1f} -> {st[to].err_db:+.1f} dB ({v:.3f}/page)")
             if taken is not None:                       # (drum, from level, to level, value per page)
                 taken.append((name, level[name], to, v))
             drum_blocks, level[name] = trial, to
@@ -711,7 +721,7 @@ def _valued_loops(samples: list[ModSample], song_spec: dict, ranges: dict, usage
         for name, frm, to, v in trade["taken"]:
             if name in index:
                 st = trade["steps"][name]
-                revertible.append((v, index[name], st[frm][0], st[to][0], name))
+                revertible.append((v, index[name], st[frm].size, st[to].size, name))
     stuck: list = []
     b_sets: list = []
     bought: list = []
@@ -1059,7 +1069,7 @@ def _zones_for_loop(blocked: list, trade: dict, count: dict[str, int], plans: di
     left = dict(count)
     st = trade.get("steps", {})
     # drum upgrades cheaper than the loop: the loop planner takes those back itself
-    freed = sum((st[d][to][0] - st[d][frm][0]) // 256 for d, frm, to, dv in trade.get("taken", ()) if dv < v)
+    freed = sum((st[d][to].size - st[d][frm].size) // 256 for d, frm, to, dv in trade.get("taken", ()) if dv < v)
     lines: list[str] = []
     merge: set[str] = set()
     pool = sorted([(zv, "zone", zn, to, zp) for zv, zn, to, zp in trade.get("zones", ()) if zv < v and zn != own] +
