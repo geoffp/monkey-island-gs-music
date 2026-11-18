@@ -40,8 +40,6 @@ from __future__ import annotations
 import dataclasses
 import functools
 import hashlib
-import json
-import os
 from collections.abc import Callable
 from pathlib import Path
 
@@ -49,6 +47,7 @@ import numpy as np
 
 from .docram import DOC_RATE
 from .loopbuild import play
+from .scorecache import Cache
 
 FRAME, HOP = 1024, 512
 LEVEL_DB = 70.0                  # nominal SPL of the RMS-normalised note
@@ -433,40 +432,6 @@ def sample_tag(s) -> str:
     return h.hexdigest()[:16]
 
 
-class Cache:
-    """Scores on disk (JSON, keyed by string), merged on save like docsim.NoteError's."""
-
-    def __init__(self, path: Path | None):
-        self.path = path
-        self.data: dict[str, float] = {}
-        self._dirty = False
-        if path is not None and path.exists():
-            d = json.loads(path.read_text())
-            if d.get("version") == VERSION:
-                self.data = d["results"]
-
-    def get(self, key: str, compute: Callable[[], float]) -> float:
-        if key not in self.data:
-            self.data[key] = float(compute())
-            self._dirty = True
-        return self.data[key]
-
-    def save(self) -> None:
-        if self.path is None or not self._dirty:
-            return
-        merged = {}
-        if self.path.exists():
-            d = json.loads(self.path.read_text())
-            if d.get("version") == VERSION:
-                merged = d["results"]
-        merged.update(self.data)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.path.with_suffix(f".{os.getpid()}.tmp")
-        tmp.write_text(json.dumps({"version": VERSION, "results": merged}))
-        tmp.replace(self.path)
-        self._dirty = False
-
-
 class Scorer:
     """Scores built samples against Munt. `render(program, key)` returns the reference (a
     Munt render at `sr`, from its onset); references are held `seconds` (long enough to hear a
@@ -480,7 +445,7 @@ class Scorer:
         self.render, self.sr, self.seconds, self.name = render, sr, seconds, name
         self.mod_weight, self.live_weight, self.vib_weight = mod_weight, live_weight, vib_weight
         self.fine_weight = fine_weight           # decaying sounds' samples only (fine_distance)
-        self.cache = Cache(cache)
+        self.cache = Cache(cache, VERSION)
         self._ref = functools.lru_cache(maxsize=256)(self._ref_pattern)
         self._ref_vib = functools.lru_cache(maxsize=256)(self._ref_vibrato)
 
@@ -554,7 +519,7 @@ class NoteError:
         from . import docsim
         self.name, self.render, self.sr, self._docsim = name, render, sr, docsim
         self.mod_weight, self.live_weight = mod_weight, live_weight
-        self.cache = Cache(cache)
+        self.cache = Cache(cache, VERSION)
         self._ref = functools.lru_cache(maxsize=None)(lambda n: loudness_pattern(to_doc_rate(self.render(n), self.sr)))
         self._sample = functools.lru_cache(maxsize=64)(lambda k, r: docsim.stored(self.render(k), r))
 

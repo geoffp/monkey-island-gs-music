@@ -244,3 +244,16 @@ def test_the_scorer_keys_its_cache_by_the_live_weight(tmp_path):
     a = d2.Scorer(lambda tag, key: ref, FS, 3.0, tmp_path / "c.json")
     b = d2.Scorer(lambda tag, key: ref, FS, 3.0, tmp_path / "c.json", live_weight=0.5)
     assert b.note_db(s, 1, 55) > a.note_db(s, 1, 55)
+
+
+def test_score_cache_merges_and_drops_other_versions(tmp_path):
+    from migs.scorecache import Cache
+    p = tmp_path / "c.json"
+    a, b = Cache(p, 1), Cache(p, 1)
+    a.get("x", lambda: 1.0)
+    b.get("y", lambda: 2.0)
+    a.save()
+    b.save()                                  # merges into what a saved
+    c = Cache(p, 1)
+    assert c.get("x", lambda: 9.0) == 1.0 and c.get("y", lambda: 9.0) == 2.0
+    assert Cache(p, 2).data == {}             # another measure version starts empty

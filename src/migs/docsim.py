@@ -22,8 +22,6 @@ Measurements: docs/ninjatrackerplus.md "Sampled pitch and rate".
 from __future__ import annotations
 
 import functools
-import json
-import os
 from collections.abc import Callable
 from pathlib import Path
 
@@ -32,6 +30,7 @@ from scipy.signal import resample, resample_poly
 
 from .docram import DOC_RATE
 from .munt import SR
+from .scorecache import Cache
 
 N_FFT = 4096                     # at DOC_RATE: 6.4 Hz bins, so harmonics of key 28 (41 Hz) resolve
 BAND_HZ = 12000                  # compared up to here (the DOC's Nyquist is 13.16 kHz)
@@ -144,37 +143,18 @@ class NoteError:
     def __init__(self, program: int, render: Callable[[int], np.ndarray], cache: Path | None = None,
                  seconds: float = WINDOW_S[1] + N_FFT / DOC_RATE):
         self.program, self.render, self.seconds = program, render, seconds
-        self.cache_path = cache
-        self._cache: dict[str, float] = {}
-        if cache is not None and cache.exists():
-            data = json.loads(cache.read_text())
-            if data.get("version") == VERSION:
-                self._cache = data["results"]
-        self._dirty = False
+        self._cache = Cache(cache, VERSION)
         self._ref = functools.lru_cache(maxsize=None)(lambda n: mean_spectrum(to_doc_rate(self.render(n))))
         self._sample = functools.lru_cache(maxsize=64)(lambda k, r: stored(self.render(k), r))
 
     def __call__(self, k: int, rate: float, n: int) -> float:
         """Distortion/signal (dB) of key n played from the sample of key k at `rate`."""
         tag = f"{self.program}:{k}:{round(rate)}:{n}"
-        if tag not in self._cache:
+        def compute() -> float:
             y = doc_play(self._sample(k, round(rate)), round(rate), n - k, self.seconds)
-            self._cache[tag] = db(sum(spectrum_error(self._ref(n), mean_spectrum(y), key_hz(n))))
-            self._dirty = True
-        return self._cache[tag]
+            return db(sum(spectrum_error(self._ref(n), mean_spectrum(y), key_hz(n))))
+        return self._cache.get(tag, compute)
 
     def save(self) -> None:
         """Merge this program's results into the cache file (atomic replace)."""
-        if self.cache_path is None or not self._dirty:
-            return
-        merged = {}
-        if self.cache_path.exists():
-            data = json.loads(self.cache_path.read_text())
-            if data.get("version") == VERSION:
-                merged = data["results"]
-        merged.update(self._cache)
-        self.cache_path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.cache_path.with_suffix(f".{os.getpid()}.tmp")
-        tmp.write_text(json.dumps({"version": VERSION, "results": merged}))
-        tmp.replace(self.cache_path)
-        self._dirty = False
+        self._cache.save()
