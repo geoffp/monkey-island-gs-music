@@ -791,3 +791,53 @@ def test_mean_release_rows_play_the_release_averaged_over_the_row(tmp_path):
     _, mean = release_row("mean")
     _, default = release_row(None)
     assert start > 0.6 * onset and 0 < mean < 0.3 * start and default == mean
+
+
+# --- release slides (release_slides, tick_max_ms) ----------------------------------------------
+
+def test_plan_release_slides_down_a_fast_release_within_its_row():
+    # linear levels, 6 ticks a row: a release from 48 falling 3 dB a tick; a flat Cxx can only
+    # hold one level a row, so the first row slides (A0y); a row that isn't free stays as it was
+    lin = [v / 64 for v in range(65)]
+    target = 48 / 64 * 10 ** (-3 * np.arange(12) / 20)
+    rows = sg.plan_release(target, 48, list(range(65)), lin, 6, [True, True])
+    assert rows[0][0] == sg.FX_SLIDE and 1 <= rows[0][1] <= 15
+    assert rows[0][2] == 48 - 5 * rows[0][1]
+    held = sg.plan_release(target, 48, list(range(65)), lin, 6, [False, True])
+    assert held[0] == (None, 0, 48)
+
+
+def test_plan_release_plans_on_the_written_curve():
+    # a measured-like curve, steep at the foot: the slide is chosen for the written volumes'
+    # own levels, and a Cxx is a wanted volume (the map turns it into the written one)
+    levels = [0.0] + [10 ** (-40 * (1 - v / 64) ** 1.5 / 20) for v in range(1, 65)]
+    wmap = [0] + [max(1, round(7 + m * 57 / 64)) for m in range(1, 65)]
+    flat = np.full(6, levels[wmap[20]])
+    (eff, par, w), = sg.plan_release(flat, 60, wmap, levels, 6, [True])
+    assert (eff, w) == (sg.FX_VOLUME, wmap[20]) and wmap[par] == wmap[20]
+
+
+def test_release_slides_write_axy_and_end_on_the_rest(tmp_path):
+    import mido
+    ev = [mido.Message("program_change", channel=1, program=9)]
+    for i in range(3):
+        ev += [mido.Message("note_on", channel=1, note=60, velocity=100, time=0 if i == 0 else 600),
+               mido.Message("note_off", channel=1, note=60, time=120)]
+    p = midi_song(tmp_path, ev)
+    s = fake_sample()
+    s.rel_g = 10 ** (-30 * np.arange(31) * 0.01 / 0.15 / 20)        # -30 dB in 150 ms
+    rest = fake_sample()
+    rest.kind, rest.name = "rest", "rest"
+    # 150 ms rows (36 ticks at 120 PPQN, 120 BPM), as MI2 177's 141 ms: a release inside a row
+    base = {"rows_per_unit": 1, "speed": 3, "quantize": 0.0, "oscillators": 31}
+    for cfg in (base, {**base, "release_slides": True, "tick_max_ms": 25}):
+        grid, _, rep = sg.convert_song(p, [s, rest], {9: 0}, {}, cfg, {**cfg, "unit_ticks": 36, "phase_ticks": 0})
+        cells = [c for t in grid.cells for _, c in sorted(t.items())]
+        slides = [c for c in cells if c[2] == sg.FX_SLIDE]
+        if cfg is base:
+            assert not slides and rep.speed == 3
+        else:
+            assert slides and all(c[3] < 0x10 for c in slides)          # down only
+            assert rep.speed > 3 and rep.row_ms / rep.speed <= 25 + 1e-9
+            # every release ends at 0 on the rest, so the track reads as idle
+            assert sum(1 for c in cells if c[1] == 2 and c[2:] == [sg.FX_VOLUME, 0]) == 3

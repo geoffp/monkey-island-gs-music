@@ -103,3 +103,14 @@ def test_render_wav_streams_what_the_whole_song_gives():
     assert np.array_equal(pcm, docrender._pcm(whole))
     scaled, _ = docrender.render_wav(m, TABLES, LINEAR, 48000, 3.0, scale=peak)
     assert np.array_equal(scaled, docrender._pcm(whole / peak))
+
+
+def test_a_volume_slide_falls_on_each_tick_after_the_first():
+    # A04 at speed 6: 32 on tick 0, then 28, 24, ... 12; the next row (no effect) holds 12
+    from migs.ntpsong import FX_SLIDE
+    m = song({(0, 0): [25, 1, FX_SPEED, 6], (0, 1): [0, 0, FX_VOLUME, 32], (0, 2): [0, 0, FX_SLIDE, 4]}, [square()])
+    y = docrender.render_doc(m, TABLES, LINEAR, tail_s=0.0)[:, 1 - docrender.STEREO[0]]
+    tick = int(0.02 * DOC_RATE)
+    for k, want in enumerate([32, 28, 24, 20, 16, 12, 12]):
+        a = 2 * 6 * tick + k * tick
+        assert abs(np.max(np.abs(y[a + 50:a + tick - 50])) - 0.5 * 127 / 128 * want / 64) < 0.01, k

@@ -54,3 +54,12 @@ def volume_map(levels: list[float]) -> list[int]:
 
 def measured_map(path: Path = CURVE) -> list[int]:
     return volume_map(load_curve(path))
+
+
+def written_levels(path: Path | None = CURVE) -> list[float]:
+    """Amplitude (re volume 64) of each volume 0..64 as written to the MOD: the measured curve,
+    or linear (path None). Volume slides (Axy) step the written volume, so they are planned on
+    these (ntpsong, `release_slides`)."""
+    if path is None:
+        return [v / 64 for v in range(65)]
+    return [0.0] + [10 ** (lv / 20) for lv in load_curve(path)]

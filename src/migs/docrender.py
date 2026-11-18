@@ -13,7 +13,8 @@ precision. This renders what the real machine does instead (docs/es5503.md):
   low-passed, as by a stereo card's 17.7 kHz active filter (csa2 FAQ), then resampled to `rate`;
 - NTP pans hard: track t goes to one side by `$doc_stereo_defaults` (1 0 0 1 ...: CA0 = 1 is
   left, TN #19).
-Only what our MODs use is played: notes, instruments, Cxx, Bxx, Dxx, EDx, Fxx (speed below 32,
+Only what our MODs use is played: notes, instruments, Axy (volume slides, as NTP plays them), Cxx,
+Bxx, Dxx, EDx, Fxx (speed below 32,
 tempo from 32, F00 ends the song). A song that loops plays its pass once, as libopenmpt does,
 then `tail_s` of what still sounds.
 """
@@ -113,6 +114,7 @@ class _Voice:
     pos: float = 0.0
     step: float = 0.0
     volume: int = 0
+    slide: int = 0                                  # Axy this row: volume change per tick after the first
     on: bool = False
     pending: tuple | None = field(default=None)     # (tick, period, inst) of a delayed note
 
@@ -188,6 +190,8 @@ def doc_blocks(mod: Mod, tables, gains: np.ndarray, tail_s: float = 1.0, max_s: 
                 v.pending = (delay, period, inst)
             elif period:
                 trigger(v, period, inst)
+            # Axy: as NTP's setup_volslide, y down if x is 0, else x up (y ignored); this row only
+            v.slide = (-par if par < 0x10 else par >> 4) if eff == 0xA else 0
             if eff == 0xC:
                 v.volume = min(par, 64)
             elif eff == 0xF:
@@ -203,6 +207,8 @@ def doc_blocks(mod: Mod, tables, gains: np.ndarray, tail_s: float = 1.0, max_s: 
                 brk = (par >> 4) * 10 + (par & 0x0F)
         for tick in range(speed):
             for v in voices:
+                if tick and v.slide:
+                    v.volume = max(0, min(64, v.volume + v.slide))
                 if v.pending and v.pending[0] == tick:
                     _, period, inst = v.pending
                     if inst:

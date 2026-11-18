@@ -157,3 +157,13 @@ base = "shared"
 # rows_per_unit = 1
 # unit_ticks = 120      # override the detected grid unit (the song's MIDI ticks: 480 per beat)
 # phase_ticks = 12.0
+
+# Trial (2026-11-17): releases that fall within a row. 177's rows are 141 ms (36 MI2 songs have
+# rows over 100 ms), so a release was one flat step at its mean: its ReggaeBass, plucked on the
+# MT-32, sounded held (the user: Munt's release is "much quicker"). Each release row is a Cxx or a
+# slide down (A0y), whichever plays nearer the MT-32 tick by tick, and the speed rises until a
+# tick is at most tick_max_ms (177: 6 ticks of 24 ms, was 3 of 47). Pattern data is unchanged.
+[modes.slides-per-song]
+base = "inst-per-song"
+release_slides = true
+tick_max_ms = 25.0

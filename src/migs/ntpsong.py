@@ -28,13 +28,13 @@ from pathlib import Path
 import mido
 import numpy as np
 
-from . import ro
+from . import docvolume, ro
 from .ntpsamples import NOTES, ModSample
 
 ROWS = 64                                 # rows per pattern
 RHYTHM = 9
 CELL_EMPTY = (0, 0, -1, 0)                # note, instrument, effect (-1: none), parameter
-FX_JUMP, FX_VOLUME, FX_BREAK, FX_EXTENDED, FX_SPEED = 0xB, 0xC, 0xD, 0xE, 0xF
+FX_SLIDE, FX_JUMP, FX_VOLUME, FX_BREAK, FX_EXTENDED, FX_SPEED = 0xA, 0xB, 0xC, 0xD, 0xE, 0xF
 NOTE_DELAY = 0xD0                         # EDx: delay the note by x ticks
 
 
@@ -457,6 +457,12 @@ def _timing(notes: list[Note], cfg: dict, song_cfg: dict, tb: Timebase = RO_TIME
     while tempo < 32:
         speed += 1
         tempo = round(2.5 * speed / row_s)
+    # `tick_max_ms` (with release_slides): more ticks while a tick is longer, so a slide falls in
+    # finer steps and EDx places notes finer; rows and pattern data stay the same
+    tick_max = song_cfg.get("tick_max_ms", cfg.get("tick_max_ms"))
+    while tick_max and row_s / speed > tick_max / 1000 and speed < 15 and round(2.5 * (speed + 1) / row_s) <= 255:
+        speed += 1
+        tempo = round(2.5 * speed / row_s)
     shift = (row_s - (phase * tb.tick_s) % row_s) % row_s + row_s      # grid aligned, >= 1 row lead-in
     return _Timing(row_s, speed, tempo, shift, song_cfg.get("quantize", cfg["quantize"]))
 
@@ -469,6 +475,42 @@ class _Track:
     off: int = -1               # note-off row of the current melodic note (-1: drum)
     oneshot_end: float = -1.0   # s when the current one-shot's sample ends
     chan: int = -1              # MIDI channel of the current note
+
+
+SLIDE_FLOOR_DB = -45.0    # plan_release: levels below this count as this (silence is silence)
+
+
+def plan_release(target: np.ndarray, w: int, wmap: list[int], levels: list[float], speed: int,
+                 free: list[bool]) -> list[tuple[int | None, int, int]]:
+    """Release rows, one per `free` entry: (effect, parameter, written volume at the row's end).
+    `target`: the wanted amplitude per tick (re volume 64), speed ticks a row; `w`: the written
+    volume playing when the release starts; `wmap`: wanted linear volume -> written; `levels`:
+    amplitude of each written volume (the measured curve or linear). Each row takes, of a Cxx
+    (any wanted volume, flat over the row) and a slide A0y (y = 1..15: the written volume falls
+    by y on ticks 1..speed-1, as NTP and ProTracker play it), the one whose ticks are nearest
+    the target in dB. A row that isn't free keeps playing what it played (effect None)."""
+    db = lambda a: np.maximum(20 * np.log10(np.maximum(a, 1e-9)), SLIDE_FLOOR_DB)
+    lv = np.asarray(levels, dtype=np.float64)
+    j = np.arange(speed)
+    out = []
+    for i, ok in enumerate(free):
+        want = db(target[i * speed:(i + 1) * speed])
+        if not ok:
+            out.append((None, 0, w))
+            continue
+        best = None
+        for v in sorted(set(wmap)):
+            cost = float(np.sum((db(np.full(speed, lv[v])) - want) ** 2))
+            if best is None or cost < best[0]:
+                best = (cost, FX_VOLUME, wmap.index(v), v)
+        for y in range(1, 16):
+            ws = np.maximum(w - j * y, 0)
+            cost = float(np.sum((db(lv[ws]) - want) ** 2))
+            if cost < best[0]:
+                best = (cost, FX_SLIDE, y, int(ws[-1]))
+        _, eff, par, w = best
+        out.append((eff, par, w))
+    return out
 
 
 class _Arranger:
@@ -484,6 +526,11 @@ class _Arranger:
         self.tracks: list[_Track] = []
         self.osc_used = 0
         self.rest = next((i for i, x in enumerate(samples) if x.kind == "rest"), None)
+        self.slides = None                               # release_slides: (written volume map, levels)
+        if self.opt("release_slides", False):
+            measured = self.opt("doc_volume", "linear") == "measured"
+            self.slides = (docvolume.measured_map() if measured else list(range(65)),
+                           docvolume.written_levels(docvolume.CURVE if measured else None))
 
     # --- tracks
 
@@ -498,7 +545,7 @@ class _Arranger:
                 return c[3]
             if c[0] and c[1]:
                 return self.samples[c[1] - 1].default_volume
-        return 0
+        return 0                    # (a release slide, FX_SLIDE, reads as the Cxx it slides from)
 
     def new_track(self, kind: str) -> int:
         self.grid.cells.append({})
@@ -650,6 +697,11 @@ class _Arranger:
             v_off = min(v_off, prev)        # release from the (limited) level that plays, never a jump up
         steps = max(1, int(round(len(s.rel_g) * 0.01 / row_s)))
         mean_rows = self.opt("release_rows", "mean") == "mean"   # "start": before 2026-11-12
+        if self.slides is not None and (oneshot_end is None or cut):
+            last = self.write_release_slides(tr, s, r_off, v_off, steps, timing)
+            if not s.loop_len:
+                last = max(last, r_off - 1)
+            return last
         for i in range(steps + 1 if oneshot_end is None or cut else 0):
             rr = r_off + i
             if i >= steps:
@@ -673,6 +725,44 @@ class _Arranger:
                 break
         if not s.loop_len:
             last = max(last, r_off - 1)                   # sounding until its sample (or note) ends
+        return last
+
+    def write_release_slides(self, tr: int, s: ModSample, r_off: int, v_off: float, steps: int,
+                             timing: _Timing) -> int:
+        """The release as `release_slides` writes it: each of its `steps` rows is a set volume
+        (Cxx) or a slide down (A0y: the player lowers the written volume by y on each tick after
+        the first), whichever plays nearer the MT-32's release tick by tick (plan_release); then
+        a row at 0, the rest on a melodic track. A release falls within a row: as rows (MI2 177:
+        141 ms) it was one flat step at its mean, heard as a held note where the MT-32 plucks.
+        Returns the last row written."""
+        wmap, levels = self.slides
+        speed, tick = timing.speed, timing.tick_s
+        n = steps * speed
+        ts = (np.arange(n)[:, None] + np.linspace(0, 1, 6)[None, :]) * tick
+        g = np.interp(ts, np.arange(len(s.rel_g)) * 0.01, s.rel_g, right=0.0)
+        target = v_off / 64 * np.sqrt(np.mean(g ** 2, axis=1))          # per tick, re volume 64
+        w = wmap[max(0, min(64, self.level_at(tr, r_off - 1)))]
+        free = [self.grid.effect_free(tr, r_off + i) and self.grid.cells[tr].get(r_off + i, CELL_EMPTY)[0] == 0
+                for i in range(steps)]
+        last = r_off
+        for i, (eff, par, w) in enumerate(plan_release(target, w, wmap, levels, speed, free)):
+            rr = r_off + i
+            if eff is not None:
+                self.grid.set_effect(tr, rr, eff, par)
+            last = rr
+            if eff == FX_VOLUME and par == 0:
+                break
+        else:
+            rr = r_off + steps
+            if self.grid.effect_free(tr, rr) and self.grid.cells[tr].get(rr, CELL_EMPTY)[0] == 0:
+                self.grid.set_effect(tr, rr, FX_VOLUME, 0)
+                last = rr
+            else:
+                return last
+        c = self.grid.cells[tr].get(last, CELL_EMPTY)
+        if c[2] == FX_VOLUME and c[3] == 0 and self.rest is not None and self.tracks[tr].kind == "melodic":
+            c[0], c[1] = self.samples[self.rest].base_note + 1, self.rest + 1   # the rest ends it
+            self.rep.halted += 1
         return last
 
     # --- finishing
