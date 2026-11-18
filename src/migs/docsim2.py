@@ -128,6 +128,12 @@ def _frames(t: float, fs: float) -> int:
     return int(round(t * fs / HOP))
 
 
+def _mean_change(a: np.ndarray, b: np.ndarray, i0: int, i1: int) -> float:
+    """sum|mean_b - mean_a| / sum mean_a over frames i0:i1 (a band's mean level, so a level-free change)."""
+    ma, mb = a[:, i0:i1].mean(axis=1), b[:, i0:i1].mean(axis=1)
+    return float(np.sum(np.abs(mb - ma)) / (np.sum(ma) or 1.0))
+
+
 def seg_distance(a: np.ndarray, b: np.ndarray, fs: float = DOC_RATE) -> float:
     """Mean over segments of sum|mean_b - mean_a| / sum mean_a (0: same)."""
     t = min(a.shape[1], b.shape[1])
@@ -136,8 +142,7 @@ def seg_distance(a: np.ndarray, b: np.ndarray, fs: float = DOC_RATE) -> float:
         i0, i1 = _frames(t0, fs), min(t, _frames(t1, fs) if t1 is not None else t)
         if i1 - i0 < 2:
             continue
-        ma, mb = a[:, i0:i1].mean(axis=1), b[:, i0:i1].mean(axis=1)
-        out.append(float(np.sum(np.abs(mb - ma)) / (np.sum(ma) or 1.0)))
+        out.append(_mean_change(a, b, i0, i1))
     return float(np.mean(out)) if out else 0.0
 
 
@@ -362,16 +367,14 @@ def fine_distance(a: np.ndarray, b: np.ndarray, fs: float = DOC_RATE) -> float:
     out = []
     for (i0, i1), s in zip(blocks, loud):
         if s >= FINE_FLOOR * loud.max() and s > 0:
-            ma, mb = a[:, i0:i1].mean(axis=1), b[:, i0:i1].mean(axis=1)
-            out.append(float(np.sum(np.abs(mb - ma)) / s))
+            out.append(_mean_change(a, b, i0, i1))
     return float(np.mean(out)) if out else 0.0
 
 
 def mean_distance(a: np.ndarray, b: np.ndarray) -> float:
     """sum|mean_b - mean_a| / sum mean_a over the whole of both patterns (drums)."""
     t = min(a.shape[1], b.shape[1])
-    ma, mb = a[:, :t].mean(axis=1), b[:, :t].mean(axis=1)
-    return float(np.sum(np.abs(mb - ma)) / (np.sum(ma) or 1.0))
+    return _mean_change(a, b, 0, t)
 
 
 def distance(ref: np.ndarray, got: np.ndarray, drum: bool = False, fs: float = DOC_RATE,

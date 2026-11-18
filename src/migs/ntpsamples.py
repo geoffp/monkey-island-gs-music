@@ -181,6 +181,7 @@ def best_tuning(freq: float, tables, min_rate, max_rate, loop_bytes, key0, key_l
     # put all the other notes off by its error (MI2 177's ReggaeBass, 30 cents flat)
     rms = np.sqrt(np.maximum(err ** 2 + 2 * err * m1[None] + m2[None], 0.0))
     a = np.where(valid[None, :, :], rms, np.inf)
+    ki = None
     if high_within_cents is not None:
         # within that many cents of the best tuning the table allows over those keys (for one
         # key, of exact): its uneven steps are there at every rate
@@ -188,9 +189,9 @@ def best_tuning(freq: float, tables, min_rate, max_rate, loop_bytes, key0, key_l
         if len(tuned):                                                # ks ascend: rates descend
             ki = int(tuned[0])
             fi, ni = np.unravel_index(int(np.argmin(a[ki])), a[ki].shape)
-            return float(err[ki, fi, ni]), int(ks[ki]), float(rates[ki]), int(ni), fts[fi]
-    # first minimum in (k, finetune, note) scan order, as the original nested loops chose
-    ki, fi, ni = np.unravel_index(int(np.argmin(a)), a.shape)
+    if ki is None:
+        # first minimum in (k, finetune, note) scan order, as the original nested loops chose
+        ki, fi, ni = np.unravel_index(int(np.argmin(a)), a.shape)
     return float(err[ki, fi, ni]), int(ks[ki]), float(rates[ki]), int(ni), fts[fi]
 
 
@@ -419,6 +420,12 @@ def forget_renders() -> None:
     _PEAKS.clear()
 
 
+def _normalised(data: np.ndarray) -> tuple[np.ndarray, float]:
+    """`data` scaled to a peak of 1, and the peak it had (1 for silence): a sample's `level`."""
+    peak = float(np.max(np.abs(data))) or 1.0
+    return data / peak, peak
+
+
 def _peak(x: np.ndarray) -> float:
     """Peak 5 ms RMS (memoised for cached renders, which cached_render keeps alive)."""
     if not x.flags.writeable and id(x) in _PEAKS:
@@ -563,7 +570,7 @@ def flattened(seg: np.ndarray, flat_s: float = 0.25) -> tuple[np.ndarray, np.nda
     contour, as for loops (_row_envelope): faster movement (Ice Rain's echo pulses) stays in
     the audio. Before flat_s the audio is as recorded and the gain 1."""
     env = audio.rms_envelope(seg)
-    c = np.exp(smooth(np.log(np.maximum(env, 1e-6)), int(0.25 * SR)))
+    c = sustain_contour(env, len(env), 0.25)
     f = min(int(flat_s * SR), len(seg) - 1)
     g = np.minimum(1.0, c / max(c[f], 1e-9))
     g[:f] = 1.0
@@ -1096,9 +1103,8 @@ def build_melodic(m: dict, cfg: dict, keys: tuple[int, int], munt: Munt, tables,
     g_max = float(g.max()) if len(g) else 1.0
     rel = src.env[src.off:src.off + int(cfg["release_max"] * SR):int(0.01 * SR)]
     rel_g = np.clip(rel / max(src.env[src.off], 1e-9), 0, 1)
-    data = np.concatenate([attack, loop])
-    peak = float(np.max(np.abs(data))) or 1.0
-    s = ModSample(m["name"], data / peak, loop_start=att_bytes, loop_len=loop_bytes,
+    data, peak = _normalised(np.concatenate([attack, loop]))
+    s = ModSample(m["name"], data, loop_start=att_bytes, loop_len=loop_bytes,
                   finetune=ft, base_note=n0, key0=m["key"], kind="melodic",
                   env_t=(t - a) / SR, env_g=g, rel_g=rel_g, tune_cents=err, level=peak)
     s.steady, s.rate, s.cycles = steady, rate, k
@@ -1125,9 +1131,8 @@ def build_melodic(m: dict, cfg: dict, keys: tuple[int, int], munt: Munt, tables,
                                m["key"], *src.keys, cfg["min_rate"], cfg.get("one_shot_max_rate_drop", 0.1))
         if shot is not None:
             r1, nb, n0, ft = shot
-            data = resample(_faded(x[a:a + int(round(nb / r1 * SR))], 20), nb)
-            peak = float(np.max(np.abs(data))) or 1.0
-            s = ModSample(m["name"], data / peak, finetune=ft, base_note=n0, key0=m["key"], kind="melodic",
+            data, peak = _normalised(resample(_faded(x[a:a + int(round(nb / r1 * SR))], 20), nb))
+            s = ModSample(m["name"], data, finetune=ft, base_note=n0, key0=m["key"], kind="melodic",
                           env_t=np.zeros(1), env_g=np.ones(1), rel_g=rel_g,
                           seconds=nb / r1, tune_cents=0.0, level=peak)
             s.rate, s.max_loop = r1, 0
@@ -1156,9 +1161,8 @@ def build_melodic(m: dict, cfg: dict, keys: tuple[int, int], munt: Munt, tables,
             if shot is not None:
                 r1, nb, n0, ft = shot
                 seg, env_t, env_g = flattened(x3[a3:a3 + int(round(nb / r1 * SR))], cfg.get("long_shot_flat_s", 0.25))
-                data = resample(_faded(seg, 20), nb)
-                peak = float(np.max(np.abs(data))) or 1.0
-                s = ModSample(m["name"], data / peak, finetune=ft, base_note=n0, key0=m["key"], kind="melodic",
+                data, peak = _normalised(resample(_faded(seg, 20), nb))
+                s = ModSample(m["name"], data, finetune=ft, base_note=n0, key0=m["key"], kind="melodic",
                               env_t=env_t, env_g=env_g, rel_g=rel_g, seconds=nb / r1, tune_cents=0.0, level=peak)
                 s.rate, s.max_loop, s.shot_env = r1, 0, True
                 line = (f"  {m['name']:<12} long one-shot {len(s.data):5d} B @ {r1:6.0f} Hz ({s.seconds * 1000:4.0f} ms "
@@ -1209,9 +1213,8 @@ def build_drum(d: dict, cfg: dict, munt: Munt, tables) -> tuple[ModSample, dict[
         n0 = min(notes, key=lambda n: abs(PAL / tables[0][n] - want))
     rate = PAL / tables[0][n0]
     seg = x[a:a + int(min(dur, (budget - STOPPER) / rate) * SR)]
-    data = resample(_faded(seg, 10), max(2, int(len(seg) / SR * rate) // 2 * 2))
-    peak = float(np.max(np.abs(data))) or 1.0
-    s = ModSample(d["name"], data / peak, kind="drum", base_note=n0, key0=d["key"],
+    data, peak = _normalised(resample(_faded(seg, 10), max(2, int(len(seg) / SR * rate) // 2 * 2)))
+    s = ModSample(d["name"], data, kind="drum", base_note=n0, key0=d["key"],
                   seconds=len(data) / rate, level=peak)
     s.rate = rate
     s.vel_v, s.vel_g = velocity_response(lambda v: cached_render(munt, None, d["key"], 0.5, velocity=v))
@@ -1229,6 +1232,10 @@ def drum_steps(d: dict, cfg: dict, munt: Munt, tables, hits: dict[int, float]
     docsim.drum_error_db against Munt, averaged over the keys it covers (each played at its
     offset) weighted by `hits` (rhythm key -> how often it's struck)."""
     cfg = {**cfg, "drum_fill_block": True}
+    if cfg.get("pitch_measure", "docsim") == "docsim2":             # one scale for the value budget
+        measure = lambda ref, s, off: docsim2.drum_db(ref, SR, s.data, s.rate, off, s.seconds)
+    else:
+        measure = lambda ref, s, off: docsim.drum_error_db(ref, s.data, s.rate, off, s.seconds)
     out = []
     block = None
     while True:
@@ -1237,15 +1244,8 @@ def drum_steps(d: dict, cfg: dict, munt: Munt, tables, hits: dict[int, float]
         if out and size <= out[-1][0]:
             break                                       # no bigger block helps (top rate, whole drum)
         ws = {c: hits.get(c, 0.0) for c in covers} if any(hits.get(c) for c in covers) else {c: 1.0 for c in covers}
-        if cfg.get("pitch_measure", "docsim") == "docsim2":         # one scale for the value budget
-            from . import docsim2
-            err = sum(w * docsim2.drum_db(_onset_cut(cached_render(munt, None, c, 0.5)), SR, s.data, s.rate, off,
-                                          s.seconds)
-                      for c, (off, _) in covers.items() if (w := ws[c])) / sum(ws.values())
-        else:
-            err = sum(w * docsim.drum_error_db(_onset_cut(cached_render(munt, None, c, 0.5)), s.data, s.rate, off,
-                                               s.seconds)
-                      for c, (off, _) in covers.items() if (w := ws[c])) / sum(ws.values())
+        err = sum(w * measure(_onset_cut(cached_render(munt, None, c, 0.5)), s, off)
+                  for c, (off, _) in covers.items() if (w := ws[c])) / sum(ws.values())
         out.append((size, err, s.seconds))
         block = 2 * size
     return out
