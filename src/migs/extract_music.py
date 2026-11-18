@@ -25,7 +25,7 @@ import json
 import re
 import sys
 from collections import Counter, defaultdict
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -156,14 +156,6 @@ def bender_range_sysex() -> list[bytes]:
 def _gm_bend_range(ch: int) -> list[ro.Event]:
     """GM: the same 16-semitone range by RPN 0 (pitch bend sensitivity)."""
     return [ro.Event(0, Kind.CC, ch, a, b) for a, b in ((101, 0), (100, 0), (6, BENDER_RANGE), (38, 0))]
-
-
-def _deltas(ticks: Iterable[int]) -> Iterator[int]:
-    """Absolute ticks -> MIDI delta times."""
-    last = 0
-    for t in ticks:
-        yield t - last
-        last = t
 
 
 def _message(ev: ro.Event, time: int) -> mido.Message:

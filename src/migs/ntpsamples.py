@@ -271,10 +271,7 @@ def zero_start(loop: np.ndarray, c: int) -> np.ndarray:
     n = len(loop)
     y0, y1 = loop[(c - 1) % n], loop[c]
     p = (c - 1) + (-y0 / (y1 - y0) if y1 != y0 else 1.0)    # crossing position, in samples
-    k = np.fft.rfftfreq(n, 1 / n)
-    out = np.fft.irfft(np.fft.rfft(loop) * np.exp(2j * np.pi * k * p / n), n)
-    out[0] = 0.0                                          # residual is ~1e-16
-    return out
+    return loopbuild.rotate_to(loop, p)                   # the residual at index 0 is ~1e-16
 
 
 def attack_and_loop(x: np.ndarray, a: int, period: float, rate: float, k: int, attack_bytes: int,

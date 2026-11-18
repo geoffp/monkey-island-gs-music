@@ -25,13 +25,13 @@ import argparse
 import math
 import struct
 import sys
-import tomllib
 import wave
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
 
+from . import docvolume
 from .docram import DOC_RATE
 from .ntpsamples import PAL, period_tables
 
@@ -102,7 +102,7 @@ def volume_gains(curve: str | Path | None) -> np.ndarray:
     """Output gain per MOD volume 0..64: the measured curve (doc-volume.toml level_db) or linear."""
     g = np.arange(65) / 64.0
     if curve is not None:
-        levels = tomllib.loads(Path(curve).read_text())["level_db"]
+        levels = docvolume.load_curve(Path(curve))
         g = np.concatenate([[0.0], 10 ** (np.asarray(levels, dtype=np.float64) / 20)])
     return g
 

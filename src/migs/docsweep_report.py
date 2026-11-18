@@ -17,9 +17,7 @@ import json
 import math
 from pathlib import Path
 
-
-def doc_volume(mod: int) -> int:
-    return mod * 1020 // 256
+from migs.docsweep_analyse import doc_volume
 
 
 def load(path: Path) -> dict:
