@@ -8,6 +8,7 @@ Layouts and semantics: docs/iigs-midisynth.md. All values are little-endian; nam
 from __future__ import annotations
 
 import struct
+from typing import NamedTuple
 from dataclasses import dataclass, field
 
 BNK_TYPE, BNK_AUX = 0xD6, 0x0001
@@ -236,12 +237,25 @@ def envelope(attack=(127, 31), decay1=(127, 31), decay2=(127, 31), sustain=127, 
                   release3_rate, decay_gain, velocity_gain, pitch_bend_range])
 
 
-def wavelist(top_key: int, config: int, a: tuple[int, int, int, int, int, int],
-             b: tuple[int, int, int, int, int, int] | None = None, stereo=0, detune=0) -> bytes:
-    """WavelistRec (ERS 18-23). a/b = (page, size code, volume, octave, semitone, fine);
-    b defaults to a silent copy of a."""
-    b = b or (a[0], a[1], 0, a[3], a[4], a[5])
+class WaveRec(NamedTuple):
+    """One oscillator of a WavelistRec: the wave's `page` and `size_code`, its `volume`, and the
+    tuning (`octave`, `semitone`, `fine`)."""
+    page: int
+    size_code: int
+    volume: int
+    octave: int
+    semitone: int
+    fine: int
+
+
+def wavelist(top_key: int, config: int, a: WaveRec | tuple, b: WaveRec | tuple | None = None,
+             stereo=0, detune=0) -> bytes:
+    """WavelistRec (ERS 18-23). a/b = WaveRec (or its six values in order); b defaults to a
+    silent copy of a."""
+    a = WaveRec(*a)
+    b = WaveRec(*b) if b else a._replace(volume=0)
     return bytes([top_key, config, stereo, detune, *a, *b])
+
 
 
 @dataclass

@@ -27,7 +27,7 @@ from . import midisynth_tuning as dt
 from .audio import one_cycle, onset, pitch_offset, refine_period, rising_zero, rms, rms_envelope
 from .docsim import key_hz
 from .docram import SILENCE, Wave, allocate, ram_image, to_doc
-from .midisynth import INSTRUMENT_SIZE, INSTRUMENTS, WAVELISTS, Bank, Instrument, WaveBank, envelope, wavelist
+from .midisynth import INSTRUMENT_SIZE, INSTRUMENTS, WAVELISTS, Bank, Instrument, WaveBank, WaveRec, envelope, wavelist
 from .munt import SR, render
 from .ntpsong import read_notes
 
@@ -170,8 +170,8 @@ def melodic_instrument(s: Melodic, pages: dict[str, int], volume: int, silence: 
     m = s.spec
     ta = dt.encode(dt.tuning_for(s.rate, m["key"], s.attack.size_code))
     tl = dt.encode(dt.single_cycle_tuning(s.loop_cycles))
-    wl = wavelist(127, OSC_SWAP, (pages[s.attack.name], s.attack.size_code, volume, *ta),
-                  (pages[s.loop.name], 0, volume, *tl))
+    wl = wavelist(127, OSC_SWAP, WaveRec(pages[s.attack.name], s.attack.size_code, volume, *ta),
+                  WaveRec(pages[s.loop.name], 0, volume, *tl))
     return Instrument.build(m["name"], (s.env, [wl]), (GEN2_OFF, [wavelist(127, OSC_FREE, silence, silence)]))
 
 
@@ -208,7 +208,7 @@ def kit_instrument(slot: int, zones: list[Drum], pages: dict[str, int], volume: 
         top = 127 if j == len(ordered) - 1 else home + max(0, max(z.offsets.values()))
         cursor = top + 1
         t = dt.encode(dt.tuning_for(z.rate, home, z.wave.size_code))
-        wls.append(wavelist(top, OSC_ONESHOT, (pages[z.wave.name], z.wave.size_code, volume(z), *t), silence))
+        wls.append(wavelist(top, OSC_ONESHOT, WaveRec(pages[z.wave.name], z.wave.size_code, volume(z), *t), silence))
         for c, off in z.offsets.items():
             drums[c] = [slot, home + off]
     # One-shot drums: decay to zero over the kit's longest sample, so each hit frees its
@@ -264,7 +264,7 @@ def build(spec: dict, smf2wav: Path, roms: Path, cache: Path, log=print):
     log(f"  DOC RAM: {used} pages used of {256 - FIRST_PAGE - reserve} "
         f"(+{reserve} reserved for effects, {FIRST_PAGE} metronome)")
     loudest = max([s.loudness for s in melodic.values()] + [z.loudness for z in drum_list])
-    silence = (pages[silence_wave.name], 0, 0, 4, 0, 0)
+    silence = WaveRec(pages[silence_wave.name], 0, 0, 4, 0, 0)
 
     insts = [Instrument("", bytes(INSTRUMENT_SIZE)) for _ in range(INSTRUMENTS)]
     programs: dict[int, int] = {}
