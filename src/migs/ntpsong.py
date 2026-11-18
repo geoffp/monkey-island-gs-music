@@ -49,7 +49,8 @@ def _tempo_for(speed: int, row_s: float) -> int:
 def _option(song_cfg: dict, cfg: dict, key: str, default=None):
     """A setting: the song's own if it has one, else the build's, else `default`."""
     return song_cfg.get(key, cfg.get(key, default))
-CELL_EMPTY = (0, 0, -1, 0)                # note, instrument, effect (-1: none), parameter
+NOTE, INST, FX, PARAM = range(4)         # a cell's fields: note, instrument, effect (-1: none), parameter
+CELL_EMPTY = (0, 0, -1, 0)
 FX_SLIDE, FX_JUMP, FX_VOLUME, FX_BREAK, FX_EXTENDED, FX_SPEED = 0xA, 0xB, 0xC, 0xD, 0xE, 0xF
 NOTE_DELAY = 0xD0                         # EDx: delay the note by x ticks
 
@@ -333,15 +334,15 @@ class Grid:
     def free(self, tr: int, row: int) -> bool:
         """No note and no effect."""
         c = self.cells[tr].get(row)
-        return c is None or (c[0] == 0 and c[2] < 0)
+        return c is None or (c[NOTE] == 0 and c[FX] < 0)
 
     def effect_free(self, tr: int, row: int) -> bool:
         c = self.cells[tr].get(row)
-        return c is None or c[2] < 0
+        return c is None or c[FX] < 0
 
     def set_effect(self, tr: int, row: int, effect: int, param: int) -> list[int]:
         c = self.get(tr, row)
-        c[2], c[3] = effect, param
+        c[FX], c[PARAM] = effect, param
         return c
 
 
@@ -537,9 +538,9 @@ class _Arranger:
 
     def put_rest(self, c: list[int], mute: bool = False) -> None:
         """Make cell `c` play the rest sample (ends what the track played); `mute`: with C00 too."""
-        c[0], c[1] = self.samples[self.rest].base_note + 1, self.rest + 1
+        c[NOTE], c[INST] = self.samples[self.rest].base_note + 1, self.rest + 1
         if mute:
-            c[2], c[3] = FX_VOLUME, 0
+            c[FX], c[PARAM] = FX_VOLUME, 0
 
     def level_at(self, tr: int, r: int) -> int:
         """MOD volume track `tr` plays at row r: its latest Cxx (or a delayed note's default)."""
@@ -548,10 +549,10 @@ class _Arranger:
             c = cells.get(rr)
             if c is None:
                 continue
-            if c[2] == FX_VOLUME:
-                return c[3]
-            if c[0] and c[1]:
-                return self.samples[c[1] - 1].default_volume
+            if c[FX] == FX_VOLUME:
+                return c[PARAM]
+            if c[NOTE] and c[INST]:
+                return self.samples[c[INST] - 1].default_volume
         return 0                    # (a release slide, FX_SLIDE, reads as the Cxx it slides from)
 
     def new_track(self, kind: str) -> int:
@@ -635,7 +636,7 @@ class _Arranger:
         sounding: NTP writes that note's default volume at tick 0, to whatever plays then (see
         docs/ninjatrackerplus.md "Ghosts"). False when row r-1 starts a note (nothing to cut it with)."""
         c = self.grid.cells[tr].get(r - 1)
-        if self.rest is None or (c is not None and c[0]):
+        if self.rest is None or (c is not None and c[NOTE]):
             return False
         c = self.grid.get(tr, r - 1)
         self.put_rest(c, mute=True)
@@ -759,7 +760,7 @@ class _Arranger:
             else:
                 return last
         c = self.grid.cells[tr].get(last, CELL_EMPTY)
-        if c[2] == FX_VOLUME and c[3] == 0 and self.rest is not None and self.tracks[tr].kind == "melodic":
+        if c[FX] == FX_VOLUME and c[PARAM] == 0 and self.rest is not None and self.tracks[tr].kind == "melodic":
             self.put_rest(c)                                   # the rest ends it
             self.rep.halted += 1
         return last
@@ -782,7 +783,7 @@ class _Arranger:
             tail = sorted(r for r in cells if r >= end_row)
             if not tail:
                 continue
-            first = min((r for r, c in cells.items() if start_row <= r < end_row and c[0] and c[1] != rest),
+            first = min((r for r, c in cells.items() if start_row <= r < end_row and c[NOTE] and c[INST] != rest),
                         default=end_row)
             before = [cells[r] for r in sorted(cells) if r < start_row]
             idle = not before or before[-1][1] == rest or (before[-1][0] == 0 and before[-1][2:] == [FX_VOLUME, 0])
@@ -791,7 +792,7 @@ class _Arranger:
                 c = cells.pop(r)
                 if cut:
                     continue
-                if c[0] and c[1] != rest:
+                if c[NOTE] and c[INST] != rest:
                     self.rep.loop_cut += 1
                     cut = True
                     continue
@@ -817,8 +818,8 @@ class _Arranger:
         free = next((t for t in tracks if self.grid.effect_free(t, row)), None)
         if free is not None:
             return free
-        step = next((t for t in tracks if self.grid.cells[t][row][0] == 0
-                     and self.grid.cells[t][row][2] == FX_VOLUME), None)
+        step = next((t for t in tracks if self.grid.cells[t][row][NOTE] == 0
+                     and self.grid.cells[t][row][FX] == FX_VOLUME), None)
         if step is None and self.osc_used + 1 <= self.budget:
             step = self.new_track("drum")
             self.rep.tracks_used, self.rep.oscillators = len(self.grid.cells), self.osc_used
@@ -844,16 +845,16 @@ class _Arranger:
                 before += per_row / cur
             tp = round(k * per_row / max(loop_s - before, 1e-6))
             free = [t for t in tracks if grid.effect_free(t, j0) or
-                    (grid.cells[t][j0][2] == FX_SPEED and (j0, grid.cells[t][j0][3]) in changes)]
+                    (grid.cells[t][j0][FX] == FX_SPEED and (j0, grid.cells[t][j0][PARAM]) in changes)]
             if 32 <= tp <= 255 and len(free) >= (2 if j0 == end_row - 1 else 1):
                 break
         else:
             raise ValueError(f"no tempo makes the pass last {loop_s:.3f} s")
         for r, old in changes:
             if r >= j0:                                    # take back the dithering there
-                tr = next(t for t in tracks if grid.cells[t].get(r, CELL_EMPTY)[2] == FX_SPEED
-                          and grid.cells[t][r][3] == old)
-                grid.cells[tr][r][2], grid.cells[tr][r][3] = -1, 0
+                tr = next(t for t in tracks if grid.cells[t].get(r, CELL_EMPTY)[FX] == FX_SPEED
+                          and grid.cells[t][r][PARAM] == old)
+                grid.cells[tr][r][FX], grid.cells[tr][r][PARAM] = -1, 0
         tr = next(t for t in tracks if grid.effect_free(t, j0))
         grid.set_effect(tr, j0, FX_SPEED, tp)
         rep.loop_err_ms = 1000 * (before + k * per_row / tp - loop_s)
@@ -934,8 +935,8 @@ class _Arranger:
         for t in tracks:
             if self.rest is None or self.tracks[t].kind != "melodic":
                 continue
-            first = min((r for r, c in grid.cells[t].items() if c[0] and c[1] != rest), default=None)
-            if first and grid.cells[t][first][2] == FX_EXTENDED and grid.cells[t][first][1]:
+            first = min((r for r, c in grid.cells[t].items() if c[NOTE] and c[INST] != rest), default=None)
+            if first and grid.cells[t][first][FX] == FX_EXTENDED and grid.cells[t][first][INST]:
                 c = grid.get(t, first - 1)
                 self.put_rest(c)
                 rep.halted += 1
