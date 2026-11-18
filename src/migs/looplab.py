@@ -71,7 +71,7 @@ def seam_score(x: np.ndarray, start: float, span: float, period: float, w_period
     t = np.arange(-m, m)
     p = interp_at(x, start + t)
     q = interp_at(x, start + span + t)
-    ep, eq = float(np.sqrt(np.mean(p ** 2))) or 1e-9, float(np.sqrt(np.mean(q ** 2))) or 1e-9
+    ep, eq = audio.rms(p) or 1e-9, audio.rms(q) or 1e-9
     ncc = float(np.dot(p, q)) / (len(t) * ep * eq)
     return (1 - ncc) + abs(20 * math.log10(eq / ep)) / 20
 
@@ -91,7 +91,7 @@ def loop_search(x, lo, hi, period, k, out, at=None, xfade=0.1, step_periods=0.25
     if nx > 1:
         pre = interp_at(x, best - (nx - np.arange(nx)) * st)
         tail = body[-nx:]
-        r = float(np.dot(pre, tail) / ((np.linalg.norm(pre) * np.linalg.norm(tail)) or 1.0))
+        r = audio.ncc(pre, tail)
         u = np.linspace(0, 1, nx + 2)[1:-1]
         b = np.sin(0.5 * np.pi * u)                 # fade-in shape; a solves constant power given r
         a = -b * r + np.sqrt(np.maximum(b * b * r * r - b * b + 1, 0))
@@ -103,10 +103,10 @@ def loop_snapshot_whole(x, lo, hi, period, k, out, at=None, cycles=4):
     """A': today's averaged snapshot cycle, but band-limited once and tiled (k | out)."""
     fine = 1024
     s0 = lo if at is None else at
-    cyc = np.mean([interp_at(x, s0 + period * (c + np.arange(fine) / fine)) for c in range(cycles)], axis=0)
+    cyc = audio.avg_cycle(x, s0, period, cycles, fine)
     loop = cycle_at_rate(cyc, k, out)
     src = interp_at(x, s0 + np.arange(fine * cycles) * (period / fine))
-    e_src, e_loop = float(np.sqrt(np.mean(src ** 2))), float(np.sqrt(np.mean(loop ** 2)))
+    e_src, e_loop = audio.rms(src), audio.rms(loop)
     return loop * (e_src / e_loop) if e_loop > 0 else loop
 
 
@@ -130,7 +130,7 @@ def join(x: np.ndarray, a: int, period: float, rate: float, k: int, attack_bytes
     n = min(attack_bytes // 4, max(4, int(round(xfade_cycles * L / k))))
     tail = attack[-n:]
     if level_match:
-        e_tail, e_lp = float(np.sqrt(np.mean(tail ** 2))), float(np.sqrt(np.mean(loop ** 2)))
+        e_tail, e_lp = audio.rms(tail), audio.rms(loop)
         if e_tail > 0 and e_lp > 0:
             loop = loop * (e_tail / e_lp)
     idx = np.nonzero((np.roll(loop, 1) < 0) & (loop >= 0))[0]
@@ -139,7 +139,7 @@ def join(x: np.ndarray, a: int, period: float, rate: float, k: int, attack_bytes
 
     def score(c):
         ext = np.roll(loop, -c)[np.arange(-n, 0) % L]
-        return float(np.dot(tail, ext)) / ((np.linalg.norm(tail) * np.linalg.norm(ext)) or 1.0)
+        return audio.ncc(tail, ext)
     loop = zero_start(loop, int(max(idx, key=score)))
     ext = loop[np.arange(-n, 0) % L]
     w = 0.5 - 0.5 * np.cos(np.linspace(0, np.pi, n + 1)[1:])
@@ -204,8 +204,8 @@ def handover(attack: np.ndarray, loop: np.ndarray, k: int) -> tuple[float, float
     the join, minus the median in the loop."""
     per = len(loop) / k
     m = max(2, int(round(2 * per)))
-    e1 = float(np.sqrt(np.mean(attack[-m:] ** 2))) or 1e-9
-    e2 = float(np.sqrt(np.mean(loop[:m] ** 2))) or 1e-9
+    e1 = audio.rms(attack[-m:]) or 1e-9
+    e2 = audio.rms(loop[:m]) or 1e-9
     up = 8
     y = resample_poly(np.concatenate([attack, loop, loop]), up, 1)
     per *= up
@@ -315,7 +315,7 @@ def trial(snd: Sound, cand: str, loop_bytes: int, attack_bytes: int, tables: dic
     hand_db, hand_flux = handover(qa, ql, k)
     return Trial(
         sound=snd.name, cand=cand, bytes=loop_bytes, k=k, rate=rate, cents=err, spc=loop_bytes / k,
-        rms_lsb=float(np.sqrt(np.mean(ql ** 2))), buzz=loop_buzz_db(ql, k),
+        rms_lsb=audio.rms(ql), buzz=loop_buzz_db(ql, k),
         step=seam_step(ql), trem=loop_tremolo_db(ql, k), sflux=seam_flux(ql, k), hand_db=hand_db,
         hand_flux=hand_flux, like=likeness_db(ql, k, snd.ref_amp, snd.st.weights),
         att_err=attack_error_db(snd, qa, ql, rate), attack=qa, loop=ql)

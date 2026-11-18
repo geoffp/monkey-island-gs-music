@@ -21,7 +21,8 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.signal import resample
 
-from .audio import interp_at, onset, refine_period, smooth
+from .audio import interp_at, ncc, onset, quantise8, refine_period, rms, smooth
+from .docsim import key_hz
 from .docram import DOC_RATE
 from .munt import SR
 
@@ -285,7 +286,7 @@ def join_aligned(x: np.ndarray, a: int, period: float, rate: float, k: int, atta
         """Correlation of the attack's tail, starting the attack at source sample s0, with
         the loop's continuation."""
         t = interp_at(x, s0 + src_len + tpos)
-        return float(np.dot(t, ext) / ((np.linalg.norm(t) * np.linalg.norm(ext)) or 1.0))
+        return ncc(t, ext)
     # first best wins, scanning from `a` back one period
     best_s0 = float(max(a - np.arange(steps + 1) * (period / steps), key=match))
     margin = int(4 * period)                                # so the resampler doesn't ring at the end
@@ -294,7 +295,7 @@ def join_aligned(x: np.ndarray, a: int, period: float, rate: float, k: int, atta
     if len(attack) < attack_bytes:
         attack = np.pad(attack, (0, attack_bytes - len(attack)))
     tail = attack[-n:]
-    e_tail, e_lp = float(np.sqrt(np.mean(tail ** 2))), float(np.sqrt(np.mean(ext ** 2)))
+    e_tail, e_lp = rms(tail), rms(ext)
     if e_tail > 0 and e_lp > 0:
         loop = loop * (e_tail / e_lp)
         ext = ext * (e_tail / e_lp)
@@ -325,7 +326,7 @@ def analyse(m: dict, render: Callable[[int, int, float], np.ndarray], hold: floa
     (within what the build's `build_hold` recording holds)."""
     x = render(m["program"], m["key"], hold)
     a = onset(x)
-    f0 = 440 * 2 ** ((m["key"] - 69) / 12)
+    f0 = key_hz(m["key"])
     period = refine_period(x, a + int(0.25 * SR), f0)
     tr = harmonic_tracks(x, a, period, end=a + int(hold * SR))
     st = settle(tr)
@@ -371,7 +372,7 @@ def play(attack: np.ndarray, loop: np.ndarray, rate: float, seconds: float, semi
 def to_bytes(attack: np.ndarray, loop: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """8-bit as the MOD stores it (ModSample.mod_bytes): one scale for attack and loop."""
     d = np.concatenate([attack, loop])
-    q = np.clip(np.round(d / (float(np.max(np.abs(d))) or 1.0) * 127), -128, 127)
+    q = quantise8(d)
     return q[:len(attack)], q[len(attack):]
 
 

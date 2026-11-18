@@ -84,14 +84,32 @@ def rising_zero(x: np.ndarray, near: int, span: int) -> int:
     return near
 
 
-def one_cycle(x: np.ndarray, start: int, period: float, cycles: int = 4, out: int = 256) -> np.ndarray:
-    """Average `cycles` consecutive periods from `start`, band-limited to `out` points (periodic)."""
-    fine = 4096
+def rms(x: np.ndarray) -> float:
+    return float(np.sqrt(np.mean(x ** 2)))
+
+
+def ncc(a: np.ndarray, b: np.ndarray) -> float:
+    """Normalised correlation of two equal-length signals (0 when either is silent)."""
+    return float(np.dot(a, b) / ((np.linalg.norm(a) * np.linalg.norm(b)) or 1.0))
+
+
+def quantise8(x: np.ndarray) -> np.ndarray:
+    """`x` peak-normalised and rounded to the 8-bit sample values -127..127 (as floats)."""
+    return np.clip(np.round(x / (float(np.max(np.abs(x))) or 1.0) * 127), -127, 127)
+
+
+def avg_cycle(x: np.ndarray, start: float, period: float, cycles: int, fine: int, interp=interp_at) -> np.ndarray:
+    """`fine` points: the average of `cycles` consecutive source periods from `start`. `interp(x, pos)`
+    reads x at fractional positions (callers keep their own: interp_at, or np.interp for the MIDI Synth bank)."""
     acc = np.zeros(fine)
     for c in range(cycles):
-        pos = start + period * (c + np.arange(fine) / fine)
-        acc += np.interp(pos, np.arange(len(x)), x)
-    return resample(acc / cycles, out)
+        acc += interp(x, start + period * (c + np.arange(fine) / fine))
+    return acc / cycles
+
+
+def one_cycle(x: np.ndarray, start: int, period: float, cycles: int = 4, out: int = 256) -> np.ndarray:
+    """Average `cycles` consecutive periods from `start`, band-limited to `out` points (periodic)."""
+    return resample(avg_cycle(x, start, period, cycles, 4096, lambda x, pos: np.interp(pos, np.arange(len(x)), x)), out)
 
 
 def _log_spectrum(x: np.ndarray, window_s: float = 0.06) -> np.ndarray:

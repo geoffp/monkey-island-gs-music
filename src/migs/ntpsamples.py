@@ -203,13 +203,10 @@ def periodic_loop(x: np.ndarray, start: float, period: float, k: int, out: int, 
     the source's own cycle-to-cycle drift (chorus, vibrato) would otherwise jump at the seam
     and buzz at the loop rate."""
     fine = 1024
-    acc = np.zeros(fine)
-    for c in range(cycles):
-        acc += audio.interp_at(x, start + period * (c + np.arange(fine) / fine))
-    loop = resample(np.tile(acc / cycles, k), out)
+    loop = resample(np.tile(audio.avg_cycle(x, start, period, cycles, fine), k), out)
     # averaging detuned partials loses level: match the source's RMS over the same span
     src = audio.interp_at(x, start + np.arange(fine * cycles) * (period / fine))
-    e_src, e_loop = float(np.sqrt(np.mean(src ** 2))), float(np.sqrt(np.mean(loop ** 2)))
+    e_src, e_loop = audio.rms(src), audio.rms(loop)
     return loop * (e_src / e_loop) if e_loop > 0 else loop
 
 
@@ -235,7 +232,7 @@ def loop_tremolo_db(loop: np.ndarray, k: int) -> float:
     doesn't have (shared Elec Organ, 1024 B: 6.3 dB at 15.3 Hz)."""
     n = len(loop)
     edges = np.round(np.arange(k + 1) * n / k).astype(int)
-    r = [float(np.sqrt(np.mean(loop[edges[i]:edges[i + 1]] ** 2))) for i in range(k) if edges[i + 1] > edges[i]]
+    r = [audio.rms(loop[edges[i]:edges[i + 1]]) for i in range(k) if edges[i + 1] > edges[i]]
     r = np.maximum(np.array(r), 1e-9)
     return float(20 * np.log10(r.max() / r.min())) if len(r) > 1 else 0.0
 
@@ -315,7 +312,7 @@ def attack_and_loop(x: np.ndarray, a: int, period: float, rate: float, k: int, a
     # Level-match the loop to the attack's tail: the loop is taken later in the sustain, where
     # the level differs; unmatched, every note stepped by up to ~4 dB at the handover (choppy).
     # The envelope then starts from gain 1 here (_row_envelope eases it to the contour).
-    e_tail, e_lp = float(np.sqrt(np.mean(tail ** 2))), float(np.sqrt(np.mean(loop ** 2)))
+    e_tail, e_lp = audio.rms(tail), audio.rms(loop)
     if e_tail > 0 and e_lp > 0:
         loop = loop * (e_tail / e_lp)
     idx = np.nonzero((np.roll(loop, 1) < 0) & (loop >= 0))[0]
@@ -324,7 +321,7 @@ def attack_and_loop(x: np.ndarray, a: int, period: float, rate: float, k: int, a
 
     def score(c):
         ext = np.roll(loop, -c)[np.arange(-n, 0) % loop_bytes]
-        return float(np.dot(tail, ext)) / ((np.linalg.norm(tail) * np.linalg.norm(ext)) or 1.0)
+        return audio.ncc(tail, ext)
     loop = zero_start(loop, int(max(idx, key=score)))
     ext = loop[np.arange(-n, 0) % loop_bytes]           # what the loop would have been before its start
     w = 0.5 - 0.5 * np.cos(np.linspace(0, np.pi, n + 1)[1:])
@@ -870,7 +867,7 @@ def sound_movement(munt: Munt, program) -> str:
 @functools.lru_cache(maxsize=None)
 def key_movement(munt: Munt, program, key: int) -> docsim2.Movement:
     x = cached_render(munt, program, key, MOVE_HOLD)
-    return docsim2.movement(x[audio.onset(x):], SR, 440 * 2 ** ((key - 69) / 12), 0.5, MOVE_HOLD - 0.1)
+    return docsim2.movement(x[audio.onset(x):], SR, docsim.key_hz(key), 0.5, MOVE_HOLD - 0.1)
 
 
 def sync_span(x: np.ndarray, at: float, want: float, period: float, tol: float = 0.04
@@ -1045,7 +1042,7 @@ def build_melodic(m: dict, cfg: dict, keys: tuple[int, int], munt: Munt, tables,
         # smf2wav drops trailing silence: a sound that ends before its note-off (the MT-32's
         # effect presets 118-127, which MI2 plays) comes back shorter than the note
         x = np.pad(x, (0, a + int((hold + 0.5) * SR) - len(x)))
-    f0 = 440 * 2 ** ((m["key"] - 69) / 12)
+    f0 = docsim.key_hz(m["key"])
     sustain_s = cfg.get("sustain_s", 0.4)
     period = audio.refine_period(x, a + int(0.25 * SR), f0)
     notes = loop_notes(x, a, a + int(hold * SR), period, sustain_s, cfg)
@@ -1078,7 +1075,7 @@ def build_melodic(m: dict, cfg: dict, keys: tuple[int, int], munt: Munt, tables,
         attack, loop, att_end, _ = attack_and_loop(x, a, period_l, rate, k, att_bytes, loop_bytes, from_s,
                                                    cfg.get("attack_xfade_cycles", 4.0),
                                                    raw=loop_bytes > cfg["loop_bytes"])
-    e_loop = float(np.sqrt(np.mean(loop ** 2))) or 1e-9
+    e_loop = audio.rms(loop) or 1e-9
     t, g = _row_envelope(src, att_end, e_loop, steady, loop_bytes, rate, cfg)
     g_max = float(g.max()) if len(g) else 1.0
     rel = src.env[src.off:src.off + int(cfg["release_max"] * SR):int(0.01 * SR)]

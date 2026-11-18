@@ -45,7 +45,10 @@ from pathlib import Path
 
 import numpy as np
 
+from . import docsim
+from .audio import quantise8
 from .docram import DOC_RATE
+from .docsim import key_hz
 from .loopbuild import play
 from .scorecache import Cache
 
@@ -419,7 +422,7 @@ def play_sample(s, semis: float, seconds: float) -> np.ndarray:
 def sample_tag(s) -> str:
     """What decides a sample's playback: its bytes, loop, rate, key and contour."""
     h = hashlib.sha1()
-    h.update(np.clip(np.round(np.asarray(s.data) * 127), -128, 127).astype(np.int8).tobytes())
+    h.update(s.mod_bytes())
     h.update(f"{s.loop_start}:{s.loop_len}:{round(float(s.rate), 2)}:{s.key0}".encode())
     h.update(np.round(np.asarray(s.env_t, dtype=np.float64), 4).tobytes())
     h.update(np.round(np.asarray(s.env_g, dtype=np.float64), 4).tobytes())
@@ -449,7 +452,7 @@ class Scorer:
 
     def _ref_vibrato(self, tag, key: int) -> float:
         x = self.render(tag, key)[:int(self.seconds * self.sr)]
-        return pitch_vibrato(to_doc_rate(x, self.sr), DOC_RATE, 440 * 2 ** ((key - 69) / 12))
+        return pitch_vibrato(to_doc_rate(x, self.sr), DOC_RATE, key_hz(key))
 
     def note_db(self, s, tag, key: int, drum: bool = False, semis: float | None = None) -> float:
         """Score (dB) of sample `s` playing `key` against program `tag`'s note `key` (another
@@ -468,7 +471,7 @@ class Scorer:
                 d += fine * fine_distance(ref, got)
             if self.vib_weight and not drum:
                 d += self.vib_weight * vib_distance(self._ref_vib(tag, key),
-                                                    pitch_vibrato(y, DOC_RATE, 440 * 2 ** ((key - 69) / 12)))
+                                                    pitch_vibrato(y, DOC_RATE, key_hz(key)))
             return db(d)
         return self.cache.get(k, compute)
 
@@ -510,7 +513,6 @@ class NoteError:
 
     def __init__(self, name, render: Callable[[int], np.ndarray], sr: int, cache: Path | None = None,
                  mod_weight: float = 1.0, live_weight: float = 0.0):
-        from . import docsim
         self.name, self.render, self.sr, self._docsim = name, render, sr, docsim
         self.mod_weight, self.live_weight = mod_weight, live_weight
         self.cache = Cache(cache, VERSION)
@@ -536,9 +538,8 @@ def drum_db(ref: np.ndarray, sr: int, sample: np.ndarray, rate: float, semis: fl
     """docsim.drum_error_db's interface on this measure (whole-hit mean, forward masking): the DOC playing
     `sample` (values -1..1, rounded to 8 bits here, stored at `rate`) `semis` above its key,
     against `ref` (Munt's render of the played key, from its onset), over `seconds` + 20 ms."""
-    from . import docsim
     n = int((seconds + 0.02) * DOC_RATE)
-    q = np.clip(np.round(sample / (float(np.max(np.abs(sample))) or 1.0) * 127), -127, 127)
+    q = quantise8(sample)
     got = docsim.doc_play(q, rate, semis, n / DOC_RATE)
     got = np.pad(got, (0, max(0, n - len(got))))
     want = to_doc_rate(ref[:int(n / DOC_RATE * sr) + 1], sr)[:n]

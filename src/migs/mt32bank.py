@@ -24,7 +24,8 @@ from scipy.signal import resample
 
 from . import games, sounds
 from . import midisynth_tuning as dt
-from .audio import one_cycle, onset, pitch_offset, refine_period, rising_zero, rms_envelope
+from .audio import one_cycle, onset, pitch_offset, refine_period, rising_zero, rms, rms_envelope
+from .docsim import key_hz
 from .docram import SILENCE, Wave, allocate, ram_image, to_doc
 from .midisynth import INSTRUMENT_SIZE, INSTRUMENTS, WAVELISTS, Bank, Instrument, WaveBank, envelope, wavelist
 from .munt import SR, render
@@ -112,7 +113,7 @@ class Drum:
 
 def sample_melodic(m: dict, render_note: Renderer, hold: float) -> Melodic:
     x = render_note(program=m["program"], key=m["key"], hold=hold)
-    f0 = 440 * 2 ** ((m["key"] - 69) / 12)
+    f0 = key_hz(m["key"])
     a = onset(x)
     off = a + int(hold * SR)                # smf2wav drops leading silence: the note starts at a
     env = rms_envelope(x)
@@ -125,8 +126,8 @@ def sample_melodic(m: dict, render_note: Renderer, hold: float) -> Melodic:
     attack = resample(flat, nbytes)
     # the loop is level-matched to the attack's last quarter, so the handover is level
     cycle = one_cycle(x, loop_at, period, out=LOOP_BYTES)
-    cycle_rms = float(np.sqrt(np.mean(cycle ** 2))) or 1.0
-    attack_rms = float(np.sqrt(np.mean(attack[-nbytes // 4:] ** 2))) or 1.0
+    cycle_rms = rms(cycle) or 1.0
+    attack_rms = rms(attack[-nbytes // 4:]) or 1.0
     peak = max(np.max(np.abs(attack)), np.max(np.abs(cycle)) * attack_rms / cycle_rms)
     return Melodic(
         m, Wave(f"{m['name']} A", to_doc(attack, peak)),
@@ -239,7 +240,7 @@ def build(spec: dict, smf2wav: Path, roms: Path, cache: Path, log=print):
     melodic: dict[int, Melodic] = {}
     for m in spec["melodic"]:
         s = melodic[m["slot"]] = sample_melodic(m, render_note, hold)
-        nbytes, f0 = len(s.attack.data), 440 * 2 ** ((m["key"] - 69) / 12)
+        nbytes, f0 = len(s.attack.data), key_hz(m["key"])
         log(f"  {m['name']:<12} prog {m['program']:3d} key {m['key']}: attack {nbytes} B @ {s.rate:7.0f} Hz "
             f"({nbytes / s.rate * 1000:.0f} ms), loop period {s.period:.2f} smp "
             f"(MT-32 {SR / s.period:.2f} Hz vs {f0:.2f})")

@@ -29,6 +29,7 @@ import mido
 import numpy as np
 
 from . import docvolume, ro
+from .audio import rms
 from .ntpsamples import NOTES, ModSample
 
 ROWS = 64                                 # rows per pattern
@@ -710,7 +711,7 @@ class _Arranger:
                 # a row holds one volume: the release's RMS gain over the row, not its first instant
                 # (Elec Org 2 falls 20 dB in 10 ms; its first 110 ms row averages 0.31, not 1.0)
                 ts = np.linspace(i * row_s, (i + 1) * row_s, 12)
-                gg = float(np.sqrt(np.mean(np.interp(ts, np.arange(len(s.rel_g)) * 0.01, s.rel_g, right=0.0) ** 2)))
+                gg = rms(np.interp(ts, np.arange(len(s.rel_g)) * 0.01, s.rel_g, right=0.0))
             else:
                 gg = float(np.interp(i * row_s, np.arange(len(s.rel_g)) * 0.01, s.rel_g, right=0.0))
             vv = max(0, min(64, round(v_off * gg)))

@@ -29,6 +29,7 @@ import numpy as np
 from scipy.signal import resample, resample_poly
 
 from .docram import DOC_RATE
+from .audio import quantise8
 from .munt import SR
 from .scorecache import Cache
 
@@ -62,7 +63,7 @@ def stored(x: np.ndarray, rate: float) -> np.ndarray:
     """A render (from its onset, at SR) as the sample bytes: resampled to `rate`, peak-normalised
     and rounded to 8 bits (values -127..127)."""
     s = resample(x, max(1, int(round(len(x) * rate / SR))))
-    return np.clip(np.round(s / (float(np.max(np.abs(s))) or 1.0) * 127), -127, 127)
+    return quantise8(s)
 
 
 def doc_play(sample: np.ndarray, rate: float, semis: float, seconds: float) -> np.ndarray:
@@ -114,7 +115,7 @@ def drum_error_db(ref: np.ndarray, sample: np.ndarray, rate: float, semis: float
     sample loses to a low rate (the top end, drop-sample images: Kick at 5872 Hz -9.6 dB,
     at 26273 Hz -23.2 dB) and to being cut short both count."""
     n = max(2 * frame, int((seconds + 0.02) * DOC_RATE))
-    q = np.clip(np.round(sample / (float(np.max(np.abs(sample))) or 1.0) * 127), -127, 127)
+    q = quantise8(sample)
     got = doc_play(q, rate, semis, n / DOC_RATE)
     want = to_doc_rate(ref[:int(n / DOC_RATE * SR) + 1])
     win = np.hanning(frame)
