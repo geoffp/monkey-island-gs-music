@@ -302,6 +302,37 @@ class PitchEntry(NamedTuple):
     one_shot: bool
 
 
+class ZoneBuy(NamedTuple):
+    """An extra zone the value budget bought: its `value` per page, the `sound`, how many `zones`
+    it then has, and the `pages` it took. Field order is the sort order the loop trading relies on."""
+    value: float
+    sound: str
+    zones: int
+    pages: int
+
+
+class SampleSet(NamedTuple):
+    """What sample_set builds for a set of songs."""
+    samples: list
+    programs: dict
+    drums: dict
+
+
+class SongJob(NamedTuple):
+    """One song's build, sent to a worker process (_build_song)."""
+    song: object
+    song_cfg: dict
+    spec: dict
+    cfg: dict
+    shared: SampleSet | None
+    last_page: int
+    tables: object
+    munt: object
+    cc7: object
+    out_dir: Path
+    game: object
+
+
 def _pitch_plans(spec: dict, usage_notes: list[tuple[int, Note]], cfg: dict, tables, munt: Munt
                  ) -> dict[str, PitchEntry]:
     """Per melodic entry (by name): (plans for 1..pitch_max_zones zones, note seconds, the error
@@ -631,7 +662,7 @@ def _value_budget(plans: dict, samples: list[ModSample], spec: dict, cfg: dict, 
             slots -= 1
             count[name] = to
             if zones is not None:                       # (value per page, sound, its zones now, pages)
-                zones.append((v, name, to, pages))
+                zones.append(ZoneBuy(v, name, to, pages))
             lines.append(f"  budget zone {name:<13} -> {to} zones: {g:+.1f} dB, {pages} pages ({v:.3f}/page)")
         else:
             trial = {**drum_blocks, name: steps[name][to].size}
@@ -798,7 +829,7 @@ def drop_least_used(spec: dict, songs: list[tuple[list[Note], dict]], room: int,
 
 
 def sample_set(spec: dict, cfg: dict, songs: list[tuple[list[Note], dict]], last_page: int, tables,
-               munt: Munt, log=lambda *a: None, _force: frozenset = frozenset()) -> tuple[list[ModSample], dict, dict]:
+               munt: Munt, log=lambda *a: None, _force: frozenset = frozenset()) -> SampleSet:
     """(samples, programs, drums) for the sounds these songs play, with loop sizes planned into
     the DOC RAM they leave free (pages up to `last_page`). One song: a per-song set; all songs:
     the shared set. With `pitch_plan`, each sound's sampled key(s), zones and rate are chosen
@@ -920,17 +951,17 @@ def sample_set(spec: dict, cfg: dict, songs: list[tuple[list[Note], dict]], last
                 # sound's too), while what they are worth in all stays below the set's worth
                 gave, lost, gone = dict(count), 0.0, []
                 while True:
-                    pool = [(zv, zn, to, zp) for zv, zn, to, zp in trade["zones"] if gave.get(zn) == to and to > 1]
+                    pool = [z for z in trade["zones"] if gave.get(z.sound) == z.zones and z.zones > 1]
                     nxt = min(pool, default=None)
-                    if nxt is None or lost + nxt[0] * nxt[3] >= worth:
+                    if nxt is None or lost + nxt.value * nxt.pages >= worth:
                         lines.append(f"  loop set {own:<16} keeps its zones: "
                                      + ("no zone left to take back" if nxt is None else
-                                        f"the zones it would take ({lost + nxt[0] * nxt[3]:.2f}) are worth more "
+                                        f"the zones it would take ({lost + nxt.value * nxt.pages:.2f}) are worth more "
                                         f"than its set ({worth:.2f})") + (f", after {', '.join(gone)}" if gone else ""))
                         break
-                    gave[nxt[1]] = nxt[2] - 1
-                    lost += nxt[0] * nxt[3]
-                    gone.append(f"{nxt[1]} {nxt[2]} -> {nxt[2] - 1}")
+                    gave[nxt.sound] = nxt.zones - 1
+                    lost += nxt.value * nxt.pages
+                    gone.append(f"{nxt.sound} {nxt.zones} -> {nxt.zones - 1}")
                     trial_spec = {**planned(gave), "drum": song_spec["drum"]}
                     t_samples, t_programs, t_drums = build(trial_spec, {**cfg, "one_shots": False})
                     t_bought: list = []
@@ -950,7 +981,7 @@ def sample_set(spec: dict, cfg: dict, songs: list[tuple[list[Note], dict]], last
             if took is not None:
                 gave, song_spec, samples, programs, drums = took
                 count = gave
-                trade["zones"] = [zn for zn in trade["zones"] if zn[2] <= count[zn[1]]]
+                trade["zones"] = [z for z in trade["zones"] if z.zones <= count[z.sound]]
                 usage = held(programs)
                 for line in lines:
                     if "keeps its zones" in line:
@@ -967,7 +998,7 @@ def sample_set(spec: dict, cfg: dict, songs: list[tuple[list[Note], dict]], last
             again: list[str] = []
             res = sample_set(whole, cfg, songs, last_page, tables, munt, again.append, _force | remerge)
             own = _sound_of(want[1], plans)
-            if any(sm.loop_len >= want[2] for sm in res[0] if _is_sound(sm.name, own)):
+            if any(sm.loop_len >= want[2] for sm in res.samples if _is_sound(sm.name, own)):
                 for line in log_back + again:
                     out(line)
                 return res
@@ -986,7 +1017,7 @@ def sample_set(spec: dict, cfg: dict, songs: list[tuple[list[Note], dict]], last
             log(line)
         changed = {name for name in gave if gave[name] != count[name]}
         count = gave
-        trade["zones"] = [zn for zn in trade["zones"] if zn[2] <= count[zn[1]]]
+        trade["zones"] = [z for z in trade["zones"] if z.zones <= count[z.sound]]
         song_spec, samples, programs, drums = trial_spec, t_samples, t_programs, t_drums
         usage = held(programs)
         for name in sorted(changed):
@@ -1008,7 +1039,7 @@ def sample_set(spec: dict, cfg: dict, songs: list[tuple[list[Note], dict]], last
             log(line)
     for line in held_lines:
         out(line)
-    return samples, programs, drums
+    return SampleSet(samples, programs, drums)
 
 
 def _planned_size(m: dict, z: int) -> dict:
@@ -1239,11 +1270,11 @@ def _build_song(job) -> tuple[str, object, str, str | None]:
         try:
             rep, err = _build_song_quiet(job)
         except Exception:
-            rep, err = None, f"{job[-1].prefix}{job[0].sid}: build failed\n{traceback.format_exc()}"
+            rep, err = None, f"{job.game.prefix}{job.song.sid}: build failed\n{traceback.format_exc()}"
         finally:
             forget_renders()                    # a worker builds many songs: don't keep them all
             _give_back()
-    return job[0].sid, rep, buf.getvalue(), err
+    return job.song.sid, rep, buf.getvalue(), err
 
 
 def _give_back() -> None:
@@ -1274,9 +1305,9 @@ def _gather(results) -> tuple[list[tuple[str, object]], list[tuple[str, str]]]:
     return reports, failed
 
 
-def _build_song_quiet(job) -> tuple[object, str | None]:
+def _build_song_quiet(job: SongJob) -> tuple[object, str | None]:
     """_build_song's work: (report, error or None)."""
-    song, song_cfg, spec, cfg, shared, last_page, tables, munt, cc7, out_dir, game = job
+    song, song_cfg, spec, cfg, shared, last_page, tables, munt, cc7, out_dir, game = job   # (SongJob)
     name = f"{game.prefix}{song.sid}"
     reserve = 255 - last_page
     if shared:
@@ -1403,19 +1434,19 @@ def main(argv: list[str] | None = None) -> int:
     shared, bank = None, {}
     if mode == "shared":
         shared = sample_set(spec, cfg, [(s.notes, s.programs) for s in songs], last_page, tables, munt, log=print)
-        if bad := loop_problems(shared[0], cfg):
+        if bad := loop_problems(shared.samples, cfg):
             raise SystemExit("shared loops fail the tremolo/buzz check: " + "; ".join(bad))
-        print(f"shared samples ({len(shared[0])}, DOC {ntp_doc_pages(shared[0], last_page)}/256 pages, "
-              f"reserve {reserve}): {loop_summary(shared[0], cfg)}")
-        print(f"shared rates (Hz): {rate_summary(shared[0])}")
+        print(f"shared samples ({len(shared.samples)}, DOC {ntp_doc_pages(shared.samples, last_page)}/256 pages, "
+              f"reserve {reserve}): {loop_summary(shared.samples, cfg)}")
+        print(f"shared rates (Hz): {rate_summary(shared.samples)}")
         bank = _shared_levels(songs, shared, cfg, conf, cc7, args.out_dir, game)
     built = songs
     if args.only:
         built = [s for s in songs if any(_same_id(s.sid, i) for i in args.only)]
         if missing := [i for i in args.only if not any(_same_id(s.sid, i) for s in songs)]:
             raise SystemExit(f"ntpmod: no song {', '.join(missing)} among the inputs")
-    work = [(song, {**cfg, **conf.get("songs", {}).get(song.sid, {}), **bank}, spec, cfg, shared, last_page,
-             tables, munt, cc7, args.out_dir, game) for song in built]
+    work = [SongJob(song, {**cfg, **conf.get("songs", {}).get(song.sid, {}), **bank}, spec, cfg, shared, last_page,
+                    tables, munt, cc7, args.out_dir, game) for song in built]
     # songs are independent once the samples are known (per-song: each makes its own): one worker
     # each, logs printed in song order
     cpus = getattr(os, "process_cpu_count", os.cpu_count)() or 2   # 3.13+: honours CPU affinity
