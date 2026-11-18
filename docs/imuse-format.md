@@ -58,7 +58,7 @@ and a reset:
    MT-32's defaults), master volume 100;
 2. **rhythm setup 03 01 10: keys 24-34 play rhythm timbres 0x40-0x51**, which the MT-32's
    power-on map leaves silent; MI2's songs play them;
-3. bender range 16 in all 128 patches (pitch bends aren't followed here).
+3. bender range 16 in all 128 patches (`initDevice`: `0x014004 + (i << 3)`, i.e. patch memory 05 00 00, offset 4). Since 2026-11-17 the MT-32 rendition of a song with bends sends this after the init (`extract_music.bender_range_sysex`), and the GM rendition sets the same range by RPN 0 on each bending channel. The single-note renders (the Munt sample cache) are unchanged: they bend nothing.
 
 Items 1 and 2 are in `config/games/monkey2/game.toml` `[mt32] init`; every render sends
 them first, and `mt32.rhythm_keys` reads the extra rhythm keys from them.
@@ -83,9 +83,15 @@ output tick, `end_tick` the jump's. A counted loop of `FOREVER` (2) passes or mo
 loop the same way. A song whose track ends (`FF 2F`) plays once. MI2's 97 music sounds: 64
 loop, 33 play once.
 
+## Pitch bend (since 2026-11-17)
+MI2 has 16,193 pitch-bend events, Atlantis about 7,300; before 2026-11-17 the reader dropped them all, so the extracted MIDI, and the Munt reference renders made from it, had none. They are played as the MI2/Indy4/DOTT MT-32 driver sends them (`IMuseChannel_Midi::pitchBend`, `ref/scummvm/engines/scumm/imuse/drivers/midi.cpp`): wheel = clip(((bend × factor) >> 6) + detune + (transpose << 7), −2048, 2047) << 2, plus 0x2000, at bender range 16, so 512 wheel units are a semitone and a full bend at the default factor 2 is 2 semitones.
+- `bend` is the part's last pitch-bend event less 0x2000 (`Player::send`); the **factor** is set by `7D 00` (byte 7) and by CC16, and setting it zeroes the bend (`Part::pitchBendFactor`); **detune** (1/128 semitone) is `7D 00` byte 6 (signed) or CC17 − 64 (`set_detune`). Part defaults: factor 2, no detune, no bend.
+- The driver plays transpose through the wheel; the reader keeps it on the note numbers, so the wheel it writes is the driver's less transpose << 7, clipped first with it counted. Percussion parts aren't bent.
+- A wheel value is written when it changes, on the part's output channel.
+
 ## Not followed
-- **Pitch bend** (16,193 events in MI2's sounds): the NTP pipeline plays no pitch bends.
-- Detune, the pitch-bend factor, modulation and the effect level.
+- Modulation and the effect level.
+- **Pitch bend in the NTP build:** the extracted MIDI carries the bends (below), but `ntpsong.read_notes` ignores them, so the MODs play none (2026-11-17).
 - Hooks that wait for scripts (1,071 jumps, 120 other hooks in MI2): the game's scripts set
   them as the player moves about (MI2's Woodtick song, sound 100, switches tracks per
   building). What is extracted is the song before any such change.

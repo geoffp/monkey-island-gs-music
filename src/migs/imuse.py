@@ -21,8 +21,13 @@ imuse_part.cpp, sysex_scumm.cpp) and writes down what an MT-32 would receive:
 - percussion parts (channel 9, or flagged by `7D 00`) all play on the rhythm channel, and a
   rhythm note carries its part's volume (Part::noteOn: `_rhyState.vol`).
 
-Not followed: pitch bend, detune, modulation and the effect level (the NTP pipeline has no
-use for them), hooks that wait for scripts, and the MT-32 part allocation by priority
+- pitch bend, the part's detune and its pitch-bend factor (`7D 00`, CC16, CC17) become one
+  pitch wheel value per channel, as the MI2/Indy4 MT-32 driver sends it (IMuseChannel_Midi::
+  pitchBend: ((bend * factor) >> 6) + detune + (transpose << 7), clipped to +-2048, << 2, for
+  the 16-semitone bender range IMuseDriver_MT32::initDevice gives every patch). Transpose is
+  played on the note numbers here, so the wheel carries the rest; the clip still counts it.
+
+Not followed: modulation and the effect level (the NTP pipeline has no use for them), hooks that wait for scripts, and the MT-32 part allocation by priority
 (iMUSE plays at most 8 melodic parts at once on an MT-32; this keeps every part).
 Format notes: docs/imuse-format.md.
 """
@@ -170,6 +175,9 @@ class _Part:
     percussion: bool = False
     volume: int = 127
     transpose: int = 0             # the part's own (-128: none)
+    bend: int = 0                  # pitch bend, -8192..8191 (Part::pitchBend)
+    factor: int = 2                # pitch-bend factor (Part::setup: 2)
+    detune: int = 0                # 1/128 semitone (Part::set_detune)
 
 
 @dataclass
@@ -189,6 +197,7 @@ class Reader:
     transpose: int = 0             # the song's (global) transpose
     sounding: dict[tuple[int, int], tuple[int, int]] = field(default_factory=dict)  # (part, key) -> (ch, key)
     rhythm_volume: int = -1
+    wheel: dict[int, int] = field(default_factory=dict)   # output channel -> last pitch wheel sent
     ignored: dict[str, int] = field(default_factory=dict)
 
     def part(self, ch: int) -> _Part:
@@ -212,6 +221,20 @@ class Reader:
         if p.transpose == -128:
             return 0
         return max(-12, min(12, p.transpose + self.transpose))
+
+    def send_bend(self, out: int, ch: int) -> None:
+        """The channel's pitch wheel, as IMuseChannel_Midi::pitchBend computes it for MI2 (see the
+        module docstring), when it changes."""
+        p = self.part(ch)
+        if p.percussion:
+            return
+        tr = self.eff_transpose(p) << 7
+        v = (max(-2048, min(2047, ((p.bend * p.factor) >> 6) + p.detune + tr)) - tr) << 2
+        v = max(-8192, min(8191, v))
+        och = self.out_channel(ch)
+        if self.wheel.get(och, 0) != v:
+            self.wheel[och] = v
+            self.emit(out, Kind.BEND, och, v)
 
     def skip(self, what: str) -> None:
         self.ignored[what] = self.ignored.get(what, 0) + 1
@@ -243,6 +266,12 @@ class Reader:
                 p.volume = v
                 if not p.percussion:
                     self.emit(out, Kind.CC, self.out_channel(ch), 7, v)
+            elif c == 16:                                       # pitch-bend factor (Player::send)
+                p.factor, p.bend = v, 0
+                self.send_bend(out, ch)
+            elif c == 17:                                       # detune (GP slider 2, old system)
+                p.detune = v - 0x40
+                self.send_bend(out, ch)
             elif c in PASSED_CCS and not p.percussion:
                 self.emit(out, Kind.CC, self.out_channel(ch), c, v)
             else:
@@ -251,7 +280,8 @@ class Reader:
             if not p.percussion:
                 self.emit(out, Kind.PROGRAM, self.out_channel(ch), e.data[0])
         elif cmd == 0xE:
-            self.skip("pitch bend")
+            p.bend = ((e.data[1] << 7) | e.data[0]) - 0x2000
+            self.send_bend(out, ch)
         else:
             self.skip(f"status {e.status:#x}")
 
@@ -269,6 +299,8 @@ class Reader:
             self.emit(out, Kind.CC, och, 7, b[3])
             self.emit(out, Kind.CC, och, 10, max(0, min(127, _s8(b[4]) + 64)))
             self.emit(out, Kind.PROGRAM, och, b[8])
+        p.detune, p.factor, p.bend = _s8(b[6]), b[7], 0   # set_detune, pitchBendFactor (which zeroes the bend)
+        self.send_bend(out, ch)
 
     def hook(self, out: int, code: int, d: bytes) -> None:
         """7D 31-35 with hook id 0 (unconditional)."""

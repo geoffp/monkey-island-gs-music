@@ -144,6 +144,20 @@ def _gm_channel_defaults(ch: int) -> list[ro.Event]:
     return evs
 
 
+BENDER_RANGE = 16    # semitones: IMuseDriver_MT32::initDevice writes it into every patch
+
+
+def bender_range_sysex() -> list[bytes]:
+    """MT-32: bender range 16 in patch memory 05 00 00 (8 bytes a patch, the range at offset 4)
+    for all 128 patches, as ScummVM's iMUSE MT-32 driver sets up before a song."""
+    return [roland_dt1(0x014004 + (i << 3), bytes([BENDER_RANGE])) for i in range(128)]
+
+
+def _gm_bend_range(ch: int) -> list[ro.Event]:
+    """GM: the same 16-semitone range by RPN 0 (pitch bend sensitivity)."""
+    return [ro.Event(0, Kind.CC, ch, a, b) for a, b in ((101, 0), (100, 0), (6, BENDER_RANGE), (38, 0))]
+
+
 def _deltas(ticks: Iterable[int]) -> Iterator[int]:
     """Absolute ticks -> MIDI delta times."""
     last = 0
@@ -160,6 +174,8 @@ def _message(ev: ro.Event, time: int) -> mido.Message:
             return mido.Message("control_change", channel=ev.channel, control=ev.a, value=ev.b, time=time)
         case Kind.PROGRAM:
             return mido.Message("program_change", channel=ev.channel, program=ev.a, time=time)
+        case Kind.BEND:
+            return mido.Message("pitchwheel", channel=ev.channel, pitch=ev.a, time=time)
     raise ValueError(f"no MIDI message for {ev.kind}")
 
 
@@ -192,6 +208,8 @@ def _conductor(song: Song, gm: bool, ctx: Context | None = None) -> mido.MidiTra
         trk.append(mido.Message("sysex", data=[0x7E, 0x7F, 0x09, 0x01], time=0))  # GM System On
     else:
         trk += [mido.Message("sysex", data=s, time=0) for s in (ctx.init if ctx else [])]
+        if any(ev.kind == Kind.BEND for ev in t.events):
+            trk += [mido.Message("sysex", data=s, time=0) for s in bender_range_sysex()]
     events = [(ev.tick, mido.MetaMessage("marker", text=f"A{ev.channel:X}")) for ev in t.events if ev.kind == Kind.MARKER]
     if t.loops:
         events = [(t.loop_start, mido.MetaMessage("marker", text="loopStart")), *events,
@@ -226,7 +244,8 @@ def build_midi(song: Song, gm: bool, ctx: Context | None = None) -> mido.MidiFil
             by_ch[ev.channel].append(ev)
     for ch, evs in sorted(by_ch.items()):
         if gm:
-            evs = _gm_channel_defaults(ch) + [e for e in (_gm_transform(e, ctx) for e in evs) if e]
+            bends = _gm_bend_range(ch) if any(e.kind == Kind.BEND for e in evs) else []
+            evs = _gm_channel_defaults(ch) + bends + [e for e in (_gm_transform(e, ctx) for e in evs) if e]
         name = f"Ch {ch + 1} {_track_label(ch, evs, gm, ctx)}".strip()
         mf.tracks.append(_channel_track(evs, song.track.end_tick, name, ctx))
     return mf

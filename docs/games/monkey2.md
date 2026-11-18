@@ -33,7 +33,7 @@ Both are in `game.toml`'s `[md5]`. The folder also holds `monkey2.exe` and the s
   the full arrangements are tracks 1-6, which the game's scripts switch to per building.
 - Four songs change tempo (154, 159, 211, 222). The NTP build arranges them in beats and its
   tempo commands follow the changes (`docs/ninjatrackerplus.md`, "Songs that change tempo").
-- Pitch bend isn't played (the NTP pipeline has none); MI2 bends a lot (16,193 events).
+- Pitch bend (16,193 events): in the extracted MIDI and the Munt renders since 2026-11-17 (docs/imuse-format.md "Pitch bend"); the NTP build doesn't play it yet.
 
 ## The songs
 One pass at the song's tempo; *loop from X* = where the loop goes back to; channels with

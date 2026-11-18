@@ -132,3 +132,24 @@ def test_the_smf_reader_takes_what_mido_refuses():
     with pytest.raises(Exception):
         import io
         mido.MidiFile(file=io.BytesIO(smf))
+
+
+def test_pitch_bends_play_as_the_mi2_mt32_driver_sends_them():
+    """IMuseChannel_Midi::pitchBend (MI2): ((bend * factor) >> 6) + detune + (transpose << 7),
+    clipped to +-2048, << 2, at a 16-semitone bender range. Transpose is on the note numbers
+    here, so the wheel carries the rest, but the clip counts it."""
+    def bent(*evs, transpose=0):
+        tr, ignored = imuse.read(song([(0, alloc(0, transpose=transpose)), *evs, *note(1000, 0, 60)]), {})
+        assert "pitch bend" not in ignored
+        return [(t, v) for t, _, v, _ in events(tr, Kind.BEND)]
+    wheel = lambda t, v: (t, mido.Message("pitchwheel", channel=0, pitch=v))
+    cc = lambda t, c, v: (t, mido.Message("control_change", channel=0, control=c, value=v))
+    # factor 2 (the allocation's): a full bend up is 2 semitones, 1024 at range 16
+    assert bent(wheel(10, 8191)) == [(10, ((8191 * 2) >> 6) << 2)]
+    assert bent(wheel(10, -8192), wheel(20, 0)) == [(10, -1024), (20, 0)]
+    # CC16 sets the factor and zeroes the bend; CC17 detunes (value - 64, 1/128 semitone)
+    assert bent(wheel(10, 4096), cc(20, 16, 12), wheel(30, 4096), cc(40, 17, 64 + 10)) == \
+        [(10, 512), (20, 0), (30, 3072), (40, 3072 + 40)]
+    # the clip counts the transpose (12 semitones = 1536 of 2048): only 512 more fits up
+    assert bent(wheel(10, 8191), cc(15, 16, 16), wheel(20, 8191), transpose=12) == \
+        [(10, 1020), (15, 0), (20, (2047 - 1536) << 2)]

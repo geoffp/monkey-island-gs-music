@@ -27,6 +27,7 @@ class Kind(StrEnum):
     PROGRAM = "program"
     MARKER = "marker"
     TIMBRE = "timbre"          # iMUSE (SCUMM v5): the channel's custom MT-32 timbre `a` (an id >= 128)
+    BEND = "bend"              # iMUSE (SCUMM v5): pitch wheel `a` (-8192..8191) at a 16-semitone bender range
 
 
 @dataclass(frozen=True)

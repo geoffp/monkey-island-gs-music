@@ -100,3 +100,23 @@ def test_patch_notes_are_valid_toml_with_channel_statistics():
     assert by_ch[2]["mt32_name"] == "Panpipes" and by_ch[2]["initial_pan_mt32"] == 0
     assert by_ch[10]["role"] == "rhythm" and by_ch[10]["max_polyphony"] == 2
     assert by_ch[10]["rhythm_keys"]["76"][1].startswith("UNMAPPED")
+
+
+def test_bends_carry_the_16_semitone_range_they_were_computed_for():
+    # iMUSE bends (migs.imuse) are wheel values at a 16-semitone range: the MT-32 rendition sets
+    # it in all 128 patches (as ScummVM's driver does), the GM one by RPN 0 on the bending channel
+    import dataclasses
+    song = make_song(DATA)
+    t = song.track
+    song = dataclasses.replace(song, track=dataclasses.replace(
+        t, events=[*t.events, ro.Event(30, ro.Kind.BEND, 1, -1024)]))
+    mt = build_midi(song, gm=False)
+    sysex = [bytes(m.data) for m in mt.tracks[0] if m.type == "sysex"]
+    patches = [s for s in sysex if s[4:7] >= bytes([5, 0, 0]) and s[7:8] == bytes([16]) and s[3] == 0x12]
+    assert len(patches) == 128 and bytes([0x41, 0x10, 0x16, 0x12, 5, 0, 4, 16]) == patches[0][:8]
+    assert [(tk, m.pitch) for tk, m in channel_events(mt) if m.type == "pitchwheel"] == [(30, -1024)]
+    gm = build_midi(song, gm=True)
+    cc = [(m.channel, m.control, m.value) for _, m in channel_events(gm) if m.type == "control_change"]
+    assert [(1, 101, 0), (1, 100, 0), (1, 6, 16), (1, 38, 0)] == [c for c in cc if c[1] in (101, 100, 6, 38)]
+    # a song without bends gets neither
+    assert not [m for m in build_midi(make_song(DATA), gm=False).tracks[0] if m.type == "sysex"]
