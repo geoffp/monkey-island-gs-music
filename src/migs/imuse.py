@@ -40,11 +40,11 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .mt32 import RHYTHM_CHANNEL as RHYTHM
 from .ro import Event, Kind, Track
 
 IMUSE, ROLAND = 0x7D, 0x41
 TICKS_PER_BEAT = 480
-RHYTHM = 9
 TIMBRE_BYTES = 246                 # one MT-32 timbre (common + 4 partials)
 FOREVER = 2                        # a counted loop (7D 50) of this many passes or more is the song's loop (MI2's count 100 or 1000)
 MAX_TICKS = 480 * 2 * 60 * 30      # half an hour at 120 BPM: give up on a song that never ends or loops

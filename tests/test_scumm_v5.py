@@ -66,7 +66,7 @@ def test_v5_songs_extract_with_their_custom_timbres(tmp_path):
     msgs = [m for trk in mt.tracks for m in trk]
     assert any(m.type == "text" and m.text == "timbre ch1 128 ReggaeBass" for m in msgs)
     dt1 = [bytes(m.data) for m in msgs if m.type == "sysex" and len(m.data) > 200]
-    assert dt1 == [em.roland_dt1(em.timbre_temp_addr(1), data)] and dt1[0][4:7] == b"\x04\x00\x00"
+    assert dt1 == [mt32.roland_dt1(em.timbre_temp_addr(1), data)] and dt1[0][4:7] == b"\x04\x00\x00"
     assert bytes(next(m for m in mt.tracks[0] if m.type == "sysex").data) == ctx.init[0]
     gm = em.build_midi(songs[0], gm=True, ctx=ctx)
     assert [m.program for trk in gm.tracks for m in trk if m.type == "program_change"] == [mt32.MT32_TO_GM[5], 32]
@@ -125,10 +125,10 @@ def test_munt_renders_a_custom_timbre_after_the_drivers_setup():
 
 def test_a_drivers_rhythm_setup_adds_rhythm_keys():
     """MI2's driver maps keys 24-34 (rhythm setup 03 01 10, 4 bytes a key)."""
-    s = em.roland_dt1(mt32.RHYTHM_SETUP, bytes([0x40, 0x64, 0x07, 0x00] * 11))
+    s = mt32.roland_dt1(mt32.RHYTHM_SETUP, bytes([0x40, 0x64, 0x07, 0x00] * 11))
     assert mt32.rhythm_keys([s]) - mt32.MT32_RHYTHM_KEYS == frozenset(range(24, 35))
     assert mt32.rhythm_keys() == mt32.MT32_RHYTHM_KEYS
-    system = em.roland_dt1(0x10 << 14, bytes(23))
+    system = mt32.roland_dt1(0x10 << 14, bytes(23))
     assert mt32.rhythm_keys([system]) == mt32.MT32_RHYTHM_KEYS
 
 

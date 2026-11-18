@@ -21,8 +21,10 @@ import mido
 import numpy as np
 from scipy.io import wavfile
 
+from . import mt32
+
 SR = 32000                      # Munt output rate
-MELODIC_CH, RHYTHM_CH = 1, 9    # MT-32 part 1 = MIDI channel 2; rhythm = 10
+MELODIC_CH, RHYTHM_CH = 1, mt32.RHYTHM_CHANNEL    # MT-32 part 1 = MIDI channel 2; rhythm = 10
 _TPQ, _TICKS_PER_S = 480, 960   # 120 BPM
 _LEAD_IN_S = 0.5                # note-on time in the MIDI file (dropped by smf2wav)
 _TAIL_S = 2.0                   # rendered after note-off, for the release
@@ -30,19 +32,16 @@ _TAIL_S = 2.0                   # rendered after note-off, for the release
 
 def reverb_off() -> mido.Message:
     """MT-32 SysEx: system area 10 00 03 (reverb level) = 0, with the Roland checksum."""
-    addr_data = [0x10, 0x00, 0x03, 0x00]
-    checksum = (128 - sum(addr_data) % 128) % 128
-    return mido.Message("sysex", data=[0x41, 0x10, 0x16, 0x12, *addr_data, checksum])
+    return mido.Message("sysex", data=list(mt32.roland_dt1(0x10 << 14 | 0x03, b"\x00")))
 
 
-TIMBRE_TEMP_PART1 = bytes([0x04, 0x00, 0x00])   # MT-32 timbre temporary area, part 1 (MIDI channel 2)
+TIMBRE_TEMP_PART1 = 0x04 << 14      # MT-32 timbre temporary area, part 1 (MIDI channel 2), as a 7-bit address
 
 
 def timbre_sysex(data: bytes) -> list[int]:
     """Roland DT1 writing a 246-byte timbre to part 1's temporary area: the part then plays it
     (as iMUSE's MT-32 driver loads a custom timbre: IMuseChannel_MT32::sysEx_customInstrument)."""
-    body = TIMBRE_TEMP_PART1 + data
-    return [0x41, 0x10, 0x16, 0x12, *body, (128 - sum(body) % 128) % 128]
+    return list(mt32.roland_dt1(TIMBRE_TEMP_PART1, data))
 
 
 def _note_file(program: int | None, key: int, hold: float, velocity: int, volume: int,

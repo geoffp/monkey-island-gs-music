@@ -30,10 +30,10 @@ import numpy as np
 
 from . import docvolume, ro
 from .audio import rms
+from .mt32 import RHYTHM_CHANNEL as RHYTHM
 from .ntpsamples import NOTES, ModSample
 
 ROWS = 64                                 # rows per pattern
-RHYTHM = 9
 CELL_EMPTY = (0, 0, -1, 0)                # note, instrument, effect (-1: none), parameter
 FX_SLIDE, FX_JUMP, FX_VOLUME, FX_BREAK, FX_EXTENDED, FX_SPEED = 0xA, 0xB, 0xC, 0xD, 0xE, 0xF
 NOTE_DELAY = 0xD0                         # EDx: delay the note by x ticks

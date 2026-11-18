@@ -24,9 +24,9 @@ from typing import NamedTuple
 import mido
 
 from . import games
+from .mt32 import RHYTHM_CHANNEL
 from .midisynth import SEQ_TICKS_PER_QUARTER, TRACK_ON, TRACKS, Bank, SeqItem, Sequence
 
-RHYTHM_CHANNEL = 9
 KEEP_CC = {7, 64}                   # volume, sustain pedal
 VOLUME = 7
 MAX_VOICES = 7

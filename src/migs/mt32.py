@@ -12,6 +12,12 @@ Programs, keys and channels are 0-based, as on the wire.
 
 RHYTHM_CHANNEL = 9  # MIDI channel 10
 
+
+def roland_dt1(addr: int, data: bytes) -> bytes:
+    """A Roland DT1 SysEx (from the 0x41 byte) writing `data` at 7-bit address `addr`, with its checksum."""
+    a = bytes([(addr >> 14) & 0x7F, (addr >> 7) & 0x7F, addr & 0x7F])
+    return bytes([0x41, 0x10, 0x16, 0x12]) + a + data + bytes([(128 - sum(a + data) % 128) % 128])
+
 MT32_PRESET_NAMES = (
     "AcouPiano1", "AcouPiano2", "AcouPiano3", "ElecPiano1", "ElecPiano2", "ElecPiano3",
     "ElecPiano4", "Honkytonk", "Elec Org 1", "Elec Org 2", "Elec Org 3", "Elec Org 4",

@@ -98,12 +98,6 @@ class Context:
         return mt32.MT32_TO_GM[program]
 
 
-def roland_dt1(addr: int, data: bytes) -> bytes:
-    """A Roland DT1 SysEx (from the 0x41 byte) writing `data` at 7-bit address `addr`."""
-    a = bytes([(addr >> 14) & 0x7F, (addr >> 7) & 0x7F, addr & 0x7F])
-    return bytes([0x41, 0x10, 0x16, 0x12]) + a + data + bytes([(128 - sum(a + data) % 128) % 128])
-
-
 def timbre_temp_addr(part: int) -> int:
     """MT-32 timbre temporary area of part 1-8 (04 00 00, 246 bytes each), as a 7-bit address."""
     linear = (0x04 << 14) + (part - 1) * imuse.TIMBRE_BYTES
@@ -149,7 +143,7 @@ BENDER_RANGE = 16    # semitones: IMuseDriver_MT32::initDevice writes it into ev
 def bender_range_sysex() -> list[bytes]:
     """MT-32: bender range 16 in patch memory 05 00 00 (8 bytes a patch, the range at offset 4)
     for all 128 patches, as ScummVM's iMUSE MT-32 driver sets up before a song."""
-    return [roland_dt1(0x014004 + (i << 3), bytes([BENDER_RANGE])) for i in range(128)]
+    return [mt32.roland_dt1(0x014004 + (i << 3), bytes([BENDER_RANGE])) for i in range(128)]
 
 
 def _gm_bend_range(ch: int) -> list[ro.Event]:
@@ -179,7 +173,7 @@ def _channel_track(events: list[ro.Event], end_tick: int, name: str, ctx: Contex
             trk.append(mido.MetaMessage("text", text=timbre_text(ev.channel, ev.a, tb.name if tb else ""),
                                         time=ev.tick - last))
             if tb and ev.channel in imuse.MT32_PARTS:
-                trk.append(mido.Message("sysex", data=roland_dt1(timbre_temp_addr(ev.channel), tb.data), time=0))
+                trk.append(mido.Message("sysex", data=mt32.roland_dt1(timbre_temp_addr(ev.channel), tb.data), time=0))
         else:
             trk.append(_message(ev, ev.tick - last))
         last = ev.tick
