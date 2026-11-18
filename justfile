@@ -31,6 +31,12 @@ vendor   := "vendor"
 platform := os() + "-" + arch()
 gs2      := if os() == "macos" { vendor / "gssquared/GSSquared.app/Contents/MacOS/GSSquared" } else { vendor / "gssquared/GSSquared-x86_64.AppImage" }
 cp2      := vendor / "cp2/cp2"
+# SenseiPlay's files, taken from its archive (needs $cp2 and $st in the recipe) and added to a disk image
+sensei_files   := "PRODOS sensei.system ntpplayer dgr.radio.dgr"
+sensei_extract := '"$cp2" extract --preserve=naps --overwrite --exdir="$st" "' + vendor + '/ntp/senseiplay800.2mg" ' + sensei_files + ' >/dev/null'
+sensei_globs   := "PRODOS* sensei.system* ntpplayer* dgr.radio.dgr*"
+ntp_convert    := 'php "' + vendor + '/ntp/src/ntpconverter.php"'      # the Ninjaforce MOD -> .NTP converter
+has_openmpt    := 'ffmpeg -hide_banner -demuxers 2>/dev/null | grep libopenmpt >/dev/null'   # ffmpeg can render MODs with libopenmpt
 cp2_zip  := if platform == "linux-x86_64" { "linux-x64_sc" } else if os() == "macos" { "osx-x64_sc" } else { "" }
 smf2wav  := vendor / "munt/bin/mt32emu-smf2wav"
 sf2      := vendor / "soundfonts/GeneralUser-GS.sf2"
@@ -136,7 +142,7 @@ doctor:
     fi
     echo "host tools OK"
     # optional: song previews and the General MIDI renders
-    ffmpeg -hide_banner -demuxers 2>/dev/null | grep libopenmpt >/dev/null || echo "note: no ffmpeg with libopenmpt: desktop MOD previews (build/<game>/ntp/<mode>/wav-desktop/) are skipped; the DOC renders (wav/) don't need it"
+    {{has_openmpt}} || echo "note: no ffmpeg with libopenmpt: desktop MOD previews (build/<game>/ntp/<mode>/wav-desktop/) are skipped; the DOC renders (wav/) don't need it"
     command -v fluidsynth >/dev/null || echo "note: no fluidsynth: \`just render\` and \`just gm-wav\` won't run"
     [ -d "{{data}}" ] || echo "note: game data for {{game}} not found at '{{data}}' (see README)"
     [ -d "{{roms}}" ] || echo "note: no MT-32 ROMs at '{{roms}}' (needed only for MT-32 rendering)"
@@ -299,18 +305,17 @@ testdisk songs modes=ntp_modes: extract fetch-ntp fetch-munt fetch-cp2
       mv "$t.$m.log" "$t/$m/build.log"; grep "^FAILED" "$t/$m/build.log" || true
       for f in "$t/$m"/*.mod; do
         [ -f "$f" ] || continue
-        php "{{vendor}}/ntp/src/ntpconverter.php" "$f" STREAM_FORBIDDEN > "${f%.mod}.log" || { echo "$f:"; cat "${f%.mod}.log"; exit 1; }
+        {{ntp_convert}} "$f" STREAM_FORBIDDEN > "${f%.mod}.log" || { echo "$f:"; cat "${f%.mod}.log"; exit 1; }
       done
       echo "$m: $(ls "$t/$m"/*.ntp 2>/dev/null | wc -l | tr -d ' ') songs (log: $t/$m/build.log)"
     done
     st="$PWD/$t/stage"; img="$PWD/{{out}}/disks/{{prefix}}.TEST.PO"; mkdir -p "$st" "{{out}}/disks"
-    "$cp2" extract --preserve=naps --overwrite --exdir="$st" "{{vendor}}/ntp/senseiplay800.2mg" \
-      PRODOS sensei.system ntpplayer dgr.radio.dgr >/dev/null
+    {{sensei_extract}}
     for m in {{modes}}; do
       d="$st/songs/$(echo $m | tr a-z- A-Z.)"; mkdir -p "$d"
       for f in "$t/$m"/*.ntp; do [ -f "$f" ] && cp "$f" "$d/$(basename "$f" .ntp | tr a-z A-Z).NTP#d50008"; done
     done
-    {{fit_image}} "$img" {{prefix}}.TEST "$st" '{{p8_tree}} "$cp2" "$img" songs; "$cp2" add "$img" PRODOS* sensei.system* ntpplayer* dgr.radio.dgr*'
+    {{fit_image}} "$img" {{prefix}}.TEST "$st" '{{p8_tree}} "$cp2" "$img" songs; "$cp2" add "$img" {{sensei_globs}}'
     rm -rf "$st"
     echo "test disk: {{out}}/disks/{{prefix}}.TEST.PO (just emu-test)"
 
@@ -326,17 +331,16 @@ docsweep: fetch-ntp fetch-cp2
     command -v php >/dev/null || { echo "php not found (see just doctor)"; exit 1; }
     d=build/docsweep; cp2="$PWD/{{cp2}}"; mkdir -p "$d"
     uv run doc-sweep "$d/DOCSWEEP.mod"
-    php "{{vendor}}/ntp/src/ntpconverter.php" "$d/DOCSWEEP.mod" STREAM_FORBIDDEN > "$d/DOCSWEEP.log" || { cat "$d/DOCSWEEP.log"; exit 1; }
-    if ffmpeg -hide_banner -demuxers 2>/dev/null | grep libopenmpt >/dev/null; then
+    {{ntp_convert}} "$d/DOCSWEEP.mod" STREAM_FORBIDDEN > "$d/DOCSWEEP.log" || { cat "$d/DOCSWEEP.log"; exit 1; }
+    if {{has_openmpt}}; then
       ffmpeg -hide_banner -loglevel error -y -f libopenmpt -i "$d/DOCSWEEP.mod" -ac 2 -ar 44100 "$d/desktop.wav"
     fi
     st="$PWD/$d/stage"; img="$PWD/$d/DOCSWEEP.PO"; rm -rf "$st"; mkdir -p "$st/songs"
-    "$cp2" extract --preserve=naps --overwrite --exdir="$st" "{{vendor}}/ntp/senseiplay800.2mg" \
-      PRODOS sensei.system ntpplayer dgr.radio.dgr >/dev/null
+    {{sensei_extract}}
     cp "$d/DOCSWEEP.ntp" "$st/songs/DOCSWEEP.NTP#d50008"
     # a fixed 4 MB: Floppy Emu doesn't take the 1 MB image fit_image would make (user, 2026-11-15)
     rm -f "$img"; "$cp2" create-disk-image "$img" 4m prodos >/dev/null; "$cp2" rename "$img" : DOCSWEEP >/dev/null
-    (cd "$st" && {{p8_tree}} "$cp2" "$img" songs && "$cp2" add "$img" PRODOS* sensei.system* ntpplayer* dgr.radio.dgr* >/dev/null)
+    (cd "$st" && {{p8_tree}} "$cp2" "$img" songs && "$cp2" add "$img" {{sensei_globs}} >/dev/null)
     rm -rf "$st"
     echo "sweep disk: $d/DOCSWEEP.PO (just emu-docsweep)"
 
@@ -384,8 +388,7 @@ _disk:
     {{lowprio}}
     cp2="$PWD/{{cp2}}"; img="$PWD/{{out}}/disks/{{prefix}}.NTP.PO"; st="$PWD/{{out}}/disks/ntpstage"
     rm -rf "$st" "$img" && mkdir -p "$st"
-    "$cp2" extract --preserve=naps --overwrite --exdir="$st" "{{vendor}}/ntp/senseiplay800.2mg" \
-      PRODOS sensei.system ntpplayer dgr.radio.dgr >/dev/null
+    {{sensei_extract}}
     {{ntp_folders}} "$st/songs"
     # what the variant folders are: the game's template, filled in from the staged songs
     # (count, file names, placeholders); ProDOS TXT, CR line ends
@@ -393,7 +396,7 @@ _disk:
     ! LC_ALL=C grep -n '[^ -~]' "$st/README.lf" || { echo "{{gconf}}/disk/README.TXT: only printable 7-bit ASCII (no tabs, no accents or curly quotes)"; exit 1; }
     tr '\n' '\r' < "$st/README.lf" > "$st/README.TXT#040000"; rm "$st/README.lf"
     # songs first on the disk, so it's the first entry in SenseiPlay
-    {{fit_image}} "$img" {{prefix}}.NTP "$st" '{{p8_tree}} "$cp2" "$img" songs; "$cp2" add "$img" README.TXT* PRODOS* sensei.system* ntpplayer* dgr.radio.dgr*'
+    {{fit_image}} "$img" {{prefix}}.NTP "$st" '{{p8_tree}} "$cp2" "$img" songs; "$cp2" add "$img" README.TXT* {{sensei_globs}}'
     # the README names the placeholders p8_tree made (diskreadme.gap_names follows its rule)
     want=$(echo "$r" | sed -n 's/^placeholders: //p'); got=$("$cp2" list "$img" | sed -n 's/.*:\(GAP\.[0-9]*\)$/\1/p' | sort -u -t. -k2n | tr '\n' ' ' | sed 's/ $//')
     [ "${got:-none}" = "$want" ] || { echo "README names placeholders '$want', the image has '${got:-none}'"; exit 1; }
@@ -498,7 +501,7 @@ _ntpmod-one mode:
     echo "previews: $d/wav/ (as the DOC plays them)"
     # and as a desktop player smooths them (libopenmpt: interpolated, linear volume), if ffmpeg has it
     # (not grep -q: it exits at the first match, ffmpeg dies of SIGPIPE, and pipefail fails the test)
-    if ffmpeg -hide_banner -demuxers 2>/dev/null | grep libopenmpt >/dev/null; then
+    if {{has_openmpt}}; then
       mkdir -p "$d/wav-desktop"
       ls $d/*.mod | xargs -P {{num_cpus()}} -I{} sh -c \
         'ffmpeg -hide_banner -loglevel error -y -f libopenmpt -i "$1" -ac 2 -ar 44100 "$2/wav-desktop/$(basename "$1" .mod).wav"' _ {} "$d"

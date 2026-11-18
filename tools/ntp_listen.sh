@@ -27,7 +27,7 @@ for m in $modes; do
   done
   # as the IIgs's DOC plays them (migs.docrender), not a desktop player's smoothed mix
   if [ ${#todo[@]} -gt 0 ]; then
-    printf '%s\n' "${todo[@]}" | xargs -P 8 -n 4 nice -n "${MIGS_NICE:-10}" uv run docrender -o "$d/wav"
+    printf '%s\n' "${todo[@]}" | xargs -P "$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)" -n 4 nice -n "${MIGS_NICE:-10}" uv run docrender -o "$d/wav"
   fi
   echo "$m: $n songs, WAVs in $d/wav/"
   grep -c "^[A-Z0-9]*: [0-9]* samples" "$d.log" | sed "s/^/$m: songs built per the log: /" || true
